@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+
+# Electron main bundle (rebuild with npm run build:main)
+electron/main.bundle.cjs
+electron/main.bundle.cjs.map
+
+# Local env / OS
+.env
+.env.*

@@ -1,0 +1,86 @@
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import type { Content } from '@google/generative-ai';
+import type { ChatMessage } from '../threadStore.js';
+import type { ShellSettings } from '../settingsStore.js';
+import { composeSystem, temperatureForMode } from './modePrompts.js';
+import type { StreamHandlers, UnifiedChatOptions } from './types.js';
+
+function toGeminiContents(messages: ChatMessage[]): Content[] {
+	const nonSystem = messages.filter((m) => m.role === 'user' || m.role === 'assistant');
+	const contents: Content[] = [];
+	for (const m of nonSystem) {
+		const role = m.role === 'user' ? 'user' : 'model';
+		const last = contents[contents.length - 1];
+		if (last && last.role === role) {
+			const prev = last.parts[0];
+			if (prev && 'text' in prev && typeof prev.text === 'string') {
+				last.parts = [{ text: `${prev.text}\n\n${m.content}` }];
+			}
+		} else {
+			contents.push({ role, parts: [{ text: m.content }] });
+		}
+	}
+	return contents;
+}
+
+export async function streamGemini(
+	settings: ShellSettings,
+	messages: ChatMessage[],
+	options: UnifiedChatOptions,
+	handlers: StreamHandlers
+): Promise<void> {
+	const key = settings.gemini?.apiKey?.trim();
+	if (!key) {
+		handlers.onError('未配置 Google Gemini API Key。请在设置 → Models → API Keys 中填写。');
+		return;
+	}
+
+	const storedSystem = messages.find((m) => m.role === 'system');
+	const systemInstruction = composeSystem(storedSystem?.content, options.mode, options.agentSystemAppend);
+	const modelId = options.requestModelId.trim();
+	if (!modelId) {
+		handlers.onError('模型请求名称为空。请在 Models 中编辑该模型的「请求名称」。');
+		return;
+	}
+	const temperature = temperatureForMode(options.mode);
+
+	const genAI = new GoogleGenerativeAI(key);
+	const model = genAI.getGenerativeModel({
+		model: modelId,
+		systemInstruction,
+		generationConfig: { temperature },
+	});
+
+	const contents = toGeminiContents(messages);
+	if (contents.length === 0) {
+		handlers.onError('没有可发送的对话消息。');
+		return;
+	}
+
+	let full = '';
+	try {
+		const streamResult = await model.generateContentStream(
+			{ contents },
+			{ signal: options.signal }
+		);
+
+		for await (const chunk of streamResult.stream) {
+			if (options.signal.aborted) {
+				break;
+			}
+			const text = chunk.text();
+			if (text) {
+				full += text;
+				handlers.onDelta(text);
+			}
+		}
+		handlers.onDone(full);
+	} catch (e: unknown) {
+		if (options.signal.aborted) {
+			handlers.onDone(full);
+			return;
+		}
+		const msg = e instanceof Error ? e.message : String(e);
+		handlers.onError(msg);
+	}
+}

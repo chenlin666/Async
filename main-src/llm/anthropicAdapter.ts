@@ -1,0 +1,98 @@
+import Anthropic from '@anthropic-ai/sdk';
+import type { MessageParam } from '@anthropic-ai/sdk/resources/messages';
+import type { ChatMessage } from '../threadStore.js';
+import type { ShellSettings } from '../settingsStore.js';
+import { composeSystem, temperatureForMode } from './modePrompts.js';
+import type { StreamHandlers, UnifiedChatOptions } from './types.js';
+
+function toAnthropicMessages(messages: ChatMessage[]): MessageParam[] {
+	const nonSystem = messages.filter((m) => m.role === 'user' || m.role === 'assistant');
+	const out: MessageParam[] = [];
+	let buf = '';
+	let lastRole: 'user' | 'assistant' | null = null;
+	for (const m of nonSystem) {
+		const role = m.role as 'user' | 'assistant';
+		if (lastRole === role) {
+			buf += (buf ? '\n\n' : '') + m.content;
+		} else {
+			if (lastRole && buf) {
+				out.push({ role: lastRole, content: buf });
+			}
+			buf = m.content;
+			lastRole = role;
+		}
+	}
+	if (lastRole && buf) {
+		out.push({ role: lastRole, content: buf });
+	}
+	return out;
+}
+
+export async function streamAnthropic(
+	settings: ShellSettings,
+	messages: ChatMessage[],
+	options: UnifiedChatOptions,
+	handlers: StreamHandlers
+): Promise<void> {
+	const key = settings.anthropic?.apiKey?.trim();
+	if (!key) {
+		handlers.onError('未配置 Anthropic API Key。请在设置 → Models → API Keys 中填写。');
+		return;
+	}
+
+	const baseURL = settings.anthropic?.baseURL?.trim() || undefined;
+	const client = new Anthropic({
+		apiKey: key,
+		baseURL: baseURL || undefined,
+	});
+
+	const storedSystem = messages.find((m) => m.role === 'system');
+	const system = composeSystem(storedSystem?.content, options.mode, options.agentSystemAppend);
+	const anthropicMessages = toAnthropicMessages(messages);
+	const model = options.requestModelId.trim();
+	if (!model) {
+		handlers.onError('模型请求名称为空。请在 Models 中编辑该模型的「请求名称」。');
+		return;
+	}
+	const temperature = temperatureForMode(options.mode);
+
+	if (anthropicMessages.length === 0) {
+		handlers.onError('没有可发送的对话消息。');
+		return;
+	}
+
+	let full = '';
+	try {
+		const stream = client.messages.stream(
+			{
+				model,
+				max_tokens: 8192,
+				system,
+				messages: anthropicMessages,
+				temperature,
+			},
+			{ signal: options.signal }
+		);
+
+		for await (const ev of stream) {
+			if (options.signal.aborted) {
+				break;
+			}
+			if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
+				const piece = ev.delta.text;
+				if (piece) {
+					full += piece;
+					handlers.onDelta(piece);
+				}
+			}
+		}
+		handlers.onDone(full);
+	} catch (e: unknown) {
+		if (options.signal.aborted) {
+			handlers.onDone(full);
+			return;
+		}
+		const msg = e instanceof Error ? e.message : String(e);
+		handlers.onError(msg);
+	}
+}

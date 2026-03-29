@@ -1,0 +1,80 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+/** @type {Set<string>} */
+const INVOKE_CHANNELS = new Set([
+	'async-shell:ping',
+	'app:getPaths',
+	'workspace:pickFolder',
+	'workspace:openPath',
+	'workspace:listRecents',
+	'workspace:get',
+	'workspace:listFiles',
+	'settings:get',
+	'settings:set',
+	'threads:list',
+	'threads:messages',
+	'threads:create',
+	'threads:select',
+	'threads:delete',
+	'threads:rename',
+	'chat:send',
+	'chat:editResend',
+	'chat:abort',
+	'fs:readFile',
+	'fs:writeFile',
+	'fs:listDir',
+	'git:status',
+	'git:stageAll',
+	'git:commit',
+	'git:push',
+	'git:diffPreviews',
+	'terminal:execLine',
+	'agent:applyDiffChunk',
+	'agent:applyDiffChunks',
+	'plan:save',
+]);
+
+const chatHandlers = new Map();
+let chatSeq = 0;
+
+const layoutHandlers = new Map();
+let layoutSeq = 0;
+
+ipcRenderer.on('async-shell:chat', (_event, payload) => {
+	for (const fn of chatHandlers.values()) {
+		try {
+			fn(payload);
+		} catch (e) {
+			console.error(e);
+		}
+	}
+});
+
+ipcRenderer.on('async-shell:layout', () => {
+	for (const fn of layoutHandlers.values()) {
+		try {
+			fn();
+		} catch (e) {
+			console.error(e);
+		}
+	}
+});
+
+contextBridge.exposeInMainWorld('asyncShell', {
+	invoke(channel, ...args) {
+		if (!INVOKE_CHANNELS.has(channel)) {
+			throw new Error(`async-shell: blocked IPC channel "${channel}"`);
+		}
+		return ipcRenderer.invoke(channel, ...args);
+	},
+	subscribeChat(callback) {
+		const id = ++chatSeq;
+		chatHandlers.set(id, callback);
+		return () => chatHandlers.delete(id);
+	},
+	subscribeLayout(callback) {
+		const id = ++layoutSeq;
+		layoutHandlers.set(id, callback);
+		return () => layoutHandlers.delete(id);
+	},
+});

@@ -1,0 +1,2753 @@
+import {
+	Fragment,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+	type ReactNode,
+} from 'react';
+import type { editor as MonacoEditorNS } from 'monaco-editor';
+import Editor from '@monaco-editor/react';
+import { Terminal } from './TerminalPane';
+import { ChatMarkdown } from './ChatMarkdown';
+import { languageFromFilePath } from './fileTypeIcons';
+import { OpenWorkspaceModal } from './OpenWorkspaceModal';
+import { WorkspaceExplorer, type GitPathStatusMap } from './WorkspaceExplorer';
+import type { AgentPendingPatch, ChatStreamPayload } from './ipcTypes';
+import { AgentReviewPanel } from './AgentReviewPanel';
+import { AgentFileChangesPanel } from './AgentFileChanges';
+import {
+	assistantMessageUsesAgentToolProtocol,
+	segmentAssistantContent,
+	collectFileChanges,
+} from './agentChatSegments';
+import { ModelPickerDropdown, type ModelPickerItem } from './ModelPickerDropdown';
+import { SettingsPage, type SettingsNavId } from './SettingsPage';
+import {
+	AUTO_MODEL_ID,
+	coerceDefaultModel,
+	sanitizeEnabledIds,
+	type UserModelEntry,
+} from './modelCatalog';
+import { ComposerPlusMenu, ComposerModeIcon, composerModeLabel, type ComposerMode } from './ComposerPlusMenu';
+import { ComposerThoughtBlock } from './ComposerThoughtBlock';
+import { ComposerAtMenu } from './ComposerAtMenu';
+import { ComposerRichInput } from './ComposerRichInput';
+import { PlanQuestionDialog } from './PlanQuestionDialog';
+import { PlanReviewPanel } from './PlanReviewPanel';
+import {
+	parseQuestions,
+	parsePlanDocument,
+	stripPlanBodyForChatDisplay,
+	toPlanMd,
+	generatePlanFilename,
+	type PlanQuestion,
+	type ParsedPlan,
+} from './planParser';
+import {
+	segmentsToWireText,
+	segmentsTrimmedEmpty,
+	userMessageToSegments,
+	type ComposerSegment,
+} from './composerSegments';
+import { useComposerAtMention } from './useComposerAtMention';
+import { UserMessageRich } from './UserMessageRich';
+import { BrandLogo } from './BrandLogo';
+import { defaultAgentCustomization, type AgentCustomization } from './agentSettingsTypes';
+import { useI18n, translateChatError, normalizeLocale, type AppLocale, type TFunction } from './i18n';
+import './monacoSetup';
+
+type ThreadInfo = {
+	id: string;
+	title: string;
+	updatedAt: number;
+	createdAt?: number;
+	previewCount: number;
+	isToday?: boolean;
+	isAwaitingReply?: boolean;
+	hasAgentDiff?: boolean;
+	additions?: number;
+	deletions?: number;
+	filePaths?: string[];
+	fileCount?: number;
+	subtitleFallback?: string;
+};
+type ChatMessage = { role: 'user' | 'assistant'; content: string };
+type DiffPreview = { diff: string; isBinary: boolean; additions: number; deletions: number };
+
+const SIDEBAR_LAYOUT_KEY = 'async:sidebar-widths-v1';
+const COMPOSER_MODE_KEY = 'async:composer-mode-v1';
+
+function readComposerMode(): ComposerMode {
+	try {
+		if (typeof window === 'undefined') {
+			return 'agent';
+		}
+		const v = localStorage.getItem(COMPOSER_MODE_KEY);
+		if (v === 'agent' || v === 'plan' || v === 'debug' || v === 'ask') {
+			return v;
+		}
+	} catch {
+		/* ignore */
+	}
+	return 'agent';
+}
+
+function writeComposerMode(m: ComposerMode) {
+	try {
+		localStorage.setItem(COMPOSER_MODE_KEY, m);
+	} catch {
+		/* ignore */
+	}
+}
+const RESIZE_HANDLE_PX = 5;
+const LEFT_RAIL_MIN = 200;
+const LEFT_RAIL_MAX = 960;
+const RIGHT_RAIL_MIN = 260;
+const RIGHT_RAIL_MAX = 1280;
+const CENTER_MIN_PX = 320;
+
+function clampSidebarLayout(left: number, right: number): { left: number; right: number } {
+	const w = typeof window !== 'undefined' ? window.innerWidth : 1280;
+	let l = Math.min(Math.max(left, LEFT_RAIL_MIN), LEFT_RAIL_MAX);
+	let r = Math.min(Math.max(right, RIGHT_RAIL_MIN), RIGHT_RAIL_MAX);
+	const maxPair = w - 2 * RESIZE_HANDLE_PX - CENTER_MIN_PX;
+	if (l + r > maxPair) {
+		r = Math.max(RIGHT_RAIL_MIN, maxPair - l);
+		if (r < RIGHT_RAIL_MIN || l + r > maxPair) {
+			r = RIGHT_RAIL_MIN;
+			l = Math.max(LEFT_RAIL_MIN, Math.min(LEFT_RAIL_MAX, maxPair - r));
+		}
+	}
+	return { left: l, right: r };
+}
+
+/** 左、右各约 25% 视口，中间列用 1fr 占剩余约 50%（已扣除两条拖拽条宽度） */
+function defaultQuarterRailWidths(): { left: number; right: number } {
+	const w = typeof window !== 'undefined' ? window.innerWidth : 1280;
+	const usable = Math.max(0, w - 2 * RESIZE_HANDLE_PX);
+	const quarter = Math.round(usable * 0.25);
+	return clampSidebarLayout(quarter, quarter);
+}
+
+function readSidebarLayout(): { left: number; right: number } {
+	try {
+		if (typeof window !== 'undefined') {
+			const raw = localStorage.getItem(SIDEBAR_LAYOUT_KEY);
+			if (raw) {
+				const j = JSON.parse(raw) as { left?: unknown; right?: unknown };
+				if (typeof j.left === 'number' && typeof j.right === 'number') {
+					return { left: j.left, right: j.right };
+				}
+			}
+		}
+	} catch {
+		/* ignore */
+	}
+	return defaultQuarterRailWidths();
+}
+
+function changeBadgeLabel(gitLabel: string, t: TFunction): string {
+	switch (gitLabel) {
+		case 'U':
+			return t('git.badge.new');
+		case 'M':
+			return t('git.badge.modified');
+		case 'A':
+			return t('git.badge.added');
+		case 'D':
+			return t('git.badge.deleted');
+		case 'R':
+			return t('git.badge.renamed');
+		case 'I':
+			return t('git.badge.ignored');
+		default:
+			return gitLabel;
+	}
+}
+
+function GitDiffLines({ diff, t }: { diff: string; t: TFunction }) {
+	const lines = diff.split('\n');
+	return (
+		<div className="ref-git-card-diff" role="region" aria-label={t('git.diffPreview')}>
+			{lines.map((line, i) => {
+				let mod = 'ref-git-diff-line';
+				if (line.startsWith('+') && !line.startsWith('+++')) {
+					mod += ' is-add';
+				} else if (line.startsWith('-') && !line.startsWith('---')) {
+					mod += ' is-del';
+				} else if (line.startsWith('@@')) {
+					mod += ' is-hunk';
+				} else if (line.startsWith('diff ') || line.startsWith('index ')) {
+					mod += ' is-meta';
+				}
+				return (
+					<div key={i} className={mod}>
+						{line || '\u00a0'}
+					</div>
+				);
+			})}
+		</div>
+	);
+}
+
+function IconArrowUp({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+			<path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+		</svg>
+	);
+}
+
+function IconStop({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+			<rect x="6" y="6" width="12" height="12" rx="2" />
+		</svg>
+	);
+}
+
+function IconExplorer({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+			<path
+				d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z"
+				strokeLinejoin="round"
+			/>
+		</svg>
+	);
+}
+
+function IconGitSCM({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+			<circle cx="6" cy="6" r="2" />
+			<circle cx="18" cy="18" r="2" />
+			<circle cx="18" cy="6" r="2" />
+			<path d="M6 8v4a2 2 0 0 0 2 2h8M16 8V6" />
+		</svg>
+	);
+}
+
+function useAsyncShell() {
+	return window.asyncShell;
+}
+
+function IconSearch({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+			<circle cx="11" cy="11" r="7" />
+			<path d="M21 21l-4.3-4.3" strokeLinecap="round" />
+		</svg>
+	);
+}
+
+function IconRefresh({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+			<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" strokeLinecap="round" />
+			<path d="M3 3v5h5" strokeLinecap="round" />
+			<path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" strokeLinecap="round" />
+			<path d="M16 21h5v-5" strokeLinecap="round" />
+		</svg>
+	);
+}
+
+function IconDoc({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+			<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+			<polyline points="14 2 14 8 20 8" />
+		</svg>
+	);
+}
+
+function IconChevron({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+			<path d="M6 9l6 6 6-6" strokeLinecap="round" />
+		</svg>
+	);
+}
+
+function IconMic({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+			<path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z" strokeLinejoin="round" />
+			<path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v3M8 22h8" strokeLinecap="round" />
+		</svg>
+	);
+}
+
+function IconPlus({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+			<path d="M12 5v14M5 12h14" strokeLinecap="round" />
+		</svg>
+	);
+}
+
+function IconChipClear({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" aria-hidden>
+			<path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />
+		</svg>
+	);
+}
+
+function IconPencil({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+			<path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" strokeLinecap="round" strokeLinejoin="round" />
+		</svg>
+	);
+}
+
+function IconTrash({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+			<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14zM10 11v6M14 11v6" strokeLinecap="round" strokeLinejoin="round" />
+		</svg>
+	);
+}
+
+function IconCheckCircle({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+			<circle cx="12" cy="12" r="9" />
+			<path d="M8 12l2.5 2.5 5-5" />
+		</svg>
+	);
+}
+
+function normalizeThreadRow(t: ThreadInfo): ThreadInfo {
+	return {
+		...t,
+		isToday: typeof t.isToday === 'boolean' ? t.isToday : true,
+		isAwaitingReply: t.isAwaitingReply ?? false,
+		hasAgentDiff: t.hasAgentDiff ?? false,
+		additions: t.additions ?? 0,
+		deletions: t.deletions ?? 0,
+		filePaths: t.filePaths ?? [],
+		fileCount: t.fileCount ?? 0,
+		subtitleFallback: t.subtitleFallback ?? '',
+	};
+}
+
+function threadFileBasename(rel: string): string {
+	const n = rel.replace(/\\/g, '/');
+	const i = n.lastIndexOf('/');
+	return i >= 0 ? n.slice(i + 1) : n;
+}
+
+function formatThreadRowSubtitle(tr: TFunction, t: ThreadInfo, isActive: boolean): ReactNode {
+	const paths = t.filePaths ?? [];
+	const fc = Math.max(t.fileCount ?? 0, paths.length);
+	const add = t.additions ?? 0;
+	const del = t.deletions ?? 0;
+	const hasDiff = t.hasAgentDiff ?? false;
+
+	if (t.isAwaitingReply) {
+		const fb = (t.subtitleFallback ?? '').trim();
+		if (fb) {
+			return fb;
+		}
+	}
+
+	if (isActive && hasDiff && paths.length > 0) {
+		const names = paths.map(threadFileBasename);
+		let s = names.join(', ');
+		if (s.length > 52) {
+			s = `${s.slice(0, 50)}…`;
+		}
+		return <>{tr('app.threadEdited', { names: s })}</>;
+	}
+	if (!isActive && hasDiff && (add > 0 || del > 0 || fc > 0)) {
+		const n = fc > 0 ? fc : 1;
+		return (
+			<>
+				<span className="ref-thread-meta-add">+{add}</span>{' '}
+				<span className="ref-thread-meta-del">−{del}</span>
+				<span className="ref-thread-meta-sep"> · </span>
+				{n === 1 ? tr('app.threadFilesOne', { n }) : tr('app.threadFilesMany', { n })}
+			</>
+		);
+	}
+	const fb = (t.subtitleFallback ?? '').trim();
+	return fb || '\u00a0';
+}
+
+function threadRowTitle(tr: TFunction, t: ThreadInfo): string {
+	if (t.isAwaitingReply) {
+		return t.title.startsWith('Draft:') || t.title.startsWith('草稿：')
+			? t.title
+			: tr('app.draftPrefix', { title: t.title });
+	}
+	return t.title;
+}
+
+export default function App() {
+	const shell = useAsyncShell();
+	const { t, setLocale, locale } = useI18n();
+	const [ipcOk, setIpcOk] = useState<string>('…');
+	const [workspace, setWorkspace] = useState<string | null>(null);
+	const [workspaceFileList, setWorkspaceFileList] = useState<string[]>([]);
+	const [threads, setThreads] = useState<ThreadInfo[]>([]);
+	const [threadSearch, setThreadSearch] = useState('');
+	const [currentId, setCurrentId] = useState<string | null>(null);
+	const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
+	const [editingThreadTitleDraft, setEditingThreadTitleDraft] = useState('');
+	const threadTitleDraftRef = useRef('');
+	const threadTitleInputRef = useRef<HTMLInputElement>(null);
+	const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+	const confirmDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const [messages, setMessages] = useState<ChatMessage[]>([]);
+	/** 点击某条用户消息后，从该条起截断并重发（与 threads:messages 顺序一致） */
+	const [resendFromUserIndex, setResendFromUserIndex] = useState<number | null>(null);
+	const [composerSegments, setComposerSegments] = useState<ComposerSegment[]>([]);
+	/** 内联编辑已发送消息时专用，与底部输入框互不共享 */
+	const [inlineResendSegments, setInlineResendSegments] = useState<ComposerSegment[]>([]);
+	const resendIdxRef = useRef<number | null>(null);
+	resendIdxRef.current = resendFromUserIndex;
+	const [streaming, setStreaming] = useState('');
+	const [awaitingReply, setAwaitingReply] = useState(false);
+	const [thinkingTick, setThinkingTick] = useState(0);
+	const [thoughtSecondsByThread, setThoughtSecondsByThread] = useState<Record<string, number>>({});
+	const [gitBranch, setGitBranch] = useState('—');
+	const [gitLines, setGitLines] = useState<string[]>([]);
+	const [gitPathStatus, setGitPathStatus] = useState<GitPathStatusMap>({});
+	const [gitChangedPaths, setGitChangedPaths] = useState<string[]>([]);
+	const [diffPreviews, setDiffPreviews] = useState<Record<string, DiffPreview>>({});
+	const [diffLoading, setDiffLoading] = useState(false);
+	const [gitActionError, setGitActionError] = useState<string | null>(null);
+	/** 各线程待审阅的 Agent diff（确认后才写入工作区） */
+	const [agentReviewPendingByThread, setAgentReviewPendingByThread] = useState<
+		Record<string, AgentPendingPatch[]>
+	>({});
+	const [agentReviewBusy, setAgentReviewBusy] = useState(false);
+	const [fileChangesDismissed, setFileChangesDismissed] = useState(false);
+	/** Plan 模式 — 结构化问题弹窗 */
+	const [planQuestion, setPlanQuestion] = useState<PlanQuestion | null>(null);
+	/** Plan 模式 — 解析出的计划文档 */
+	const [parsedPlan, setParsedPlan] = useState<ParsedPlan | null>(null);
+	/** Plan 文件保存路径 */
+	const [planFilePath, setPlanFilePath] = useState<string | null>(null);
+	/** 上次 Build 时注入的计划内容 */
+	const planBuildContentRef = useRef<string | null>(null);
+	const [rightPanelTab, setRightPanelTab] = useState<'explorer' | 'search' | 'git'>('git');
+	const [treeEpoch, setTreeEpoch] = useState(0);
+	const [commitMsg, setCommitMsg] = useState('');
+	const [workedSeconds, setWorkedSeconds] = useState<number | null>(null);
+	const [settingsPageOpen, setSettingsPageOpen] = useState(false);
+	const [settingsMountKey, setSettingsMountKey] = useState(0);
+	const [settingsInitialNav, setSettingsInitialNav] = useState<SettingsNavId>('general');
+	const [modelPickerOpen, setModelPickerOpen] = useState(false);
+	const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+	const [composerMode, setComposerMode] = useState<ComposerMode>(() => readComposerMode());
+	const [apiKey, setApiKey] = useState('');
+	const [baseURL, setBaseURL] = useState('');
+	const [proxyUrl, setProxyUrl] = useState('');
+	const [anthropicApiKey, setAnthropicApiKey] = useState('');
+	const [anthropicBaseURL, setAnthropicBaseURL] = useState('');
+	const [geminiApiKey, setGeminiApiKey] = useState('');
+	const [defaultModel, setDefaultModel] = useState(AUTO_MODEL_ID);
+	const [modelEntries, setModelEntries] = useState<UserModelEntry[]>([]);
+	const [enabledModelIds, setEnabledModelIds] = useState<string[]>([]);
+	const [agentCustomization, setAgentCustomization] = useState<AgentCustomization>(() => defaultAgentCustomization());
+	const [filePath, setFilePath] = useState('');
+	const [editorValue, setEditorValue] = useState('');
+	const monacoEditorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null);
+	const pendingEditorRevealLineRef = useRef<number | null>(null);
+	const [workspaceToolsOpen, setWorkspaceToolsOpen] = useState(false);
+	const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
+	const [homePath, setHomePath] = useState('');
+	const [railWidths, setRailWidths] = useState(() => {
+		const s = readSidebarLayout();
+		return clampSidebarLayout(s.left, s.right);
+	});
+	const streamThreadRef = useRef<string | null>(null);
+	const streamStartedAtRef = useRef<number | null>(null);
+	const firstTokenAtRef = useRef<number | null>(null);
+	const onNewThreadRef = useRef<() => Promise<void>>(async () => {});
+	const composerRichHeroRef = useRef<HTMLDivElement>(null);
+	const composerRichBottomRef = useRef<HTMLDivElement>(null);
+	const composerRichInlineRef = useRef<HTMLDivElement>(null);
+	const inlineResendRootRef = useRef<HTMLDivElement | null>(null);
+	/** 对话消息滚动容器：新消息 / 流式输出时自动滚到底（用户上移阅读时暂停跟随） */
+	const messagesViewportRef = useRef<HTMLDivElement>(null);
+	const messagesTrackRef = useRef<HTMLDivElement>(null);
+	const pinMessagesToBottomRef = useRef(true);
+	const prevMessagesLenForScrollRef = useRef(0);
+	const closeAtMenuLatestRef = useRef<() => void>(() => {});
+	const plusAnchorHeroRef = useRef<HTMLDivElement>(null);
+	const plusAnchorBottomRef = useRef<HTMLDivElement>(null);
+	const plusAnchorInlineRef = useRef<HTMLDivElement>(null);
+	const modelPillHeroRef = useRef<HTMLDivElement>(null);
+	const modelPillBottomRef = useRef<HTMLDivElement>(null);
+	const modelPillInlineRef = useRef<HTMLDivElement>(null);
+	type ComposerAnchorSlot = 'hero' | 'bottom' | 'inline';
+	const [plusMenuAnchorSlot, setPlusMenuAnchorSlot] = useState<ComposerAnchorSlot>('bottom');
+	const [modelPickerAnchorSlot, setModelPickerAnchorSlot] = useState<ComposerAnchorSlot>('bottom');
+
+	const setComposerModePersist = useCallback((m: ComposerMode) => {
+		setComposerMode(m);
+		writeComposerMode(m);
+	}, []);
+
+	const openSettingsPage = (nav: SettingsNavId) => {
+		setModelPickerOpen(false);
+		setPlusMenuOpen(false);
+		setSettingsMountKey((k) => k + 1);
+		setSettingsInitialNav(nav);
+		setSettingsPageOpen(true);
+	};
+
+	const workspaceBasename = useMemo(() => {
+		if (!workspace) {
+			return t('app.noWorkspace');
+		}
+		const norm = workspace.replace(/\\/g, '/');
+		const parts = norm.split('/').filter(Boolean);
+		return parts[parts.length - 1] ?? workspace;
+	}, [workspace, t]);
+
+	const { todayThreads, archivedThreads } = useMemo(() => {
+		const q = threadSearch.trim().toLowerCase();
+		const list = q
+			? threads.filter(
+					(t) =>
+						t.title.toLowerCase().includes(q) ||
+						(t.subtitleFallback ?? '').toLowerCase().includes(q)
+				)
+			: threads;
+		const today: ThreadInfo[] = [];
+		const archived: ThreadInfo[] = [];
+		for (const t of list) {
+			if (t.isToday) {
+				today.push(t);
+			} else {
+				archived.push(t);
+			}
+		}
+		return { todayThreads: today, archivedThreads: archived };
+	}, [threads, threadSearch]);
+
+	const hasConversation = messages.length > 0 || !!streaming;
+	const changeCount = gitChangedPaths.length;
+	const gitPathsKey = useMemo(() => gitChangedPaths.join('\n'), [gitChangedPaths]);
+
+	const canSendComposer = useMemo(() => !segmentsTrimmedEmpty(composerSegments), [composerSegments]);
+	const canSendInlineResend = useMemo(
+		() => !segmentsTrimmedEmpty(inlineResendSegments),
+		[inlineResendSegments]
+	);
+
+	const currentThreadTitle = useMemo(() => {
+		const t = threads.find((x) => x.id === currentId);
+		return t?.title ?? workspaceBasename;
+	}, [threads, currentId, workspaceBasename]);
+
+	const pendingAgentPatches = useMemo(
+		() => (currentId ? agentReviewPendingByThread[currentId] ?? [] : []),
+		[currentId, agentReviewPendingByThread]
+	);
+
+	const diffTotals = useMemo(() => {
+		let additions = 0;
+		let deletions = 0;
+		for (const p of gitChangedPaths) {
+			const pr = diffPreviews[p];
+			if (pr) {
+				additions += pr.additions;
+				deletions += pr.deletions;
+			}
+		}
+		return { additions, deletions };
+	}, [gitChangedPaths, diffPreviews]);
+
+	const refreshThreads = useCallback(async () => {
+		if (!shell) {
+			return;
+		}
+		const r = (await shell.invoke('threads:list')) as {
+			threads: ThreadInfo[];
+			currentId: string | null;
+		};
+		setThreads((r.threads ?? []).map(normalizeThreadRow));
+		setCurrentId(r.currentId);
+	}, [shell]);
+
+	const loadMessages = useCallback(
+		async (id: string) => {
+			if (!shell) {
+				return;
+			}
+			const r = (await shell.invoke('threads:messages', id)) as {
+				ok: boolean;
+				messages?: ChatMessage[];
+			};
+			if (r.ok && r.messages) {
+				setMessages(r.messages);
+			}
+		},
+		[shell]
+	);
+
+	const refreshGit = useCallback(async () => {
+		if (!shell) {
+			return;
+		}
+		const r = (await shell.invoke('git:status')) as
+			| { ok: true; branch: string; lines: string[]; pathStatus?: GitPathStatusMap; changedPaths?: string[] }
+			| { ok: false; error?: string };
+		if (r.ok) {
+			setGitBranch(r.branch || 'master');
+			setGitLines(r.lines);
+			setGitPathStatus(r.pathStatus ?? {});
+			setGitChangedPaths(r.changedPaths ?? []);
+		} else {
+			setGitBranch('—');
+			setGitLines([r.error ?? 'Failed to load changes']);
+			setGitPathStatus({});
+			setGitChangedPaths([]);
+		}
+		setTreeEpoch((n) => n + 1);
+	}, [shell]);
+
+	const clearAgentReviewForThread = useCallback((threadId: string) => {
+		setAgentReviewPendingByThread((prev) => {
+			const next = { ...prev };
+			delete next[threadId];
+			return next;
+		});
+	}, []);
+
+	const onDiscardAgentReview = useCallback(() => {
+		if (currentId) {
+			clearAgentReviewForThread(currentId);
+		}
+	}, [currentId, clearAgentReviewForThread]);
+
+	const onApplyAgentPatchOne = useCallback(
+		async (id: string) => {
+			if (!shell || !currentId) {
+				return;
+			}
+			const list = agentReviewPendingByThread[currentId] ?? [];
+			const patch = list.find((p) => p.id === id);
+			if (!patch) {
+				return;
+			}
+			setAgentReviewBusy(true);
+			try {
+				const ar = (await shell.invoke('agent:applyDiffChunk', {
+					threadId: currentId,
+					chunk: patch.chunk,
+				})) as { applied: string[]; failed: { path: string; reason: string }[] };
+				if (ar.applied.length > 0) {
+					setAgentReviewPendingByThread((prev) => ({
+						...prev,
+						[currentId]: (prev[currentId] ?? []).filter((x) => x.id !== id),
+					}));
+				}
+				await loadMessages(currentId);
+				await refreshGit();
+			} finally {
+				setAgentReviewBusy(false);
+			}
+		},
+		[shell, currentId, agentReviewPendingByThread, loadMessages, refreshGit]
+	);
+
+	const onApplyAgentPatchesAll = useCallback(async () => {
+		if (!shell || !currentId) {
+			return;
+		}
+		const list = agentReviewPendingByThread[currentId] ?? [];
+		if (list.length === 0) {
+			return;
+		}
+		setAgentReviewBusy(true);
+		try {
+			const ar = (await shell.invoke('agent:applyDiffChunks', {
+				threadId: currentId,
+				items: list.map((p) => ({ id: p.id, chunk: p.chunk })),
+			})) as {
+				applied: string[];
+				failed: { path: string; reason: string }[];
+				succeededIds: string[];
+			};
+			const okIds = new Set(ar.succeededIds ?? []);
+			setAgentReviewPendingByThread((prev) => ({
+				...prev,
+				[currentId]: (prev[currentId] ?? []).filter((p) => !okIds.has(p.id)),
+			}));
+			await loadMessages(currentId);
+			await refreshGit();
+		} finally {
+			setAgentReviewBusy(false);
+		}
+	}, [shell, currentId, agentReviewPendingByThread, loadMessages, refreshGit]);
+
+	useEffect(() => {
+		if (!shell) {
+			setIpcOk(t('app.ipcBrowserOnly'));
+			return;
+		}
+		void (async () => {
+			try {
+				const p = (await shell.invoke('async-shell:ping')) as { ok: boolean; message: string };
+				setIpcOk(p.ok ? t('app.ipcReady', { message: p.message }) : t('app.ipcError'));
+				const w = (await shell.invoke('workspace:get')) as { root: string | null };
+				setWorkspace(w.root);
+				const paths = (await shell.invoke('app:getPaths')) as { home?: string };
+				if (paths.home) {
+					setHomePath(paths.home);
+				}
+				await refreshThreads();
+				const st = (await shell.invoke('settings:get')) as {
+					language?: string;
+					openAI?: { apiKey?: string; baseURL?: string; proxyUrl?: string };
+					anthropic?: { apiKey?: string; baseURL?: string };
+					gemini?: { apiKey?: string };
+					defaultModel?: string;
+					models?: { entries?: UserModelEntry[]; enabledIds?: string[] };
+					agent?: AgentCustomization;
+				};
+				setLocale(normalizeLocale(st.language));
+				setApiKey(st.openAI?.apiKey ?? '');
+				setBaseURL(st.openAI?.baseURL ?? '');
+				setProxyUrl(st.openAI?.proxyUrl ?? '');
+				setAnthropicApiKey(st.anthropic?.apiKey ?? '');
+				setAnthropicBaseURL(st.anthropic?.baseURL ?? '');
+				setGeminiApiKey(st.gemini?.apiKey ?? '');
+				const rawEntries = Array.isArray(st.models?.entries) ? st.models!.entries! : [];
+				setModelEntries(rawEntries);
+				const saneEnabled = sanitizeEnabledIds(rawEntries, st.models?.enabledIds);
+				setEnabledModelIds(saneEnabled);
+				setDefaultModel(coerceDefaultModel(st.defaultModel, rawEntries, saneEnabled));
+				const ag = st.agent;
+				setAgentCustomization({
+					...defaultAgentCustomization(),
+					...(ag ?? {}),
+					importThirdPartyConfigs: ag?.importThirdPartyConfigs ?? false,
+					rules: Array.isArray(ag?.rules) ? ag.rules : [],
+					skills: Array.isArray(ag?.skills) ? ag.skills : [],
+					subagents: Array.isArray(ag?.subagents) ? ag.subagents : [],
+					commands: Array.isArray(ag?.commands) ? ag.commands : [],
+				});
+				await refreshGit();
+			} catch (e) {
+				setIpcOk(String(e));
+			}
+		})();
+	}, [shell, refreshThreads, refreshGit, t, setLocale]);
+
+	useEffect(() => {
+		if (!shell || !currentId) {
+			return;
+		}
+		void loadMessages(currentId);
+	}, [shell, currentId, loadMessages]);
+
+	useEffect(() => {
+		if (!shell) {
+			return;
+		}
+		const unsub = shell.subscribeChat((raw: unknown) => {
+			const payload = raw as ChatStreamPayload;
+			if (payload.threadId !== streamThreadRef.current) {
+				return;
+			}
+			if (payload.type === 'delta') {
+				setStreaming((s) => {
+					if (s.length === 0 && payload.text.length > 0) {
+						firstTokenAtRef.current = Date.now();
+					}
+					return s + payload.text;
+				});
+			} else if (payload.type === 'tool_call') {
+				const marker = `\n<tool_call tool="${payload.name}">${payload.args}</tool_call>\n`;
+				setStreaming((s) => s + marker);
+			} else if (payload.type === 'tool_result') {
+				const truncated = payload.result.length > 3000 ? payload.result.slice(0, 3000) + '\n... (truncated)' : payload.result;
+				const safe = truncated.split('</tool_result>').join('</tool\u200c_result>');
+				const marker = `<tool_result tool="${payload.name}" success="${payload.success}">${safe}</tool_result>\n`;
+				setStreaming((s) => s + marker);
+			} else if (payload.type === 'done') {
+				const start = streamStartedAtRef.current;
+				const ft = firstTokenAtRef.current;
+				const end = Date.now();
+				if (start !== null) {
+					setWorkedSeconds(Math.max(1, Math.round((end - start) / 1000)));
+				}
+				const thinkSec =
+					start !== null && ft !== null
+						? Math.max(0.1, (ft - start) / 1000)
+						: start !== null
+							? Math.max(0.1, (end - start) / 1000)
+							: 0.5;
+				setThoughtSecondsByThread((prev) => ({ ...prev, [payload.threadId]: thinkSec }));
+				streamStartedAtRef.current = null;
+				firstTokenAtRef.current = null;
+				setAwaitingReply(false);
+				setStreaming('');
+				setFileChangesDismissed(false);
+				if (payload.pendingAgentPatches && payload.pendingAgentPatches.length > 0) {
+					setAgentReviewPendingByThread((prev) => ({
+						...prev,
+						[payload.threadId]: payload.pendingAgentPatches!,
+					}));
+				}
+
+				const fullText = payload.text ?? '';
+				const q = parseQuestions(fullText);
+				if (q) {
+					setPlanQuestion(q);
+				} else {
+					setPlanQuestion(null);
+				}
+
+				const plan = parsePlanDocument(fullText);
+				if (plan) {
+					setParsedPlan(plan);
+					const filename = generatePlanFilename(plan.name);
+					const md = toPlanMd(plan);
+					if (shell) {
+						void (async () => {
+							const r = (await shell.invoke('plan:save', { filename, content: md })) as
+								| { ok: true; path: string }
+								| { ok: false };
+							if (r.ok) {
+								setPlanFilePath(r.path);
+							}
+						})();
+					}
+				}
+
+				void loadMessages(payload.threadId);
+				void refreshThreads();
+			} else if (payload.type === 'error') {
+				const start = streamStartedAtRef.current;
+				const end = Date.now();
+				if (start !== null) {
+					setWorkedSeconds(Math.max(1, Math.round((end - start) / 1000)));
+				}
+				const thinkSec =
+					start !== null && firstTokenAtRef.current !== null
+						? Math.max(0.1, (firstTokenAtRef.current - start) / 1000)
+						: start !== null
+							? Math.max(0.1, (end - start) / 1000)
+							: 0.3;
+				setThoughtSecondsByThread((prev) => ({ ...prev, [payload.threadId]: thinkSec }));
+				streamStartedAtRef.current = null;
+				firstTokenAtRef.current = null;
+				setAwaitingReply(false);
+				setStreaming('');
+				setMessages((m) => [
+					...m,
+					{ role: 'assistant', content: t('app.errorPrefix', { message: translateChatError(payload.message, t) }) },
+				]);
+				void refreshThreads();
+			}
+		});
+		return () => unsub();
+	}, [shell, loadMessages, refreshThreads]);
+
+	useEffect(() => {
+		if (!workspace || !shell) {
+			return;
+		}
+		void refreshGit();
+	}, [workspace, shell, refreshGit]);
+
+	useEffect(() => {
+		if (!shell || !workspace) {
+			setWorkspaceFileList([]);
+			return;
+		}
+		let cancelled = false;
+		void (async () => {
+			const r = (await shell.invoke('workspace:listFiles')) as
+				| { ok: true; paths: string[] }
+				| { ok: false; error?: string };
+			if (cancelled) {
+				return;
+			}
+			if (r.ok && Array.isArray(r.paths)) {
+				setWorkspaceFileList(r.paths);
+			} else {
+				setWorkspaceFileList([]);
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [shell, workspace]);
+
+	useEffect(() => {
+		if (!shell || gitChangedPaths.length === 0) {
+			setDiffPreviews({});
+			setDiffLoading(false);
+			return;
+		}
+		setDiffLoading(true);
+		let cancelled = false;
+		void (async () => {
+			const r = (await shell.invoke('git:diffPreviews', gitChangedPaths)) as
+				| { ok: true; previews: Record<string, DiffPreview> }
+				| { ok: false };
+			if (!cancelled && r.ok) {
+				setDiffPreviews(r.previews);
+			}
+			if (!cancelled) {
+				setDiffLoading(false);
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [shell, treeEpoch, gitPathsKey]);
+
+	const applyWorkspacePath = async (next: string) => {
+		setWorkspace(next);
+		setRightPanelTab('explorer');
+		await refreshGit();
+	};
+
+	const onNewThread = async () => {
+		if (!shell) {
+			return;
+		}
+		const r = (await shell.invoke('threads:create')) as { id: string };
+		await refreshThreads();
+		setCurrentId(r.id);
+		setWorkedSeconds(null);
+		setAwaitingReply(false);
+		streamStartedAtRef.current = null;
+		firstTokenAtRef.current = null;
+		await loadMessages(r.id);
+		setComposerSegments([]);
+		setInlineResendSegments([]);
+		setResendFromUserIndex(null);
+		composerRichHeroRef.current?.focus();
+	};
+
+	onNewThreadRef.current = onNewThread;
+
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
+				e.preventDefault();
+				void onNewThreadRef.current();
+			}
+		};
+		window.addEventListener('keydown', onKey);
+		return () => window.removeEventListener('keydown', onKey);
+	}, []);
+
+	const onSelectThread = async (id: string) => {
+		if (!shell) {
+			return;
+		}
+		await shell.invoke('threads:select', id);
+		setCurrentId(id);
+		setWorkedSeconds(null);
+		setAwaitingReply(false);
+		streamStartedAtRef.current = null;
+		firstTokenAtRef.current = null;
+		setResendFromUserIndex(null);
+		setComposerSegments([]);
+		setInlineResendSegments([]);
+		await loadMessages(id);
+	};
+
+	const commitThreadTitleEdit = useCallback(async () => {
+		if (!editingThreadId) {
+			return;
+		}
+		if (!shell) {
+			setEditingThreadId(null);
+			setEditingThreadTitleDraft('');
+			return;
+		}
+		const id = editingThreadId;
+		const draft = threadTitleDraftRef.current.trim();
+		const prev = threads.find((x) => x.id === id)?.title ?? '';
+		setEditingThreadId(null);
+		setEditingThreadTitleDraft('');
+		if (!draft || draft === prev) {
+			return;
+		}
+		const r = (await shell.invoke('threads:rename', id, draft)) as { ok?: boolean };
+		if (r?.ok) {
+			await refreshThreads();
+		}
+	}, [shell, editingThreadId, threads, refreshThreads]);
+
+	const cancelThreadTitleEdit = useCallback(() => {
+		setEditingThreadId(null);
+		setEditingThreadTitleDraft('');
+	}, []);
+
+	const beginThreadTitleEdit = useCallback((t: ThreadInfo) => {
+		setEditingThreadId(t.id);
+		setEditingThreadTitleDraft(t.title);
+		threadTitleDraftRef.current = t.title;
+	}, []);
+
+	const onDeleteThread = useCallback(
+		async (e: React.MouseEvent, id: string) => {
+			e.preventDefault();
+			e.stopPropagation();
+			if (!shell) {
+				return;
+			}
+			if (confirmDeleteId !== id) {
+				setConfirmDeleteId(id);
+				if (confirmDeleteTimerRef.current) {
+					clearTimeout(confirmDeleteTimerRef.current);
+				}
+				confirmDeleteTimerRef.current = setTimeout(() => {
+					setConfirmDeleteId(null);
+					confirmDeleteTimerRef.current = null;
+				}, 2500);
+				return;
+			}
+			setConfirmDeleteId(null);
+			if (confirmDeleteTimerRef.current) {
+				clearTimeout(confirmDeleteTimerRef.current);
+				confirmDeleteTimerRef.current = null;
+			}
+			const wasCurrent = id === currentId;
+			if (wasCurrent && awaitingReply) {
+				await shell.invoke('chat:abort', id);
+				setAwaitingReply(false);
+				setStreaming('');
+				streamStartedAtRef.current = null;
+				firstTokenAtRef.current = null;
+			}
+			setEditingThreadId((ed) => (ed === id ? null : ed));
+			if (wasCurrent) {
+				setMessages([]);
+				setStreaming('');
+				setComposerSegments([]);
+				setInlineResendSegments([]);
+				setResendFromUserIndex(null);
+			}
+			await shell.invoke('threads:delete', id);
+			await refreshThreads();
+		},
+		[shell, currentId, awaitingReply, refreshThreads, confirmDeleteId]
+	);
+
+	useLayoutEffect(() => {
+		if (!editingThreadId) {
+			return;
+		}
+		const el = threadTitleInputRef.current;
+		if (el) {
+			el.focus();
+			el.select();
+		}
+	}, [editingThreadId]);
+
+	const onSend = async (textOverride?: string) => {
+		const resendIdx = resendFromUserIndex;
+		const segments = resendIdx !== null ? inlineResendSegments : composerSegments;
+		const fromSegments = segmentsToWireText(segments).trim();
+		const text =
+			resendIdx === null && typeof textOverride === 'string' && textOverride.trim().length > 0
+				? textOverride.trim()
+				: fromSegments;
+		if (!shell || !currentId || !text) {
+			return;
+		}
+		clearAgentReviewForThread(currentId);
+		if (resendIdx !== null) {
+			setInlineResendSegments([]);
+			setMessages((m) => [...m.slice(0, resendIdx), { role: 'user', content: text }]);
+		} else {
+			setComposerSegments([]);
+			setMessages((m) => [...m, { role: 'user', content: text }]);
+		}
+		setStreaming('');
+		setWorkedSeconds(null);
+		firstTokenAtRef.current = null;
+		streamStartedAtRef.current = Date.now();
+		streamThreadRef.current = currentId;
+		setAwaitingReply(true);
+
+		if (resendIdx !== null) {
+			setResendFromUserIndex(null);
+			const r = (await shell.invoke('chat:editResend', {
+				threadId: currentId,
+				visibleIndex: resendIdx,
+				text,
+				mode: composerMode,
+				modelId: defaultModel,
+			})) as { ok?: boolean };
+			if (!r?.ok) {
+				setAwaitingReply(false);
+				streamStartedAtRef.current = null;
+				setResendFromUserIndex(resendIdx);
+				setInlineResendSegments(userMessageToSegments(text, workspaceFileList));
+				void loadMessages(currentId);
+			} else {
+				void refreshThreads();
+			}
+			return;
+		}
+
+		await shell.invoke('chat:send', {
+			threadId: currentId,
+			text,
+			mode: composerMode,
+			modelId: defaultModel,
+		});
+		void refreshThreads();
+	};
+
+	const onAbort = async () => {
+		if (!shell || !currentId) {
+			return;
+		}
+		await shell.invoke('chat:abort', currentId);
+		streamStartedAtRef.current = null;
+		firstTokenAtRef.current = null;
+		setAwaitingReply(false);
+		setStreaming('');
+	};
+
+	const onPlanQuestionSubmit = (answer: string) => {
+		setPlanQuestion(null);
+		const reply = `我选择：${answer}`;
+		void onSend(reply);
+	};
+
+	const onPlanQuestionSkip = useCallback(() => {
+		setPlanQuestion(null);
+	}, []);
+
+	const onPlanTodoToggle = useCallback(
+		(id: string) => {
+			setParsedPlan((prev) => {
+				if (!prev) return prev;
+				return {
+					...prev,
+					todos: prev.todos.map((t) =>
+						t.id === id
+							? { ...t, status: t.status === 'completed' ? 'pending' as const : 'completed' as const }
+							: t
+					),
+				};
+			});
+		},
+		[]
+	);
+
+	const onPlanBuild = useCallback(() => {
+		if (!parsedPlan) return;
+		planBuildContentRef.current = parsedPlan.body;
+		setParsedPlan(null);
+		setPlanQuestion(null);
+		setComposerModePersist('agent');
+		const buildPrompt = `请根据以下计划执行所有步骤，逐个修改文件：\n\n${parsedPlan.body}`;
+		setComposerSegments(userMessageToSegments(buildPrompt, workspaceFileList));
+		setTimeout(() => {
+			const ref = hasConversation ? composerRichBottomRef.current : composerRichHeroRef.current;
+			ref?.focus();
+		}, 50);
+	}, [parsedPlan, workspaceFileList, hasConversation, setComposerModePersist]);
+
+	const onPlanReviewClose = useCallback(() => {
+		setParsedPlan(null);
+	}, []);
+
+	const onPersistLanguage = useCallback(
+		async (loc: AppLocale) => {
+			if (!shell) {
+				return;
+			}
+			await shell.invoke('settings:set', { language: loc });
+		},
+		[shell]
+	);
+
+	const persistSettings = useCallback(async () => {
+		if (!shell) {
+			return;
+		}
+		await shell.invoke('settings:set', {
+			language: locale,
+			openAI: {
+				apiKey,
+				baseURL: baseURL || undefined,
+				proxyUrl: proxyUrl.trim() || undefined,
+			},
+			anthropic: {
+				apiKey: anthropicApiKey || undefined,
+				baseURL: anthropicBaseURL.trim() || undefined,
+			},
+			gemini: {
+				apiKey: geminiApiKey || undefined,
+			},
+			defaultModel,
+			models: { entries: modelEntries, enabledIds: enabledModelIds },
+			agent: {
+				importThirdPartyConfigs: agentCustomization.importThirdPartyConfigs ?? false,
+				rules: agentCustomization.rules ?? [],
+				skills: agentCustomization.skills ?? [],
+				subagents: agentCustomization.subagents ?? [],
+				commands: agentCustomization.commands ?? [],
+			},
+		});
+	}, [
+		shell,
+		apiKey,
+		baseURL,
+		proxyUrl,
+		anthropicApiKey,
+		anthropicBaseURL,
+		geminiApiKey,
+		defaultModel,
+		modelEntries,
+		enabledModelIds,
+		agentCustomization,
+		locale,
+	]);
+
+	/** 离开设置页时写入磁盘（返回、点遮罩、Esc 等） */
+	const closeSettingsPage = useCallback(async () => {
+		try {
+			await persistSettings();
+		} catch (e) {
+			console.error('Failed to persist settings:', e);
+		} finally {
+			setSettingsPageOpen(false);
+		}
+	}, [persistSettings]);
+
+	const onToggleModelEnabled = useCallback(
+		async (id: string, enabled: boolean) => {
+			const nextSet = new Set(enabledModelIds);
+			if (enabled) {
+				nextSet.add(id);
+			} else {
+				nextSet.delete(id);
+			}
+			const arr = Array.from(nextSet);
+			setEnabledModelIds(arr);
+			if (shell) {
+				await shell.invoke('settings:set', { models: { entries: modelEntries, enabledIds: arr } });
+			}
+		},
+		[shell, enabledModelIds, modelEntries]
+	);
+
+	const onChangeModelEntries = useCallback((entries: UserModelEntry[]) => {
+		setModelEntries(entries);
+		setEnabledModelIds((prev) => sanitizeEnabledIds(entries, prev));
+	}, []);
+
+	const onPickDefaultModel = useCallback(
+		async (id: string) => {
+			setDefaultModel(id);
+			if (shell) {
+				await shell.invoke('settings:set', { defaultModel: id });
+			}
+		},
+		[shell]
+	);
+
+	const modelPickerItems = useMemo((): ModelPickerItem[] => {
+		const auto: ModelPickerItem = {
+			id: AUTO_MODEL_ID,
+			label: t('modelPicker.auto'),
+			description: t('modelPicker.autoDesc'),
+			speedTag: 'Fast',
+		};
+		const enabledSet = new Set(enabledModelIds);
+		const fromUser = modelEntries
+			.filter((e) => enabledSet.has(e.id) && (e.displayName.trim() || e.requestName.trim()))
+			.map((e) => ({
+				id: e.id,
+				label: e.displayName.trim() || e.requestName,
+				description: `${t(`settings.paradigm.${e.paradigm}`)} · ${e.requestName || t('modelPicker.requestNameMissing')}`,
+				speedTag: 'Medium' as const,
+			}));
+		return [auto, ...fromUser];
+	}, [enabledModelIds, modelEntries, t]);
+
+	const modelPillLabel = useMemo(() => {
+		if (defaultModel === AUTO_MODEL_ID) {
+			return t('modelPicker.auto');
+		}
+		const e = modelEntries.find((x) => x.id === defaultModel);
+		return e ? e.displayName.trim() || e.requestName || defaultModel : defaultModel;
+	}, [defaultModel, modelEntries, t]);
+
+	const onLoadFile = async () => {
+		if (!shell || !filePath.trim()) {
+			return;
+		}
+		try {
+			const r = (await shell.invoke('fs:readFile', filePath.trim())) as { ok: boolean; content?: string };
+			if (r.ok && r.content !== undefined) {
+				setEditorValue(r.content);
+			}
+		} catch (e) {
+			setEditorValue(t('app.readFileFailed', { detail: String(e) }));
+		}
+	};
+
+	const onSaveFile = async () => {
+		if (!shell || !filePath.trim()) {
+			return;
+		}
+		await shell.invoke('fs:writeFile', filePath.trim(), editorValue);
+		await refreshGit();
+	};
+
+	const onExplorerOpenFile = async (rel: string, revealLine?: number) => {
+		if (!shell) {
+			return;
+		}
+		pendingEditorRevealLineRef.current =
+			typeof revealLine === 'number' && Number.isFinite(revealLine) && revealLine > 0 ? Math.floor(revealLine) : null;
+		setFilePath(rel);
+		setRightPanelTab('explorer');
+		try {
+			const r = (await shell.invoke('fs:readFile', rel)) as { ok: boolean; content?: string };
+			if (r.ok && r.content !== undefined) {
+				setEditorValue(r.content);
+			}
+		} catch (e) {
+			setEditorValue(t('app.readFileFailed', { detail: String(e) }));
+		}
+	};
+
+	useEffect(() => {
+		const ed = monacoEditorRef.current;
+		const ln = pendingEditorRevealLineRef.current;
+		if (!ed || !filePath.trim() || ln == null || ln < 1) {
+			return;
+		}
+		const id = requestAnimationFrame(() => {
+			try {
+				ed.revealLineInCenter(ln);
+				ed.setPosition({ lineNumber: ln, column: 1 });
+
+				const endLn = Math.min(ln + 8, ed.getModel()?.getLineCount() ?? ln);
+				const decorations = ed.deltaDecorations([], [
+					{
+						range: { startLineNumber: ln, startColumn: 1, endLineNumber: endLn, endColumn: 1 },
+						options: {
+							isWholeLine: true,
+							className: 'ref-editor-highlight-line',
+							overviewRuler: { color: 'rgba(212,175,55,0.6)', position: 1 },
+						},
+					},
+				]);
+				setTimeout(() => {
+					try { ed.deltaDecorations(decorations, []); } catch { /* ignore */ }
+				}, 3000);
+
+				pendingEditorRevealLineRef.current = null;
+			} catch {
+				/* 模型尚未就绪时忽略 */
+			}
+		});
+		return () => cancelAnimationFrame(id);
+	}, [editorValue, filePath]);
+
+	const composerRichSurface = useMemo(
+		() => ({
+			hero: composerRichHeroRef,
+			bottom: composerRichBottomRef,
+			inline: composerRichInlineRef,
+		}),
+		[]
+	);
+
+	const atMention = useComposerAtMention(
+		(slot) => (slot === 'inline' && resendIdxRef.current !== null ? setInlineResendSegments : setComposerSegments),
+		composerRichSurface,
+		{
+			gitChangedPaths,
+			currentThreadTitle,
+			workspaceOpen: !!workspace,
+			workspaceFiles: workspaceFileList,
+			onFileChipPreview: (relPath: string) => void onExplorerOpenFile(relPath),
+		}
+	);
+	closeAtMenuLatestRef.current = atMention.closeAtMenu;
+
+	useEffect(() => {
+		if (resendFromUserIndex === null) {
+			return;
+		}
+		const onDocPointerDown = (ev: PointerEvent) => {
+			const t = ev.target;
+			if (!(t instanceof Node)) {
+				return;
+			}
+			if (inlineResendRootRef.current?.contains(t)) {
+				return;
+			}
+			if (t instanceof Element && t.closest('.ref-at-menu, .ref-model-dd, .ref-plus-menu')) {
+				return;
+			}
+			closeAtMenuLatestRef.current();
+			composerRichInlineRef.current?.blur();
+			setResendFromUserIndex(null);
+			setInlineResendSegments([]);
+		};
+		document.addEventListener('pointerdown', onDocPointerDown, true);
+		return () => document.removeEventListener('pointerdown', onDocPointerDown, true);
+	}, [resendFromUserIndex]);
+
+	const editorFileBasename = useMemo(() => {
+		const p = filePath.trim();
+		if (!p) {
+			return '';
+		}
+		const i = p.replace(/\\/g, '/').lastIndexOf('/');
+		return i >= 0 ? p.slice(i + 1) : p;
+	}, [filePath]);
+
+	const commitStaged = async () => {
+		if (!shell) {
+			return;
+		}
+		setGitActionError(null);
+		await shell.invoke('git:stageAll');
+				await shell.invoke('git:commit', commitMsg || 'chore: async commit');
+		setCommitMsg('');
+		await refreshGit();
+	};
+
+	const onCommitOnly = async () => {
+		if (!shell) {
+			return;
+		}
+		try {
+			await commitStaged();
+		} catch (e) {
+			setGitActionError(String(e));
+		}
+	};
+
+	const onCommitAndPush = async () => {
+		if (!shell) {
+			return;
+		}
+		setGitActionError(null);
+		try {
+			await shell.invoke('git:stageAll');
+				await shell.invoke('git:commit', commitMsg || 'chore: async commit');
+			setCommitMsg('');
+			const pr = (await shell.invoke('git:push')) as { ok: boolean; error?: string };
+			if (!pr.ok) {
+				setGitActionError(pr.error ?? t('app.pushFailed'));
+			}
+			await refreshGit();
+		} catch (e) {
+			setGitActionError(String(e));
+		}
+	};
+
+	const displayMessages = useMemo(() => {
+		if (!awaitingReply && streaming === '') {
+			return messages;
+		}
+		return [...messages, { role: 'assistant' as const, content: streaming }];
+	}, [messages, streaming, awaitingReply]);
+
+	/** 中间消息区滚动时，最后一条用户消息 sticky 在视口顶部（参考 Cursor） */
+	const lastUserMessageIndex = useMemo(() => {
+		let idx = -1;
+		for (let j = 0; j < displayMessages.length; j++) {
+			if (displayMessages[j]!.role === 'user') {
+				idx = j;
+			}
+		}
+		return idx;
+	}, [displayMessages]);
+
+	const agentFileChanges = useMemo(() => {
+		if (composerMode !== 'agent') return [];
+		const lastAssistant = [...displayMessages].reverse().find((m) => m.role === 'assistant');
+		if (!lastAssistant) return [];
+		const segs = segmentAssistantContent(lastAssistant.content, { t });
+		return collectFileChanges(segs);
+	}, [displayMessages, composerMode, t]);
+
+	const onKeepAllEdits = useCallback(async () => {
+		if (shell && currentId) {
+			try {
+				await shell.invoke('agent:keepLastTurn', currentId);
+			} catch {
+				/* ignore */
+			}
+		}
+		setFileChangesDismissed(true);
+	}, [shell, currentId]);
+
+	const onRevertAllEdits = useCallback(async () => {
+		if (!shell || composerMode !== 'agent' || !currentId) return;
+		let reverted = 0;
+		try {
+			const result = (await shell.invoke('agent:revertLastTurn', currentId)) as { ok?: boolean; reverted?: number };
+			reverted = result.reverted ?? 0;
+		} catch {
+			return;
+		}
+		if (reverted <= 0) {
+			return;
+		}
+		setFileChangesDismissed(true);
+		void refreshGit();
+	}, [shell, composerMode, currentId, refreshGit]);
+
+	const onMessagesScroll = useCallback(() => {
+		const el = messagesViewportRef.current;
+		if (!el) {
+			return;
+		}
+		const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+		pinMessagesToBottomRef.current = dist < 120;
+	}, []);
+
+	const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+		const el = messagesViewportRef.current;
+		if (!el) {
+			return;
+		}
+		el.scrollTo({ top: el.scrollHeight, behavior });
+	}, []);
+
+	/** 切换线程：恢复「粘底」，等 messages / 流式更新后再滚（避免旧列表闪滚） */
+	useLayoutEffect(() => {
+		pinMessagesToBottomRef.current = true;
+	}, [currentId]);
+
+	/** 用户发出新消息：强制跟到底部 */
+	useLayoutEffect(() => {
+		const len = messages.length;
+		const prev = prevMessagesLenForScrollRef.current;
+		prevMessagesLenForScrollRef.current = len;
+		if (len > prev && messages[len - 1]?.role === 'user') {
+			pinMessagesToBottomRef.current = true;
+			scrollMessagesToBottom('auto');
+		}
+	}, [messages, scrollMessagesToBottom]);
+
+	/** 流式 / 思考计时 / 展示列表变化：仅在「粘底」时跟随 */
+	useLayoutEffect(() => {
+		if (!hasConversation || !pinMessagesToBottomRef.current) {
+			return;
+		}
+		scrollMessagesToBottom('auto');
+	}, [hasConversation, displayMessages, streaming, thinkingTick, currentId, scrollMessagesToBottom]);
+
+	/** 内容高度异步变化（Markdown、diff 卡片等）时仍保持粘底 */
+	useEffect(() => {
+		if (!hasConversation) {
+			return;
+		}
+		const outer = messagesViewportRef.current;
+		const track = messagesTrackRef.current;
+		if (!outer || !track) {
+			return;
+		}
+		const ro = new ResizeObserver(() => {
+			if (!pinMessagesToBottomRef.current) {
+				return;
+			}
+			outer.scrollTop = outer.scrollHeight;
+		});
+		ro.observe(track);
+		return () => ro.disconnect();
+	}, [hasConversation, currentId]);
+
+	useEffect(() => {
+		if (!awaitingReply || streaming.length > 0) {
+			return;
+		}
+		const id = window.setInterval(() => setThinkingTick((x) => x + 1), 100);
+		return () => window.clearInterval(id);
+	}, [awaitingReply, streaming.length]);
+
+	useEffect(() => {
+		const applyFollowupHeight = (el: HTMLDivElement | null) => {
+			if (!el) {
+				return;
+			}
+			el.style.height = '0';
+			el.style.height = `${Math.min(140, Math.max(38, el.scrollHeight))}px`;
+		};
+		const applyInlineEditHeight = (el: HTMLDivElement | null) => {
+			if (!el) {
+				return;
+			}
+			el.style.height = '0';
+			el.style.height = `${Math.min(200, Math.max(72, el.scrollHeight))}px`;
+		};
+		if (!hasConversation) {
+			const h = composerRichHeroRef.current;
+			if (h) {
+				h.style.height = '';
+			}
+			return;
+		}
+		applyFollowupHeight(composerRichBottomRef.current);
+		applyInlineEditHeight(composerRichInlineRef.current);
+	}, [hasConversation, composerSegments, inlineResendSegments, resendFromUserIndex]);
+
+	useEffect(() => {
+		if (resendFromUserIndex === null) {
+			return;
+		}
+		const id = requestAnimationFrame(() => {
+			composerRichInlineRef.current?.focus();
+		});
+		return () => cancelAnimationFrame(id);
+	}, [resendFromUserIndex]);
+
+	const composerPlaceholder = useMemo(() => {
+		switch (composerMode) {
+			case 'ask':
+				return t('composer.placeholder.ask');
+			case 'plan':
+				return t('composer.placeholder.plan');
+			case 'debug':
+				return t('composer.placeholder.debug');
+			case 'agent':
+			default:
+				return t('composer.placeholder.agent');
+		}
+	}, [composerMode, t]);
+
+	/** 有会话时底部胶囊：Cursor 式短占位 */
+	const followUpComposerPlaceholder = useMemo(() => {
+		switch (composerMode) {
+			case 'ask':
+				return t('composer.followup.ask');
+			case 'plan':
+				return t('composer.followup.plan');
+			case 'debug':
+				return t('composer.followup.debug');
+			case 'agent':
+			default:
+				return t('composer.followup.default');
+		}
+	}, [composerMode, t]);
+
+	const onPlanNewIdea = (e: React.KeyboardEvent) => {
+		if (e.key === 'Tab' && e.shiftKey) {
+			e.preventDefault();
+			setComposerModePersist('plan');
+			void onNewThread();
+		}
+	};
+
+	useEffect(() => {
+		const onResize = () => {
+			setRailWidths((prev) => clampSidebarLayout(prev.left, prev.right));
+		};
+		window.addEventListener('resize', onResize);
+		return () => window.removeEventListener('resize', onResize);
+	}, []);
+
+	const persistRailWidths = useCallback((next: { left: number; right: number }) => {
+		const c = clampSidebarLayout(next.left, next.right);
+		setRailWidths(c);
+		try {
+			localStorage.setItem(SIDEBAR_LAYOUT_KEY, JSON.stringify(c));
+		} catch {
+			/* ignore */
+		}
+	}, []);
+
+	const beginResizeLeft = useCallback(
+		(e: React.MouseEvent) => {
+			e.preventDefault();
+			const startX = e.clientX;
+			const { left, right } = railWidths;
+			const onMove = (ev: MouseEvent) => {
+				const nl = left + (ev.clientX - startX);
+				setRailWidths(clampSidebarLayout(nl, right));
+			};
+			const onUp = () => {
+				document.removeEventListener('mousemove', onMove);
+				document.removeEventListener('mouseup', onUp);
+				document.body.style.cursor = '';
+				document.body.style.userSelect = '';
+				setRailWidths((prev) => {
+					const c = clampSidebarLayout(prev.left, prev.right);
+					try {
+						localStorage.setItem(SIDEBAR_LAYOUT_KEY, JSON.stringify(c));
+					} catch {
+						/* ignore */
+					}
+					return c;
+				});
+			};
+			document.body.style.cursor = 'col-resize';
+			document.body.style.userSelect = 'none';
+			document.addEventListener('mousemove', onMove);
+			document.addEventListener('mouseup', onUp);
+		},
+		[railWidths.left, railWidths.right]
+	);
+
+	const beginResizeRight = useCallback(
+		(e: React.MouseEvent) => {
+			e.preventDefault();
+			const startX = e.clientX;
+			const { left, right } = railWidths;
+			const onMove = (ev: MouseEvent) => {
+				const nr = right - (ev.clientX - startX);
+				setRailWidths(clampSidebarLayout(left, nr));
+			};
+			const onUp = () => {
+				document.removeEventListener('mousemove', onMove);
+				document.removeEventListener('mouseup', onUp);
+				document.body.style.cursor = '';
+				document.body.style.userSelect = '';
+				setRailWidths((prev) => {
+					const c = clampSidebarLayout(prev.left, prev.right);
+					try {
+						localStorage.setItem(SIDEBAR_LAYOUT_KEY, JSON.stringify(c));
+					} catch {
+						/* ignore */
+					}
+					return c;
+				});
+			};
+			document.body.style.cursor = 'col-resize';
+			document.body.style.userSelect = 'none';
+			document.addEventListener('mousemove', onMove);
+			document.addEventListener('mouseup', onUp);
+		},
+		[railWidths.left, railWidths.right]
+	);
+
+	const resetRailWidths = useCallback(() => {
+		persistRailWidths(defaultQuarterRailWidths());
+	}, [persistRailWidths]);
+
+	const renderStackedChatComposer = (
+		slot: 'bottom' | 'inline',
+		composer: { segments: ComposerSegment[]; setSegments: typeof setComposerSegments; canSend: boolean },
+		extraClass?: string
+	) => {
+		const richRef = slot === 'bottom' ? composerRichBottomRef : composerRichInlineRef;
+		const plusRef = slot === 'bottom' ? plusAnchorBottomRef : plusAnchorInlineRef;
+		const modelRef = slot === 'bottom' ? modelPillBottomRef : modelPillInlineRef;
+		const slotKey: ComposerAnchorSlot = slot === 'bottom' ? 'bottom' : 'inline';
+		const isFollowUpBar = slot === 'bottom';
+		const inputPlaceholder = isFollowUpBar ? followUpComposerPlaceholder : composerPlaceholder;
+		const inputClass = isFollowUpBar
+			? 'ref-capsule-input ref-followup-rich-input'
+			: 'ref-capsule-input ref-capsule-input--stacked-chat';
+
+		const barStart = (
+			<div className="ref-capsule-bar-start">
+				<div className="ref-plus-anchor" ref={plusRef}>
+					<button
+						type="button"
+						className="ref-plus-btn"
+						aria-expanded={plusMenuOpen}
+						aria-haspopup="menu"
+						title={t('app.addPlusTitle')}
+						aria-label={t('app.addPlusAria')}
+						onClick={() => {
+							setPlusMenuAnchorSlot(slotKey);
+							setModelPickerOpen(false);
+							setPlusMenuOpen((o) => !o);
+						}}
+					>
+						<IconPlus className="ref-plus-btn-icon" />
+					</button>
+				</div>
+				<div
+					className={`ref-mode-chip ref-mode-chip--${composerMode}`}
+					title={t('app.currentMode', { mode: composerModeLabel(composerMode, t) })}
+				>
+					<ComposerModeIcon mode={composerMode} className="ref-mode-chip-ico" />
+					<span className="ref-mode-chip-label">{composerModeLabel(composerMode, t)}</span>
+					{composerMode !== 'agent' ? (
+						<button
+							type="button"
+							className="ref-mode-chip-clear"
+							aria-label={t('app.resetAgentModeAria')}
+							onClick={() => setComposerModePersist('agent')}
+						>
+							<IconChipClear className="ref-mode-chip-clear-svg" />
+						</button>
+					) : null}
+				</div>
+			</div>
+		);
+
+		const barEnd = (
+			<div className="ref-capsule-bar-end">
+				<div className="ref-model-pill-anchor" ref={modelRef}>
+					<button
+						type="button"
+						className="ref-model-pill"
+						aria-expanded={modelPickerOpen}
+						aria-haspopup="listbox"
+						onClick={() => {
+							setModelPickerAnchorSlot(slotKey);
+							setPlusMenuOpen(false);
+							setModelPickerOpen((o) => !o);
+						}}
+					>
+						<span className="ref-model-name">{modelPillLabel}</span>
+						<IconChevron className="ref-model-chev" />
+					</button>
+				</div>
+				<button
+					type="button"
+					className="ref-mic-btn"
+					disabled
+					title={t('app.voiceSoonTitle')}
+					aria-label={t('app.voiceSoonAria')}
+				>
+					<IconMic className="ref-mic-btn-svg" />
+				</button>
+				<button
+					type="button"
+					className={`ref-send-btn ${awaitingReply ? 'is-stop' : ''}`}
+					title={awaitingReply ? t('app.stopGeneration') : t('app.send')}
+					aria-label={awaitingReply ? t('app.stopGeneration') : t('app.send')}
+					disabled={!awaitingReply && !composer.canSend}
+					onClick={() => (awaitingReply ? void onAbort() : void onSend())}
+				>
+					{awaitingReply ? <IconStop className="ref-send-icon" /> : <IconArrowUp className="ref-send-icon" />}
+				</button>
+			</div>
+		);
+
+		const onComposerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+			if (atMention.handleAtKeyDown(e)) {
+				return;
+			}
+			if (e.key === 'Escape' && resendFromUserIndex !== null && slot === 'inline') {
+				e.preventDefault();
+				setResendFromUserIndex(null);
+				setInlineResendSegments([]);
+				return;
+			}
+			if (e.key === 'Tab' && e.shiftKey) {
+				e.preventDefault();
+				void onNewThread();
+				return;
+			}
+			if (e.key === 'Enter' && !e.shiftKey) {
+				e.preventDefault();
+				void onSend();
+			}
+		};
+
+		const richInput = (
+			<ComposerRichInput
+				innerRef={richRef}
+				segments={composer.segments}
+				onSegmentsChange={composer.setSegments}
+				className={inputClass}
+				placeholder={inputPlaceholder}
+				onFilePreview={(rel) => void onExplorerOpenFile(rel)}
+				onRichInput={(root) => atMention.syncAtFromRich(root, slotKey)}
+				onRichSelect={(root) => atMention.syncAtFromRich(root, slotKey)}
+				onKeyDown={onComposerKeyDown}
+			/>
+		);
+
+		if (isFollowUpBar) {
+			return (
+				<div className={['ref-capsule', 'ref-capsule--followup-bar', extraClass].filter(Boolean).join(' ')}>
+					<div className="ref-followup-bar-row">
+						{barStart}
+						<div className="ref-followup-input-shell">
+							<div className="ref-composer-stacked-body ref-followup-input-body">{richInput}</div>
+						</div>
+						{barEnd}
+					</div>
+				</div>
+			);
+		}
+
+		return (
+			<div className={['ref-capsule', 'ref-capsule--stacked-chat', extraClass].filter(Boolean).join(' ')}>
+				<div className="ref-composer-stacked-body">{richInput}</div>
+				<div className="ref-capsule-bar ref-capsule-bar--stacked">
+					{barStart}
+					{barEnd}
+				</div>
+			</div>
+		);
+	};
+
+	const plusMenuAnchorRefForDropdown =
+		plusMenuAnchorSlot === 'hero'
+			? plusAnchorHeroRef
+			: plusMenuAnchorSlot === 'bottom'
+				? plusAnchorBottomRef
+				: plusAnchorInlineRef;
+	const modelPickerAnchorRefForDropdown =
+		modelPickerAnchorSlot === 'hero'
+			? modelPillHeroRef
+			: modelPickerAnchorSlot === 'bottom'
+				? modelPillBottomRef
+				: modelPillInlineRef;
+
+	const renderThreadItem = (th: ThreadInfo) => {
+		const isActive = th.id === currentId;
+		return (
+			<div
+				key={th.id}
+				className={`ref-thread-item ${isActive ? 'is-active' : ''} ${
+					editingThreadId === th.id ? 'is-editing-title' : ''
+				}`}
+			>
+				{editingThreadId === th.id ? (
+					<input
+						ref={threadTitleInputRef}
+						type="text"
+						className="ref-thread-title-input"
+						value={editingThreadTitleDraft}
+						aria-label={t('common.threadTitle')}
+						onChange={(e) => {
+							const v = e.target.value;
+							setEditingThreadTitleDraft(v);
+							threadTitleDraftRef.current = v;
+						}}
+						onClick={(e) => e.stopPropagation()}
+						onKeyDown={(e) => {
+							if (e.key === 'Enter') {
+								e.preventDefault();
+								void commitThreadTitleEdit();
+							}
+							if (e.key === 'Escape') {
+								e.preventDefault();
+								cancelThreadTitleEdit();
+							}
+						}}
+						onBlur={() => void commitThreadTitleEdit()}
+					/>
+				) : (
+					<button
+						type="button"
+						className="ref-thread-row ref-thread-row--rich"
+						onClick={() => void onSelectThread(th.id)}
+						onDoubleClick={(e) => {
+							e.preventDefault();
+							beginThreadTitleEdit(th);
+						}}
+					>
+						<span className="ref-thread-row-lead" aria-hidden>
+							{th.isAwaitingReply ? (
+								<IconPencil className="ref-thread-row-lead-svg" />
+							) : (
+								<IconCheckCircle className="ref-thread-row-lead-svg" />
+							)}
+						</span>
+						<span className="ref-thread-row-stack">
+							<span className="ref-thread-row-title">{threadRowTitle(t, th)}</span>
+							<span className={`ref-thread-row-meta ${isActive ? 'is-active-meta' : ''}`}>
+								{formatThreadRowSubtitle(t, th, isActive)}
+							</span>
+						</span>
+					</button>
+				)}
+				<div className="ref-thread-row-actions">
+					<button
+						type="button"
+						className="ref-thread-action"
+						title={t('common.rename')}
+						aria-label={t('common.renameThread')}
+						onMouseDown={(e) => e.preventDefault()}
+						onClick={(e) => {
+							e.stopPropagation();
+							beginThreadTitleEdit(th);
+						}}
+					>
+						<IconPencil className="ref-thread-action-svg" />
+					</button>
+					<button
+						type="button"
+						className={`ref-thread-action ${
+							confirmDeleteId === th.id ? 'ref-thread-action--confirm' : ''
+						}`}
+						title={confirmDeleteId === th.id ? t('common.confirmDelete') : t('common.delete')}
+						aria-label={confirmDeleteId === th.id ? t('common.confirmDelete') : t('common.deleteThread')}
+						onMouseDown={(e) => e.preventDefault()}
+						onClick={(e) => void onDeleteThread(e, th.id)}
+					>
+						{confirmDeleteId === th.id ? (
+							<span className="ref-thread-action-confirm-label">{t('common.confirm')}</span>
+						) : (
+							<IconTrash className="ref-thread-action-svg" />
+						)}
+					</button>
+				</div>
+			</div>
+		);
+	};
+
+	return (
+		<div className="ref-shell">
+			<header className="ref-menubar">
+				<button
+					type="button"
+					className="ref-brand-block"
+					onClick={() => openSettingsPage('models')}
+					title={t('app.settings')}
+					aria-label={t('app.settingsAria')}
+				>
+					<BrandLogo className="ref-brand-logo" size={22} />
+					<span className="ref-brand-wordmark">Async</span>
+				</button>
+				<nav className="ref-menu-nav" aria-label={t('app.menu')}>
+					{(
+						[
+							['File', t('app.menuFile')],
+							['Edit', t('app.menuEdit')],
+							['View', t('app.menuView')],
+							['Help', t('app.menuHelp')],
+						] as const
+					).map(([key, label]) => (
+						<button key={key} type="button" className="ref-menu-item">
+							{label}
+						</button>
+					))}
+				</nav>
+				<button type="button" className="ref-icon-tile" aria-label={t('app.searchAria')}>
+					<IconSearch />
+				</button>
+				<button type="button" className="ref-btn-new-agent" onClick={() => void onNewThread()}>
+					{t('app.newAgent')}
+					<kbd className="ref-kbd">Ctrl+N</kbd>
+				</button>
+				<button type="button" className="ref-link-ghost">
+					{t('app.marketplace')}
+				</button>
+				<div className="ref-menubar-spacer" />
+			</header>
+
+			<div
+				className="ref-body"
+				style={{
+					gridTemplateColumns: `${railWidths.left}px ${RESIZE_HANDLE_PX}px minmax(0, 1fr) ${RESIZE_HANDLE_PX}px ${railWidths.right}px`,
+				}}
+			>
+				<aside className="ref-left" aria-label={t('app.projectAndAgent')}>
+					<div className="ref-left-scroll">
+						<div className="ref-project-block">
+							<div className="ref-project-header">{workspaceBasename}</div>
+							<label className="ref-agent-search-wrap">
+								<IconSearch className="ref-agent-search-icon" />
+								<input
+									type="search"
+									className="ref-agent-search-input"
+									placeholder={t('app.searchAgentsPlaceholder')}
+									value={threadSearch}
+									onChange={(e) => setThreadSearch(e.target.value)}
+									aria-label={t('app.searchAgentsAria')}
+								/>
+							</label>
+							<button type="button" className="ref-agent-new-btn" onClick={() => void onNewThread()}>
+								{t('app.newAgent')}
+								<kbd className="ref-kbd">Ctrl+N</kbd>
+							</button>
+							<div className="ref-thread-section-label">{t('app.today')}</div>
+							<div className="ref-thread-list">{todayThreads.map(renderThreadItem)}</div>
+							{archivedThreads.length > 0 ? (
+								<>
+									<div className="ref-thread-section-label ref-thread-section-label--archived">{t('app.archived')}</div>
+									<div className="ref-thread-list">{archivedThreads.map(renderThreadItem)}</div>
+								</>
+							) : null}
+						</div>
+					</div>
+					<div className="ref-left-footer">
+						<button type="button" className="ref-open-workspace" onClick={() => setWorkspacePickerOpen(true)}>
+							{t('app.openWorkspace')}
+						</button>
+						<div className="ref-user-strip">
+							<div className="ref-user-avatar" aria-hidden />
+							<div className="ref-user-meta">
+								<span className="ref-user-name">{t('app.you')}</span>
+								<span className="ref-user-plan">Async</span>
+							</div>
+						</div>
+						<div className="ref-ipc-hint">{ipcOk}</div>
+					</div>
+				</aside>
+
+				<div
+					className="ref-resize-handle"
+					role="separator"
+					aria-orientation="vertical"
+					aria-label={t('app.resizeLeftAria')}
+					title={t('app.resizeLeftTitle')}
+					onMouseDown={beginResizeLeft}
+					onDoubleClick={resetRailWidths}
+				/>
+
+				<main
+					className={`ref-center ${hasConversation ? 'ref-center--chat' : ''}`}
+					aria-label={t('app.commandCenter')}
+					onKeyDown={onPlanNewIdea}
+				>
+					<div className="ref-context-block">
+						<div className="ref-context-line">
+							<IconDoc className="ref-context-icon" />
+							<span className="ref-context-title">{workspace ? workspaceBasename : t('app.noWorkspace')}</span>
+						</div>
+						{hasConversation ? (
+							<div className="ref-context-sub" title={currentThreadTitle}>
+								{currentThreadTitle}
+							</div>
+						) : null}
+					</div>
+
+					{hasConversation ? (
+						<div
+							className="ref-messages"
+							ref={messagesViewportRef}
+							onScroll={onMessagesScroll}
+						>
+							<div className="ref-messages-track" ref={messagesTrackRef}>
+							{displayMessages.map((m, i) => {
+								const isLast = i === displayMessages.length - 1;
+								const stAt = streamStartedAtRef.current;
+								const ftAt = firstTokenAtRef.current;
+								const showLiveThought = isLast && m.role === 'assistant' && awaitingReply;
+								const frozenSec =
+									!awaitingReply && isLast && m.role === 'assistant' && currentId
+										? thoughtSecondsByThread[currentId]
+										: undefined;
+
+								let thoughtBlock: ReactNode = null;
+								if (showLiveThought && stAt) {
+									void thinkingTick;
+									const phase = streaming.length === 0 ? 'thinking' : 'streaming';
+									const elapsed =
+										phase === 'thinking'
+											? Math.max(0, (Date.now() - stAt) / 1000)
+											: ftAt
+												? Math.max(0, (ftAt - stAt) / 1000)
+												: Math.max(0, (Date.now() - stAt) / 1000);
+									thoughtBlock = (
+										<ComposerThoughtBlock phase={phase} elapsedSeconds={elapsed} mode={composerMode} />
+									);
+								} else if (frozenSec != null) {
+									thoughtBlock = (
+										<ComposerThoughtBlock
+											phase="done"
+											elapsedSeconds={frozenSec}
+											totalStreamSeconds={workedSeconds}
+											mode={composerMode}
+										/>
+									);
+								}
+
+								const pendingEmptyAssistant =
+									m.role === 'assistant' && m.content.trim() === '' && awaitingReply && isLast;
+
+								const userMessageIndex = i < messages.length && m.role === 'user' ? i : -1;
+								const isEditingThisUser = userMessageIndex >= 0 && resendFromUserIndex === userMessageIndex;
+
+								if (m.role === 'user' && isEditingThisUser) {
+									const inner = (
+										<div ref={inlineResendRootRef} className="ref-msg-slot ref-msg-slot--composer">
+											{renderStackedChatComposer(
+												'inline',
+												{
+													segments: inlineResendSegments,
+													setSegments: setInlineResendSegments,
+													canSend: canSendInlineResend,
+												},
+												'ref-capsule--inline-edit'
+											)}
+										</div>
+									);
+									return i === lastUserMessageIndex ? (
+										<div key={`u-edit-${i}`} className="ref-msg-sticky-user-wrap">
+											{inner}
+										</div>
+									) : (
+										<Fragment key={`u-edit-${i}`}>{inner}</Fragment>
+									);
+								}
+
+								if (m.role === 'user') {
+									const userSegs = userMessageToSegments(m.content, workspaceFileList);
+									const inner = (
+										<div className="ref-msg-slot ref-msg-slot--user">
+											<button
+												type="button"
+												className="ref-msg-user"
+												disabled={awaitingReply}
+												title={
+													awaitingReply
+														? t('app.userMsgGenerating')
+														: t('app.userMsgEditHint')
+												}
+												onClick={() => {
+													if (awaitingReply) {
+														return;
+													}
+													setResendFromUserIndex(userMessageIndex);
+													setInlineResendSegments(userMessageToSegments(m.content, workspaceFileList));
+												}}
+											>
+												<UserMessageRich
+													segments={userSegs}
+													onFileClick={(rel) => void onExplorerOpenFile(rel)}
+												/>
+											</button>
+										</div>
+									);
+									return i === lastUserMessageIndex ? (
+										<div key={`u-${i}`} className="ref-msg-sticky-user-wrap">
+											{inner}
+										</div>
+									) : (
+										<Fragment key={`u-${i}`}>{inner}</Fragment>
+									);
+								}
+
+								return (
+									<div key={`a-${i}`} className="ref-msg-slot ref-msg-slot--assistant">
+										{thoughtBlock}
+										<div className="ref-msg-assistant-body">
+											{pendingEmptyAssistant ? (
+												<span className="ref-bubble-pending" aria-hidden>
+													<span className="ref-bubble-pending-dot" />
+													<span className="ref-bubble-pending-dot" />
+													<span className="ref-bubble-pending-dot" />
+												</span>
+											) : (
+												<ChatMarkdown
+													content={
+														composerMode === 'plan'
+															? stripPlanBodyForChatDisplay(m.content)
+															: m.content
+													}
+													agentUi={
+														composerMode === 'agent' ||
+														assistantMessageUsesAgentToolProtocol(m.content)
+													}
+													workspaceRoot={workspace}
+													onOpenAgentFile={(rel, line) => void onExplorerOpenFile(rel, line)}
+													showAgentWorking={composerMode === 'agent' && isLast && awaitingReply}
+												/>
+											)}
+										</div>
+									</div>
+								);
+							})}
+							</div>
+						</div>
+					) : (
+						<div className="ref-hero-spacer" />
+					)}
+
+					{hasConversation && pendingAgentPatches.length > 0 ? (
+						<AgentReviewPanel
+							patches={pendingAgentPatches}
+							workspaceRoot={workspace}
+							busy={agentReviewBusy}
+							onOpenFile={(rel, line) => void onExplorerOpenFile(rel, line)}
+							onApplyOne={(id) => void onApplyAgentPatchOne(id)}
+							onApplyAll={() => void onApplyAgentPatchesAll()}
+							onDiscard={onDiscardAgentReview}
+						/>
+					) : null}
+
+					{hasConversation && planQuestion && composerMode === 'plan' ? (
+						<PlanQuestionDialog
+							question={planQuestion}
+							onSubmit={onPlanQuestionSubmit}
+							onSkip={onPlanQuestionSkip}
+						/>
+					) : null}
+
+					{hasConversation && parsedPlan && composerMode === 'plan' ? (
+						<PlanReviewPanel
+							plan={parsedPlan}
+							planFilePath={planFilePath}
+							onBuild={onPlanBuild}
+							onClose={onPlanReviewClose}
+							onTodoToggle={onPlanTodoToggle}
+						/>
+					) : null}
+
+					<div className="ref-command-stack">
+						{hasConversation && composerMode === 'agent' && agentFileChanges.length > 0 && !awaitingReply && !fileChangesDismissed ? (
+							<AgentFileChangesPanel
+								files={agentFileChanges}
+								onOpenFile={(rel, line) => void onExplorerOpenFile(rel, line)}
+								onKeepAll={onKeepAllEdits}
+								onRevertAll={() => void onRevertAllEdits()}
+							/>
+						) : null}
+						{hasConversation ? (
+							renderStackedChatComposer('bottom', {
+								segments: composerSegments,
+								setSegments: setComposerSegments,
+								canSend: canSendComposer,
+							})
+						) : (
+							<>
+								<div className="ref-capsule">
+									<div className="ref-composer-hero-body">
+										<ComposerRichInput
+											innerRef={composerRichHeroRef}
+											segments={composerSegments}
+											onSegmentsChange={setComposerSegments}
+											className="ref-capsule-input"
+											placeholder={composerPlaceholder}
+											onFilePreview={(rel) => void onExplorerOpenFile(rel)}
+											onRichInput={(root) => atMention.syncAtFromRich(root, 'hero')}
+											onRichSelect={(root) => atMention.syncAtFromRich(root, 'hero')}
+											onKeyDown={(e) => {
+												if (atMention.handleAtKeyDown(e)) {
+													return;
+												}
+												if (e.key === 'Escape' && resendFromUserIndex !== null) {
+													e.preventDefault();
+													setResendFromUserIndex(null);
+													setInlineResendSegments([]);
+													return;
+												}
+												if (e.key === 'Tab' && e.shiftKey) {
+													e.preventDefault();
+													void onNewThread();
+													return;
+												}
+												if (e.key === 'Enter' && !e.shiftKey) {
+													e.preventDefault();
+													void onSend();
+												}
+											}}
+										/>
+									</div>
+									<div className="ref-capsule-bar">
+										<div className="ref-plus-anchor" ref={plusAnchorHeroRef}>
+											<button
+												type="button"
+												className="ref-plus-btn"
+												aria-expanded={plusMenuOpen}
+												aria-haspopup="menu"
+												title={t('app.addPlusTitle')}
+												aria-label={t('app.addPlusAria')}
+												onClick={() => {
+													setPlusMenuAnchorSlot('hero');
+													setModelPickerOpen(false);
+													setPlusMenuOpen((o) => !o);
+												}}
+											>
+												<IconPlus className="ref-plus-btn-icon" />
+											</button>
+										</div>
+										<div
+											className={`ref-mode-chip ref-mode-chip--${composerMode}`}
+											title={t('app.currentMode', { mode: composerModeLabel(composerMode, t) })}
+										>
+											<ComposerModeIcon mode={composerMode} className="ref-mode-chip-ico" />
+											<span className="ref-mode-chip-label">{composerModeLabel(composerMode, t)}</span>
+											{composerMode !== 'agent' ? (
+												<button
+													type="button"
+													className="ref-mode-chip-clear"
+													aria-label={t('app.resetAgentModeAria')}
+													onClick={() => setComposerModePersist('agent')}
+												>
+													<IconChipClear className="ref-mode-chip-clear-svg" />
+												</button>
+											) : null}
+										</div>
+										<div className="ref-model-pill-anchor" ref={modelPillHeroRef}>
+											<button
+												type="button"
+												className="ref-model-pill"
+												aria-expanded={modelPickerOpen}
+												aria-haspopup="listbox"
+												onClick={() => {
+													setModelPickerAnchorSlot('hero');
+													setPlusMenuOpen(false);
+													setModelPickerOpen((o) => !o);
+												}}
+											>
+												<span className="ref-model-name">{modelPillLabel}</span>
+												<IconChevron className="ref-model-chev" />
+											</button>
+										</div>
+										<div className="ref-capsule-bar-spacer" />
+										<button
+											type="button"
+											className={`ref-send-btn ${awaitingReply ? 'is-stop' : ''}`}
+											title={awaitingReply ? t('app.stopGeneration') : t('app.send')}
+											aria-label={awaitingReply ? t('app.stopGeneration') : t('app.send')}
+											disabled={!awaitingReply && !canSendComposer}
+											onClick={() => (awaitingReply ? void onAbort() : void onSend())}
+										>
+											{awaitingReply ? (
+												<IconStop className="ref-send-icon" />
+											) : (
+												<IconArrowUp className="ref-send-icon" />
+											)}
+										</button>
+									</div>
+								</div>
+								<div className="ref-quick-actions">
+									<button
+										type="button"
+										className="ref-quick-pill"
+										onClick={() => {
+											setComposerModePersist('plan');
+											void onNewThread();
+										}}
+									>
+										{t('app.planNewIdea')}
+										<kbd className="ref-kbd">Shift+Tab</kbd>
+									</button>
+									<button
+										type="button"
+										className="ref-quick-pill"
+										onClick={() => setWorkspaceToolsOpen(true)}
+									>
+										{t('app.quickTerminal')}
+									</button>
+								</div>
+							</>
+						)}
+					</div>
+				</main>
+
+				<div
+					className="ref-resize-handle"
+					role="separator"
+					aria-orientation="vertical"
+					aria-label={t('app.resizeRightAria')}
+					title={t('app.resizeRightTitle')}
+					onMouseDown={beginResizeRight}
+					onDoubleClick={resetRailWidths}
+				/>
+
+				<aside className="ref-right" aria-label={t('app.rightSidebar')}>
+					<div className="ref-right-icon-tabs" role="tablist" aria-label={t('app.rightSidebarViews')}>
+						<button
+							type="button"
+							role="tab"
+							aria-selected={rightPanelTab === 'git'}
+							aria-label={t('app.tabGit')}
+							title={t('app.tabGit')}
+							className={`ref-right-icon-tab ${rightPanelTab === 'git' ? 'is-active' : ''}`}
+							onClick={() => setRightPanelTab('git')}
+						>
+							<IconGitSCM />
+						</button>
+						<button
+							type="button"
+							role="tab"
+							aria-selected={rightPanelTab === 'search'}
+							aria-label={t('app.tabSearch')}
+							title={t('app.tabSearch')}
+							className={`ref-right-icon-tab ${rightPanelTab === 'search' ? 'is-active' : ''}`}
+							onClick={() => setRightPanelTab('search')}
+						>
+							<IconSearch />
+						</button>
+						<button
+							type="button"
+							role="tab"
+							aria-selected={rightPanelTab === 'explorer'}
+							aria-label={t('app.tabExplorer')}
+							title={t('app.tabExplorer')}
+							className={`ref-right-icon-tab ${rightPanelTab === 'explorer' ? 'is-active' : ''}`}
+							onClick={() => setRightPanelTab('explorer')}
+						>
+							<IconExplorer />
+						</button>
+					</div>
+
+					<div className="ref-right-panel-stage">
+						<div key={rightPanelTab} className="ref-right-panel-view">
+					{rightPanelTab === 'explorer' ? (
+						<div className="ref-preview-split">
+							<div className="ref-preview-tree">
+								<div className="ref-explorer-head">
+									<span className="ref-explorer-title">{workspaceBasename}</span>
+									<button
+										type="button"
+										className="ref-icon-tile"
+										aria-label={t('app.explorerRefreshAria')}
+										onClick={() => void refreshGit()}
+									>
+										<IconRefresh />
+									</button>
+								</div>
+								<div className="ref-explorer-body">
+									{workspace && shell ? (
+										<WorkspaceExplorer
+											key={workspace}
+											shell={shell}
+											pathStatus={gitPathStatus}
+											selectedRel={filePath.trim()}
+											treeEpoch={treeEpoch}
+											onOpenFile={(rel) => void onExplorerOpenFile(rel)}
+										/>
+									) : (
+										<p className="ref-explorer-placeholder">{t('app.explorerPlaceholder')}</p>
+									)}
+								</div>
+							</div>
+							<div className="ref-preview-editor" aria-label={t('app.filePreview')}>
+								<div className="ref-editor-toolbar">
+									<span className="ref-editor-file-name" title={filePath.trim() || undefined}>
+										{editorFileBasename || t('app.noFileSelected')}
+									</span>
+									<button
+										type="button"
+										className="ref-icon-tile"
+										aria-label={t('app.reloadFileAria')}
+										disabled={!filePath.trim()}
+										onClick={() => void onLoadFile()}
+									>
+										<IconRefresh />
+									</button>
+									<span className="ref-lsp-pill" title={t('app.lspSoon')}>
+										LSP
+									</span>
+									<div className="ref-editor-toolbar-spacer" />
+									<button
+										type="button"
+										className="ref-editor-save"
+										disabled={!filePath.trim()}
+										onClick={() => void onSaveFile()}
+									>
+										{t('common.save')}
+									</button>
+								</div>
+								<div className="ref-editor-pane">
+									{filePath.trim() ? (
+										<div className="ref-monaco-fill">
+											<Editor
+												key={filePath.trim()}
+												height="100%"
+												theme="void-dark"
+												path={filePath.trim()}
+												language={languageFromFilePath(filePath.trim())}
+												value={editorValue}
+												onChange={(v) => setEditorValue(v ?? '')}
+												onMount={(ed) => {
+													monacoEditorRef.current = ed;
+												}}
+												options={{
+													minimap: { enabled: true },
+													fontSize: 13,
+													wordWrap: 'on',
+													scrollbar: {
+														verticalScrollbarSize: 8,
+														horizontalScrollbarSize: 8,
+														useShadows: false,
+													},
+												}}
+											/>
+										</div>
+									) : (
+										<div className="ref-editor-empty">{t('app.selectFileToView')}</div>
+									)}
+								</div>
+							</div>
+						</div>
+					) : rightPanelTab === 'search' ? (
+						<div className="ref-search-stack">
+							<div className="ref-search-head">{t('app.searchPanelTitle')}</div>
+							<p className="ref-search-placeholder">{t('app.searchPanelHint')}</p>
+						</div>
+					) : (
+						<div className="ref-right-git-stack">
+							<div className="ref-right-toolbar">
+								<button type="button" className="ref-icon-tile" aria-label={t('app.gitRefreshAria')} onClick={() => void refreshGit()}>
+									<IconRefresh />
+								</button>
+								<span className="ref-local-label">{t('app.gitLocal')}</span>
+								<span className="ref-branch-chip">{gitBranch || 'master'}</span>
+							</div>
+							<div className="ref-git-summary ref-git-summary--rich">
+								{changeCount > 0 ? (
+									<span className="ref-git-count">{t('app.gitUncommitted', { count: String(changeCount) })}</span>
+								) : (
+									<span className="ref-git-count ref-git-count--muted">{t('app.gitNoChanges')}</span>
+								)}
+								{diffTotals.additions > 0 ? (
+									<span className="ref-git-stat-add">+{diffTotals.additions}</span>
+								) : null}
+								{diffTotals.deletions > 0 ? (
+									<span className="ref-git-stat-del">−{diffTotals.deletions}</span>
+								) : null}
+							</div>
+							<div className="ref-git-body">
+								{gitLines.length === 1 && gitLines[0]?.includes('Failed') ? (
+									<p className="ref-git-error">{t('app.gitLoadFailed')}</p>
+								) : null}
+								{changeCount > 0 ? (
+									<div className="ref-git-cards">
+										{gitChangedPaths.map((rel) => {
+											const pr = diffPreviews[rel];
+											const st = gitPathStatus[rel];
+											const badge = st ? changeBadgeLabel(st.label, t) : t('app.gitChangedFallback');
+											return (
+												<div key={rel} className="ref-git-card">
+													<div className="ref-git-card-head">
+														<span className="ref-git-card-name" title={rel}>
+															{rel.includes('/') ? rel.slice(rel.lastIndexOf('/') + 1) : rel}
+														</span>
+														<span className="ref-git-card-badge">{badge}</span>
+														<button
+															type="button"
+															className="ref-git-card-open"
+															aria-label={t('app.gitOpenInEditorAria')}
+															title={t('app.gitOpenTitle')}
+															onClick={() => void onExplorerOpenFile(rel)}
+														>
+															↗
+														</button>
+													</div>
+													<div className="ref-git-card-body">
+														{diffLoading && !pr ? (
+															<div className="ref-git-card-skel">{t('app.gitDiffLoading')}</div>
+														) : null}
+														{pr?.isBinary ? (
+															<div className="ref-git-binary-msg">{pr.diff || t('app.gitBinary')}</div>
+														) : null}
+														{pr && !pr.isBinary && pr.diff ? <GitDiffLines diff={pr.diff} t={t} /> : null}
+														{pr && !pr.isBinary && !pr.diff ? (
+															<div className="ref-git-binary-msg">{t('app.gitNoPreview')}</div>
+														) : null}
+													</div>
+												</div>
+											);
+										})}
+									</div>
+								) : null}
+								<input
+									className="ref-commit-field"
+									placeholder={t('app.commitPlaceholder')}
+									value={commitMsg}
+									onChange={(e) => setCommitMsg(e.target.value)}
+								/>
+								<div className="ref-commit-actions">
+									<button type="button" className="ref-commit-btn" onClick={() => void onCommitOnly()}>
+										{t('app.commit')}
+									</button>
+									<button type="button" className="ref-commit-btn-secondary" onClick={() => void onCommitAndPush()}>
+										{t('app.commitPush')}
+									</button>
+								</div>
+								{gitActionError ? <p className="ref-git-action-error">{gitActionError}</p> : null}
+							</div>
+						</div>
+					)}
+						</div>
+					</div>
+				</aside>
+			</div>
+
+			{workspaceToolsOpen ? (
+				<section className="ref-drawer ref-drawer--terminal-only">
+					<div className="ref-drawer-head">
+						<span className="ref-drawer-title">{t('app.terminalDrawer')}</span>
+						<button type="button" className="ref-drawer-close" onClick={() => setWorkspaceToolsOpen(false)}>
+							{t('app.terminalCollapse')}
+						</button>
+					</div>
+					<div className="ref-drawer-terminal">
+						<Terminal />
+					</div>
+				</section>
+			) : null}
+
+			<OpenWorkspaceModal
+				open={workspacePickerOpen}
+				onClose={() => setWorkspacePickerOpen(false)}
+				shell={shell}
+				homePath={homePath}
+				onWorkspaceOpened={(p) => void applyWorkspacePath(p)}
+			/>
+
+			{settingsPageOpen ? (
+				<div className="ref-settings-backdrop" role="presentation" onClick={() => void closeSettingsPage()}>
+					<div className="ref-settings-mount" onClick={(e) => e.stopPropagation()}>
+						<SettingsPage
+							key={settingsMountKey}
+							initialNav={settingsInitialNav}
+							onClose={() => void closeSettingsPage()}
+							apiKey={apiKey}
+							baseURL={baseURL}
+							defaultModel={defaultModel}
+							proxyUrl={proxyUrl}
+							anthropicApiKey={anthropicApiKey}
+							anthropicBaseURL={anthropicBaseURL}
+							geminiApiKey={geminiApiKey}
+							modelEntries={modelEntries}
+							enabledIds={enabledModelIds}
+							onChangeApiKey={setApiKey}
+							onChangeBaseURL={setBaseURL}
+							onChangeProxyUrl={setProxyUrl}
+							onChangeAnthropicApiKey={setAnthropicApiKey}
+							onChangeAnthropicBaseURL={setAnthropicBaseURL}
+							onChangeGeminiApiKey={setGeminiApiKey}
+							onChangeModelEntries={onChangeModelEntries}
+							onToggleEnabled={(id, on) => void onToggleModelEnabled(id, on)}
+							onPickDefaultModel={(id) => void onPickDefaultModel(id)}
+							agentCustomization={agentCustomization}
+							onChangeAgentCustomization={setAgentCustomization}
+							onPersistLanguage={(loc) => void onPersistLanguage(loc)}
+						/>
+					</div>
+				</div>
+			) : null}
+
+			<ComposerPlusMenu
+				open={plusMenuOpen}
+				onClose={() => setPlusMenuOpen(false)}
+				anchorRef={plusMenuAnchorRefForDropdown}
+				mode={composerMode}
+				onSelectMode={setComposerModePersist}
+			/>
+
+			<ModelPickerDropdown
+				open={modelPickerOpen}
+				onClose={() => setModelPickerOpen(false)}
+				anchorRef={modelPickerAnchorRefForDropdown}
+				items={modelPickerItems}
+				selectedId={defaultModel}
+				onSelectModel={(id) => void onPickDefaultModel(id)}
+				onNavigateToSettings={() => openSettingsPage('models')}
+				onAddModels={() => openSettingsPage('models')}
+			/>
+
+			<ComposerAtMenu
+				open={atMention.atMenuOpen}
+				items={atMention.atMenuItems}
+				highlightIndex={atMention.atMenuHighlight}
+				caretRect={atMention.atCaretRect}
+				onHighlight={atMention.setAtMenuHighlight}
+				onSelect={atMention.applyAtSelection}
+				onClose={atMention.closeAtMenu}
+			/>
+		</div>
+	);
+}

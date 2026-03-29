@@ -1,0 +1,393 @@
+import { useCallback } from 'react';
+import { useI18n } from './i18n';
+import type {
+	AgentCommand,
+	AgentCustomization,
+	AgentRule,
+	AgentRuleScope,
+	AgentSkill,
+	AgentSubagent,
+} from './agentSettingsTypes';
+import { defaultAgentCustomization } from './agentSettingsTypes';
+
+function newId(): string {
+	return globalThis.crypto?.randomUUID?.() ?? `id-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function IconInfo({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+			<circle cx="12" cy="12" r="10" />
+			<path d="M12 16v-4M12 8h.01" strokeLinecap="round" />
+		</svg>
+	);
+}
+
+type Props = {
+	value: AgentCustomization;
+	onChange: (next: AgentCustomization) => void;
+};
+
+export function SettingsAgentPanel({ value, onChange }: Props) {
+	const { t } = useI18n();
+	const v = { ...defaultAgentCustomization(), ...value };
+	const rules = v.rules ?? [];
+	const skills = v.skills ?? [];
+	const subagents = v.subagents ?? [];
+	const commands = v.commands ?? [];
+
+	const patch = useCallback(
+		(p: Partial<AgentCustomization>) => {
+			onChange({ ...v, ...p });
+		},
+		[v, onChange]
+	);
+
+	const addRule = () => {
+		const r: AgentRule = {
+			id: newId(),
+			name: '新规则',
+			content: '',
+			scope: 'always',
+			enabled: true,
+		};
+		patch({ rules: [...rules, r] });
+	};
+	const updateRule = (id: string, p: Partial<AgentRule>) => {
+		patch({ rules: rules.map((x) => (x.id === id ? { ...x, ...p } : x)) });
+	};
+	const removeRule = (id: string) => {
+		patch({ rules: rules.filter((x) => x.id !== id) });
+	};
+
+	const addSkill = () => {
+		const s: AgentSkill = {
+			id: newId(),
+			name: '新 Skill',
+			slug: 'myskill',
+			description: '',
+			content: '',
+		};
+		patch({ skills: [...skills, s] });
+	};
+	const updateSkill = (id: string, p: Partial<AgentSkill>) => {
+		patch({ skills: skills.map((x) => (x.id === id ? { ...x, ...p } : x)) });
+	};
+	const removeSkill = (id: string) => {
+		patch({ skills: skills.filter((x) => x.id !== id) });
+	};
+
+	const addSub = () => {
+		const s: AgentSubagent = {
+			id: newId(),
+			name: '新 Subagent',
+			description: '',
+			instructions: '',
+		};
+		patch({ subagents: [...subagents, s] });
+	};
+	const updateSub = (id: string, p: Partial<AgentSubagent>) => {
+		patch({ subagents: subagents.map((x) => (x.id === id ? { ...x, ...p } : x)) });
+	};
+	const removeSub = (id: string) => {
+		patch({ subagents: subagents.filter((x) => x.id !== id) });
+	};
+
+	const addCmd = () => {
+		const c: AgentCommand = {
+			id: newId(),
+			name: '新命令',
+			slash: 'cmd',
+			body: '{{args}}',
+		};
+		patch({ commands: [...commands, c] });
+	};
+	const updateCmd = (id: string, p: Partial<AgentCommand>) => {
+		patch({ commands: commands.map((x) => (x.id === id ? { ...x, ...p } : x)) });
+	};
+	const removeCmd = (id: string) => {
+		patch({ commands: commands.filter((x) => x.id !== id) });
+	};
+
+	return (
+		<div className="ref-settings-panel ref-settings-panel--agent">
+			<p className="ref-settings-lead ref-settings-agent-lead">
+				{t('agentSettings.lead1')}
+				<code className="ref-settings-code">./slug</code>
+				{t('agentSettings.lead2')}
+				<code className="ref-settings-code">/slash</code>
+				{t('agentSettings.lead3')}
+			</p>
+
+			<div className="ref-settings-agent-card">
+				<div className="ref-settings-agent-card-row">
+					<div>
+						<div className="ref-settings-agent-card-title">{t('agentSettings.importTitle')}</div>
+						<p className="ref-settings-agent-card-desc">{t('agentSettings.importDesc')}</p>
+					</div>
+					<button
+						type="button"
+						className={`ref-settings-toggle ${v.importThirdPartyConfigs ? 'is-on' : ''}`}
+						role="switch"
+						aria-checked={!!v.importThirdPartyConfigs}
+						onClick={() => patch({ importThirdPartyConfigs: !v.importThirdPartyConfigs })}
+					>
+						<span className="ref-settings-toggle-knob" />
+					</button>
+				</div>
+			</div>
+
+			<section className="ref-settings-agent-section" aria-labelledby="agent-rules-h">
+				<div className="ref-settings-agent-section-head">
+					<h2 id="agent-rules-h" className="ref-settings-agent-section-title">
+						{t('agentSettings.rulesTitle')}
+						<span className="ref-settings-agent-info-ico" title={t('agentSettings.rulesInfo')}>
+							<IconInfo />
+						</span>
+					</h2>
+					<button type="button" className="ref-settings-agent-new-btn" onClick={addRule}>
+						+ {t('agentSettings.new')}
+					</button>
+				</div>
+				<p className="ref-settings-agent-section-desc">{t('agentSettings.rulesDesc')}</p>
+				<ul className="ref-settings-agent-list">
+					{rules.map((r) => (
+						<li key={r.id} className="ref-settings-agent-item">
+							<div className="ref-settings-agent-item-head">
+								<button
+									type="button"
+									className={`ref-settings-toggle ref-settings-toggle--sm ${r.enabled ? 'is-on' : ''}`}
+									role="switch"
+									aria-checked={r.enabled}
+									title={r.enabled ? t('settings.enabled') : t('settings.disabled')}
+									onClick={() => updateRule(r.id, { enabled: !r.enabled })}
+								>
+									<span className="ref-settings-toggle-knob" />
+								</button>
+								<input
+									className="ref-settings-agent-item-name"
+									value={r.name}
+									onChange={(e) => updateRule(r.id, { name: e.target.value })}
+									aria-label={t('agentSettings.ruleNameAria')}
+								/>
+								<button type="button" className="ref-settings-agent-remove" onClick={() => removeRule(r.id)}>
+									{t('settings.removeModel')}
+								</button>
+							</div>
+							<label className="ref-settings-field ref-settings-field--compact">
+								<span>{t('agentSettings.scope')}</span>
+								<select
+									value={r.scope}
+									onChange={(e) => updateRule(r.id, { scope: e.target.value as AgentRuleScope })}
+								>
+									<option value="always">{t('agentSettings.scopeAlways')}</option>
+									<option value="glob">{t('agentSettings.scopeGlob')}</option>
+									<option value="manual">{t('agentSettings.scopeManual')}</option>
+								</select>
+							</label>
+							{r.scope === 'glob' ? (
+								<label className="ref-settings-field ref-settings-field--compact">
+									<span>{t('agentSettings.globPattern')}</span>
+									<input
+										value={r.globPattern ?? ''}
+										onChange={(e) => updateRule(r.id, { globPattern: e.target.value })}
+										placeholder="**/*.tsx"
+									/>
+								</label>
+							) : null}
+							<label className="ref-settings-field ref-settings-field--compact">
+								<span>{t('agentSettings.ruleBody')}</span>
+								<textarea
+									rows={4}
+									value={r.content}
+									onChange={(e) => updateRule(r.id, { content: e.target.value })}
+									placeholder={t('agentSettings.ruleBodyPh')}
+								/>
+							</label>
+						</li>
+					))}
+				</ul>
+				{rules.length === 0 ? <p className="ref-settings-agent-empty">{t('agentSettings.rulesEmpty')}</p> : null}
+			</section>
+
+			<section className="ref-settings-agent-section" aria-labelledby="agent-skills-h">
+				<div className="ref-settings-agent-section-head">
+					<h2 id="agent-skills-h" className="ref-settings-agent-section-title">
+						{t('agentSettings.skillsTitle')}
+						<span className="ref-settings-agent-info-ico" title={t('agentSettings.skillsInfo')}>
+							<IconInfo />
+						</span>
+					</h2>
+					<button type="button" className="ref-settings-agent-new-btn" onClick={addSkill}>
+						+ {t('agentSettings.new')}
+					</button>
+				</div>
+				<p className="ref-settings-agent-section-desc">{t('agentSettings.skillsDesc')}</p>
+				<ul className="ref-settings-agent-list">
+					{skills.map((s) => (
+						<li key={s.id} className="ref-settings-agent-item">
+							<div className="ref-settings-agent-item-head">
+								<input
+									className="ref-settings-agent-item-name"
+									value={s.name}
+									onChange={(e) => updateSkill(s.id, { name: e.target.value })}
+									aria-label={t('agentSettings.skillNameAria')}
+								/>
+								<button type="button" className="ref-settings-agent-remove" onClick={() => removeSkill(s.id)}>
+									{t('settings.removeModel')}
+								</button>
+							</div>
+							<label className="ref-settings-field ref-settings-field--compact">
+								<span>{t('agentSettings.slugLabel')}</span>
+								<input
+									value={s.slug}
+									onChange={(e) => updateSkill(s.id, { slug: e.target.value.replace(/^\.\//, '') })}
+									placeholder="review"
+								/>
+							</label>
+							<label className="ref-settings-field ref-settings-field--compact">
+								<span>{t('agentSettings.skillIntro')}</span>
+								<input
+									value={s.description}
+									onChange={(e) => updateSkill(s.id, { description: e.target.value })}
+									placeholder={t('agentSettings.skillIntroPh')}
+								/>
+							</label>
+							<label className="ref-settings-field ref-settings-field--compact">
+								<span>{t('agentSettings.skillBody')}</span>
+								<textarea
+									rows={5}
+									value={s.content}
+									onChange={(e) => updateSkill(s.id, { content: e.target.value })}
+									placeholder={t('agentSettings.skillBodyPh')}
+								/>
+							</label>
+						</li>
+					))}
+				</ul>
+				{skills.length === 0 ? (
+					<div className="ref-settings-agent-empty-block">
+						<p>{t('agentSettings.skillsEmpty')}</p>
+						<button type="button" className="ref-settings-agent-empty-cta" onClick={addSkill}>
+							{t('agentSettings.newSkill')}
+						</button>
+					</div>
+				) : null}
+			</section>
+
+			<section className="ref-settings-agent-section" aria-labelledby="agent-subs-h">
+				<div className="ref-settings-agent-section-head">
+					<h2 id="agent-subs-h" className="ref-settings-agent-section-title">
+						{t('agentSettings.subagentsTitle')}
+						<span className="ref-settings-agent-info-ico" title={t('agentSettings.subagentsInfo')}>
+							<IconInfo />
+						</span>
+					</h2>
+					<button type="button" className="ref-settings-agent-new-btn" onClick={addSub}>
+						+ {t('agentSettings.new')}
+					</button>
+				</div>
+				<p className="ref-settings-agent-section-desc">{t('agentSettings.subagentsDesc')}</p>
+				<ul className="ref-settings-agent-list">
+					{subagents.map((s) => (
+						<li key={s.id} className="ref-settings-agent-item">
+							<div className="ref-settings-agent-item-head">
+								<input
+									className="ref-settings-agent-item-name"
+									value={s.name}
+									onChange={(e) => updateSub(s.id, { name: e.target.value })}
+									aria-label={t('agentSettings.subNameAria')}
+								/>
+								<button type="button" className="ref-settings-agent-remove" onClick={() => removeSub(s.id)}>
+									{t('settings.removeModel')}
+								</button>
+							</div>
+							<label className="ref-settings-field ref-settings-field--compact">
+								<span>{t('agentSettings.subDesc')}</span>
+								<input
+									value={s.description}
+									onChange={(e) => updateSub(s.id, { description: e.target.value })}
+									placeholder={t('agentSettings.subDescPh')}
+								/>
+							</label>
+							<label className="ref-settings-field ref-settings-field--compact">
+								<span>{t('agentSettings.subInstr')}</span>
+								<textarea
+									rows={5}
+									value={s.instructions}
+									onChange={(e) => updateSub(s.id, { instructions: e.target.value })}
+									placeholder={t('agentSettings.subInstrPh')}
+								/>
+							</label>
+						</li>
+					))}
+				</ul>
+				{subagents.length === 0 ? (
+					<div className="ref-settings-agent-empty-block">
+						<p>{t('agentSettings.subEmpty')}</p>
+						<button type="button" className="ref-settings-agent-empty-cta" onClick={addSub}>
+							{t('agentSettings.newSub')}
+						</button>
+					</div>
+				) : null}
+			</section>
+
+			<section className="ref-settings-agent-section" aria-labelledby="agent-cmd-h">
+				<div className="ref-settings-agent-section-head">
+					<h2 id="agent-cmd-h" className="ref-settings-agent-section-title">
+						{t('agentSettings.cmdTitle')}
+						<span className="ref-settings-agent-info-ico" title={t('agentSettings.cmdInfo')}>
+							<IconInfo />
+						</span>
+					</h2>
+					<button type="button" className="ref-settings-agent-new-btn" onClick={addCmd}>
+						+ {t('agentSettings.new')}
+					</button>
+				</div>
+				<p className="ref-settings-agent-section-desc">{t('agentSettings.cmdDesc')}</p>
+				<ul className="ref-settings-agent-list">
+					{commands.map((c) => (
+						<li key={c.id} className="ref-settings-agent-item">
+							<div className="ref-settings-agent-item-head">
+								<input
+									className="ref-settings-agent-item-name"
+									value={c.name}
+									onChange={(e) => updateCmd(c.id, { name: e.target.value })}
+									aria-label={t('agentSettings.cmdNameAria')}
+								/>
+								<button type="button" className="ref-settings-agent-remove" onClick={() => removeCmd(c.id)}>
+									{t('settings.removeModel')}
+								</button>
+							</div>
+							<label className="ref-settings-field ref-settings-field--compact">
+								<span>{t('agentSettings.slashLabel')}</span>
+								<input
+									value={c.slash}
+									onChange={(e) => updateCmd(c.id, { slash: e.target.value.replace(/^\//, '') })}
+									placeholder="plan"
+								/>
+							</label>
+							<label className="ref-settings-field ref-settings-field--compact">
+								<span>{t('agentSettings.cmdTemplate')}</span>
+								<textarea
+									rows={4}
+									value={c.body}
+									onChange={(e) => updateCmd(c.id, { body: e.target.value })}
+									placeholder={t('agentSettings.cmdTemplatePh')}
+								/>
+							</label>
+						</li>
+					))}
+				</ul>
+				{commands.length === 0 ? (
+					<div className="ref-settings-agent-empty-block">
+						<p>{t('agentSettings.cmdEmpty')}</p>
+						<button type="button" className="ref-settings-agent-empty-cta" onClick={addCmd}>
+							{t('agentSettings.newCmd')}
+						</button>
+					</div>
+				) : null}
+			</section>
+		</div>
+	);
+}
