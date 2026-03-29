@@ -19,6 +19,13 @@ export type UserModelEntry = {
 
 export type LLMProviderId = ModelRequestParadigm;
 
+/** 主界面左右侧栏宽度（桌面端持久化，避免 file:// localStorage 因路径变化丢失） */
+export type SidebarLayoutPx = { left: number; right: number };
+
+export type ShellUiSettings = {
+	sidebarLayout?: SidebarLayoutPx;
+};
+
 export type ShellSettings = {
 	/** 界面语言：zh-CN 简体中文（默认）、en 英文 */
 	language?: 'zh-CN' | 'en';
@@ -51,6 +58,8 @@ export type ShellSettings = {
 	lastOpenedWorkspace?: string | null;
 	/** Rules / Skills / Subagents / Commands（对话注入） */
 	agent?: AgentCustomization;
+	/** 窗口布局等纯界面状态 */
+	ui?: ShellUiSettings;
 };
 
 const defaultSettings: ShellSettings = {
@@ -87,6 +96,8 @@ export function getSettings(): ShellSettings {
 }
 
 export function patchSettings(partial: Partial<ShellSettings>): ShellSettings {
+	const { ui: partialUi, ...partialRest } = partial;
+
 	const nextModels =
 		partial.models !== undefined
 			? {
@@ -113,15 +124,19 @@ export function patchSettings(partial: Partial<ShellSettings>): ShellSettings {
 				}
 			: cached.agent;
 
+	const mergedUi =
+		partialUi !== undefined ? { ...(cached.ui ?? {}), ...partialUi } : cached.ui;
+
 	cached = {
 		...cached,
-		...partial,
+		...partialRest,
 		llm: partial.llm ? { ...(cached.llm ?? {}), ...partial.llm } : cached.llm,
 		openAI: partial.openAI ? { ...cached.openAI, ...partial.openAI } : cached.openAI,
 		anthropic: partial.anthropic ? { ...(cached.anthropic ?? {}), ...partial.anthropic } : cached.anthropic,
 		gemini: partial.gemini ? { ...(cached.gemini ?? {}), ...partial.gemini } : cached.gemini,
 		models: nextModels,
 		agent: nextAgent,
+		ui: mergedUi,
 	};
 	save();
 	return getSettings();

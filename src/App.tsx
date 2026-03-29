@@ -132,13 +132,30 @@ function defaultQuarterRailWidths(): { left: number; right: number } {
 	return clampSidebarLayout(quarter, quarter);
 }
 
+function syncDesktopSidebarLayout(
+	shell: NonNullable<Window['asyncShell']> | undefined,
+	c: { left: number; right: number }
+): void {
+	if (!shell) {
+		return;
+	}
+	void shell.invoke('settings:set', {
+		ui: { sidebarLayout: { left: c.left, right: c.right } },
+	});
+}
+
 function readSidebarLayout(): { left: number; right: number } {
 	try {
 		if (typeof window !== 'undefined') {
 			const raw = localStorage.getItem(SIDEBAR_LAYOUT_KEY);
 			if (raw) {
 				const j = JSON.parse(raw) as { left?: unknown; right?: unknown };
-				if (typeof j.left === 'number' && typeof j.right === 'number') {
+				if (
+					typeof j.left === 'number' &&
+					typeof j.right === 'number' &&
+					Number.isFinite(j.left) &&
+					Number.isFinite(j.right)
+				) {
 					return { left: j.left, right: j.right };
 				}
 			}
@@ -715,8 +732,29 @@ export default function App() {
 					defaultModel?: string;
 					models?: { entries?: UserModelEntry[]; enabledIds?: string[] };
 					agent?: AgentCustomization;
+					ui?: { sidebarLayout?: { left?: unknown; right?: unknown } };
 				};
 				setLocale(normalizeLocale(st.language));
+				const sl = st.ui?.sidebarLayout;
+				const hasDiskLayout =
+					sl &&
+					typeof sl.left === 'number' &&
+					typeof sl.right === 'number' &&
+					Number.isFinite(sl.left) &&
+					Number.isFinite(sl.right);
+				if (hasDiskLayout && sl) {
+					const rw = clampSidebarLayout(sl.left, sl.right);
+					setRailWidths(rw);
+					try {
+						localStorage.setItem(SIDEBAR_LAYOUT_KEY, JSON.stringify(rw));
+					} catch {
+						/* ignore */
+					}
+				} else {
+					/** 桌面端曾仅依赖 file:// localStorage，易丢；首次把当前布局写入 settings.json */
+					const s0 = readSidebarLayout();
+					syncDesktopSidebarLayout(shell, clampSidebarLayout(s0.left, s0.right));
+				}
 				setApiKey(st.openAI?.apiKey ?? '');
 				setBaseURL(st.openAI?.baseURL ?? '');
 				setProxyUrl(st.openAI?.proxyUrl ?? '');
@@ -1659,18 +1697,26 @@ export default function App() {
 			setRailWidths((prev) => clampSidebarLayout(prev.left, prev.right));
 		};
 		window.addEventListener('resize', onResize);
-		return () => window.removeEventListener('resize', onResize);
+		const unsubLayout = window.asyncShell?.subscribeLayout?.(onResize);
+		return () => {
+			window.removeEventListener('resize', onResize);
+			unsubLayout?.();
+		};
 	}, []);
 
-	const persistRailWidths = useCallback((next: { left: number; right: number }) => {
-		const c = clampSidebarLayout(next.left, next.right);
-		setRailWidths(c);
-		try {
-			localStorage.setItem(SIDEBAR_LAYOUT_KEY, JSON.stringify(c));
-		} catch {
-			/* ignore */
-		}
-	}, []);
+	const persistRailWidths = useCallback(
+		(next: { left: number; right: number }) => {
+			const c = clampSidebarLayout(next.left, next.right);
+			setRailWidths(c);
+			try {
+				localStorage.setItem(SIDEBAR_LAYOUT_KEY, JSON.stringify(c));
+			} catch {
+				/* ignore */
+			}
+			syncDesktopSidebarLayout(shell ?? undefined, c);
+		},
+		[shell]
+	);
 
 	const beginResizeLeft = useCallback(
 		(e: React.MouseEvent) => {
@@ -1693,6 +1739,7 @@ export default function App() {
 					} catch {
 						/* ignore */
 					}
+					syncDesktopSidebarLayout(shell ?? undefined, c);
 					return c;
 				});
 			};
@@ -1701,7 +1748,7 @@ export default function App() {
 			document.addEventListener('mousemove', onMove);
 			document.addEventListener('mouseup', onUp);
 		},
-		[railWidths.left, railWidths.right]
+		[railWidths.left, railWidths.right, shell]
 	);
 
 	const beginResizeRight = useCallback(
@@ -1725,6 +1772,7 @@ export default function App() {
 					} catch {
 						/* ignore */
 					}
+					syncDesktopSidebarLayout(shell ?? undefined, c);
 					return c;
 				});
 			};
@@ -1733,7 +1781,7 @@ export default function App() {
 			document.addEventListener('mousemove', onMove);
 			document.addEventListener('mouseup', onUp);
 		},
-		[railWidths.left, railWidths.right]
+		[railWidths.left, railWidths.right, shell]
 	);
 
 	const resetRailWidths = useCallback(() => {
