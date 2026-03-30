@@ -7420,9 +7420,10 @@ body {
 	display: flex;
 	flex-direction: column;
 	min-height: 100%;
-	border: 1px solid rgba(255, 255, 255, 0.05);
-	border-radius: 14px;
-	background: rgba(7, 9, 12, 0.28);
+	margin-bottom: 0;
+	border: none;
+	border-radius: 0;
+	background: transparent;
 	overflow: hidden;
 }
 
@@ -7508,8 +7509,34 @@ body {
 }
 
 .ref-left-footer--editor {
-	padding-top: 10px;
-	background: rgba(5, 7, 10, 0.55);
+	padding: 8px 10px 10px;
+	background: transparent;
+}
+
+.ref-left-footer--editor .ref-open-workspace {
+	margin-bottom: 8px;
+}
+
+/* Editor 左侧资源管理器：贴边、无内嵌卡片感（不影响 Agent 侧栏） */
+.ref-body--editor .ref-left-scroll {
+	padding: 0;
+}
+
+.ref-body--editor .ref-explorer-kicker {
+	padding: 8px 10px 0;
+}
+
+.ref-body--editor .ref-explorer-head--editor {
+	padding: 6px 10px 8px;
+	background: transparent;
+}
+
+.ref-body--editor .ref-explorer-body--workspace {
+	padding: 2px 0 8px;
+}
+
+.ref-body--editor .ref-explorer-placeholder {
+	margin: 10px 10px 12px;
 }
 
 .ref-body.ref-body--editor .ref-center.ref-center--editor-workspace {
@@ -7874,7 +7901,7 @@ body {
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
-	background: #181818;
+	background: #0e0e11;
 }
 
 .ref-editor-canvas .ref-editor-pane {
