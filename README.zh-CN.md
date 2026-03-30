@@ -38,7 +38,7 @@ Async Shell 是一款开源的 AI 原生桌面应用，作为你与 AI Agent 之
 ### 📸 界面预览
 
 <p align="center">
-  <img src="docs/assets/async-main-screenshot.png" width="920" alt="Async 主界面" />
+  <img src="docs/assets/async-main-screenshot.png" width="1024" alt="Async 主界面" />
 </p>
 
 ### 📋 Plan 模式
@@ -46,7 +46,7 @@ Async Shell 是一款开源的 AI 原生桌面应用，作为你与 AI Agent 之
 **Plan** 模式下，模型会输出结构化计划（标题、说明、任务勾选列表，以及可选的澄清问题）。你审阅草稿、勾选或理解任务后，点击 **「开始执行」** 再让 Agent 按计划在仓库里落地修改。草稿计划会保存到应用用户数据目录（例如 **`.async/plans/`**）下的 Markdown 文件。
 
 <p align="center">
-  <img src="docs/assets/async-plan-mode.png" width="920" alt="Async Plan 模式：草稿计划、任务列表与开始执行" />
+  <img src="docs/assets/async-plan-mode.png" width="1024" alt="Async Plan 模式：草稿计划、任务列表与开始执行" />
 </p>
 
 ## ✨ 核心特性

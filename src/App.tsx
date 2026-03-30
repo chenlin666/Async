@@ -507,7 +507,8 @@ export default function App() {
 	const [filePath, setFilePath] = useState('');
 	const [editorValue, setEditorValue] = useState('');
 	const monacoEditorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null);
-	const pendingEditorRevealLineRef = useRef<number | null>(null);
+	/** 打开文件后在 Monaco 中高亮的行范围（1-based，含 end） */
+	const pendingEditorHighlightRangeRef = useRef<{ start: number; end: number } | null>(null);
 	const [workspaceToolsOpen, setWorkspaceToolsOpen] = useState(false);
 	const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
 	const [homePath, setHomePath] = useState('');
@@ -1452,12 +1453,27 @@ export default function App() {
 		await refreshGit();
 	};
 
-	const onExplorerOpenFile = async (rel: string, revealLine?: number) => {
+	const onExplorerOpenFile = async (rel: string, revealLine?: number, revealEndLine?: number) => {
 		if (!shell) {
 			return;
 		}
-		pendingEditorRevealLineRef.current =
-			typeof revealLine === 'number' && Number.isFinite(revealLine) && revealLine > 0 ? Math.floor(revealLine) : null;
+		const s =
+			typeof revealLine === 'number' && Number.isFinite(revealLine) && revealLine > 0
+				? Math.floor(revealLine)
+				: null;
+		const e =
+			typeof revealEndLine === 'number' && Number.isFinite(revealEndLine) && revealEndLine > 0
+				? Math.floor(revealEndLine)
+				: null;
+		if (s != null) {
+			const hi = e != null && e > 0 ? e : s;
+			pendingEditorHighlightRangeRef.current = {
+				start: Math.min(s, hi),
+				end: Math.max(s, hi),
+			};
+		} else {
+			pendingEditorHighlightRangeRef.current = null;
+		}
 		setFilePath(rel);
 		setRightPanelTab('explorer');
 		try {
@@ -1472,34 +1488,51 @@ export default function App() {
 
 	useEffect(() => {
 		const ed = monacoEditorRef.current;
-		const ln = pendingEditorRevealLineRef.current;
-		if (!ed || !filePath.trim() || ln == null || ln < 1) {
+		const range = pendingEditorHighlightRangeRef.current;
+		if (!ed || !filePath.trim() || !range) {
 			return;
 		}
 		const id = requestAnimationFrame(() => {
-			try {
-				ed.revealLineInCenter(ln);
-				ed.setPosition({ lineNumber: ln, column: 1 });
-
-				const endLn = Math.min(ln + 8, ed.getModel()?.getLineCount() ?? ln);
-				const decorations = ed.deltaDecorations([], [
-					{
-						range: { startLineNumber: ln, startColumn: 1, endLineNumber: endLn, endColumn: 1 },
-						options: {
-							isWholeLine: true,
-							className: 'ref-editor-highlight-line',
-							overviewRuler: { color: 'rgba(212,175,55,0.6)', position: 1 },
+			requestAnimationFrame(() => {
+				try {
+					const model = ed.getModel();
+					if (!model) {
+						return;
+					}
+					const lc = model.getLineCount();
+					const start = Math.max(1, Math.min(range.start, lc));
+					const end = Math.max(start, Math.min(range.end, lc));
+					/* 以读取区间的第一行为锚点（勿用区间中点），避免看起来像跳到末行 */
+					ed.setPosition({ lineNumber: start, column: 1 });
+					ed.revealLineInCenter(start);
+					const endCol = model.getLineMaxColumn(end);
+					const decorations = ed.deltaDecorations([], [
+						{
+							range: {
+								startLineNumber: start,
+								startColumn: 1,
+								endLineNumber: end,
+								endColumn: endCol,
+							},
+							options: {
+								isWholeLine: true,
+								className: 'ref-editor-highlight-line',
+								overviewRuler: { color: 'rgba(212,175,55,0.6)', position: 1 },
+							},
 						},
-					},
-				]);
-				setTimeout(() => {
-					try { ed.deltaDecorations(decorations, []); } catch { /* ignore */ }
-				}, 3000);
-
-				pendingEditorRevealLineRef.current = null;
-			} catch {
-				/* 模型尚未就绪时忽略 */
-			}
+					]);
+					window.setTimeout(() => {
+						try {
+							ed.deltaDecorations(decorations, []);
+						} catch {
+							/* ignore */
+						}
+					}, 6500);
+					pendingEditorHighlightRangeRef.current = null;
+				} catch {
+					/* 模型尚未就绪时忽略 */
+				}
+			});
 		});
 		return () => cancelAnimationFrame(id);
 	}, [editorValue, filePath]);
@@ -2494,7 +2527,7 @@ export default function App() {
 														assistantMessageUsesAgentToolProtocol(m.content)
 													}
 													workspaceRoot={workspace}
-													onOpenAgentFile={(rel, line) => void onExplorerOpenFile(rel, line)}
+													onOpenAgentFile={(rel, line, end) => void onExplorerOpenFile(rel, line, end)}
 													onRunCommand={(cmd) => {
 														shell?.invoke('terminal:execLine', cmd).catch(console.error);
 													}}

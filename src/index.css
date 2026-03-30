@@ -1786,6 +1786,34 @@ body {
 	white-space: pre-line;
 }
 
+/* read_file 活动：点击打开右侧编辑器并高亮读取区间（对齐 Cursor Agent） */
+.ref-agent-activity-ref-link {
+	display: inline;
+	max-width: 100%;
+	margin: 0;
+	padding: 0;
+	border: none;
+	background: none;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+	white-space: pre-line;
+	text-decoration: none;
+	border-radius: 4px;
+}
+
+.ref-agent-activity-ref-link:hover {
+	text-decoration: underline;
+	text-underline-offset: 3px;
+	color: var(--void-fg-0, #eee);
+}
+
+.ref-agent-activity-ref-link:focus-visible {
+	outline: 2px solid var(--void-ring, #818cf8);
+	outline-offset: 2px;
+}
+
 .ref-agent-activity-summary {
 	flex-shrink: 0;
 	margin-left: 8px;

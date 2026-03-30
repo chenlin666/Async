@@ -68,6 +68,31 @@ function toolResultMarker(name: string, result: string, success: boolean): strin
 	return `<tool_result tool="${name}" success="${success}">${safe}</tool_result>\n`;
 }
 
+/**
+ * Some OpenAI-compatible gateways wrap the final assistant text as:
+ * `{ "content": "...", "input_tokens": 123, "output_tokens": 456 }`
+ * In Agent mode we want the actual assistant markdown, not the transport envelope.
+ */
+function unwrapAssistantContentEnvelope(text: string): string {
+	const trimmed = text.trim();
+	if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+		return text;
+	}
+	try {
+		const parsed: unknown = JSON.parse(trimmed);
+		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+			return text;
+		}
+		const content = (parsed as { content?: unknown }).content;
+		if (typeof content !== 'string' || !content.trim()) {
+			return text;
+		}
+		return content;
+	} catch {
+		return text;
+	}
+}
+
 export async function runAgentLoop(
 	settings: ShellSettings,
 	threadMessages: ChatMessage[],
@@ -185,6 +210,7 @@ async function runOpenAILoop(
 			return;
 		}
 
+		turnText = unwrapAssistantContentEnvelope(turnText);
 		fullContent += turnText;
 
 		if (turnToolCalls.length === 0 || turnToolCalls.every((tc) => !tc.name)) {
@@ -360,6 +386,7 @@ async function runAnthropicLoop(
 			return;
 		}
 
+		turnText = unwrapAssistantContentEnvelope(turnText);
 		fullContent += turnText;
 
 		if (turnToolUses.length === 0) {

@@ -28,12 +28,21 @@ export type FileEditSegment = {
 
 export type ActivityStatus = 'info' | 'pending' | 'success' | 'error';
 
+/** read_file 活动行：点击后在编辑器中打开并高亮行范围 */
+export type AgentReadFileLink = {
+	path: string;
+	startLine: number;
+	endLine: number;
+};
+
 export type ActivitySegment = {
 	type: 'activity';
 	text: string;
 	status: ActivityStatus;
 	detail?: string;
 	summary?: string;
+	/** 仅 read_file：可点击跳转 Monaco 并高亮 */
+	agentReadLink?: AgentReadFileLink;
 };
 
 export type ToolCallSegment = {
@@ -342,6 +351,91 @@ function tryParseToolArgs(rawJson: string): Record<string, unknown> {
 	return {};
 }
 
+/** 从 read_file 返回的正文（6 位行号|内容）解析实际读取区间 */
+function parseNumberedResultLineRange(result: string): { start: number; end: number } | null {
+	const re = /^\s*(\d+)\|/gm;
+	let m: RegExpExecArray | null;
+	let min = Infinity;
+	let max = 0;
+	while ((m = re.exec(result)) !== null) {
+		const n = parseInt(m[1]!, 10);
+		if (Number.isFinite(n)) {
+			min = Math.min(min, n);
+			max = Math.max(max, n);
+		}
+	}
+	if (!Number.isFinite(min) || min === Infinity) {
+		return null;
+	}
+	return { start: min, end: Math.max(max, min) };
+}
+
+function computeReadFileAgentLink(mk: ParsedMarker, path: string, inProgress: boolean): AgentReadFileLink | undefined {
+	if (!path.trim() || mk.success === false) {
+		return undefined;
+	}
+	const p = path.trim();
+
+	if (mk.result !== undefined && mk.result.trim()) {
+		const head = mk.result.slice(0, 160);
+		if (/^(File not found|Error:|Skipped binary)/i.test(head)) {
+			return undefined;
+		}
+		const parsed = parseNumberedResultLineRange(mk.result);
+		if (parsed) {
+			return { path: p, startLine: parsed.start, endLine: parsed.end };
+		}
+	}
+
+	const sl = Number(mk.args.start_line);
+	const el = Number(mk.args.end_line);
+	const hasS = Number.isFinite(sl) && sl > 0;
+	const hasE = Number.isFinite(el) && el > 0;
+	if (hasS && hasE) {
+		const a = Math.floor(sl);
+		const b = Math.floor(el);
+		return { path: p, startLine: Math.min(a, b), endLine: Math.max(a, b) };
+	}
+	if (hasS) {
+		const a = Math.floor(sl);
+		return { path: p, startLine: a, endLine: a };
+	}
+
+	if (inProgress) {
+		return { path: p, startLine: 1, endLine: 1 };
+	}
+	return undefined;
+}
+
+function readFileActivityLabel(
+	t: TFunction,
+	path: string,
+	link: AgentReadFileLink | undefined,
+	inProgress: boolean,
+	failed: boolean
+): string {
+	if (failed) {
+		return t('agent.activity.read', { path });
+	}
+	if (!link) {
+		return inProgress ? t('agent.activity.reading', { path }) : t('agent.activity.read', { path });
+	}
+	const { startLine: s, endLine: e } = link;
+	if (inProgress) {
+		if (s === 1 && e === 1) {
+			return t('agent.activity.reading', { path });
+		}
+		if (s === e) {
+			return t('agent.activity.readingAtLine', { path, line: s });
+		}
+		return t('agent.activity.readingWithRange', { path, start: s, end: e });
+	}
+	if (s === e) {
+		return t('agent.activity.readAtLine', { path, line: s });
+	}
+	return t('agent.activity.readWithRange', { path, start: s, end: e });
+}
+
 function extractResultSummary(name: string, result: string | undefined, t: TFunction): string | undefined {
 	if (!result) return undefined;
 	switch (name) {
@@ -385,12 +479,14 @@ function summarizeToolActivity(mk: ParsedMarker, t: TFunction): ActivitySegment 
 	switch (mk.name) {
 		case 'read_file': {
 			const p = getPath();
+			const agentReadLink = computeReadFileAgentLink(mk, p, inProgress);
 			return {
 				type: 'activity',
-				text: inProgress ? t('agent.activity.reading', { path: p }) : t('agent.activity.read', { path: p }),
-				status: inProgress ? 'pending' : 'success',
+				text: readFileActivityLabel(t, p, agentReadLink, inProgress, failed),
+				status: inProgress ? 'pending' : failed ? 'error' : 'success',
 				detail,
 				summary,
+				agentReadLink,
 			};
 		}
 		case 'write_to_file': {
@@ -544,6 +640,13 @@ export function buildStreamingToolSegments(
 	return edit ? [activity, edit] : [activity];
 }
 
+function markerHasSubstantiveTail(content: string, mk: ParsedMarker): boolean {
+	if (mk.isStreaming || mk.result !== undefined) {
+		return false;
+	}
+	return content.slice(mk.end).trim().length > 0;
+}
+
 function extractToolSegments(content: string, t: TFunction): { segments: AssistantSegment[]; hasTools: boolean } {
 	const markers = findAllToolCallMarkers(content);
 	if (markers.length === 0) {
@@ -595,10 +698,14 @@ function extractToolSegments(content: string, t: TFunction): { segments: Assista
 			continue;
 		}
 
-		const activity = summarizeToolActivity(mk, t);
+		const normalizedMk =
+			markerHasSubstantiveTail(content, mk)
+				? { ...mk, result: '', success: true as const }
+				: mk;
+		const activity = summarizeToolActivity(normalizedMk, t);
 
 		if (WRITE_TOOLS.has(mk.name)) {
-			if (mk.success) {
+			if (normalizedMk.success) {
 				segments.push(activity);
 				const filePath = String(mk.args.path ?? '');
 				if (mk.name === 'str_replace') {
@@ -631,7 +738,7 @@ function extractToolSegments(content: string, t: TFunction): { segments: Assista
 			if (streamingEdit) {
 				segments.push(streamingEdit);
 			}
-		} else if (mk.result === undefined && mk.rawJson) {
+		} else if (mk.result === undefined && mk.rawJson && !markerHasSubstantiveTail(content, mk)) {
 			segments.push(activity);
 			const pendingEdit = buildStreamingFileEditSegment(mk);
 			if (pendingEdit) {

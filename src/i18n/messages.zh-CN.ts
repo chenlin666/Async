@@ -247,6 +247,11 @@ export const messagesZhCN: Record<string, string> = {
 	// agent activity (tool markers)
 	'agent.activity.reading': '正在读取 {{path}}',
 	'agent.activity.read': '已读取 {{path}}',
+	'agent.activity.readingWithRange': '正在读取 {{path}} L{{start}}–{{end}}',
+	'agent.activity.readWithRange': '已读取 {{path}} L{{start}}–{{end}}',
+	'agent.activity.readingAtLine': '正在读取 {{path}} L{{line}}',
+	'agent.activity.readAtLine': '已读取 {{path}} L{{line}}',
+	'agent.activity.readOpenEditor': '在编辑器中打开并高亮上述行',
 	'agent.activity.writing': '正在写入 {{path}}…',
 	'agent.activity.wrote': '已写入 {{path}}',
 	'agent.activity.created': '已创建 {{path}}',

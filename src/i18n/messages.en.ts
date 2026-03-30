@@ -237,6 +237,11 @@ export const messagesEn: Record<string, string> = {
 
 	'agent.activity.reading': 'Reading {{path}}',
 	'agent.activity.read': 'Read {{path}}',
+	'agent.activity.readingWithRange': 'Reading {{path}} L{{start}}–{{end}}',
+	'agent.activity.readWithRange': 'Read {{path}} L{{start}}–{{end}}',
+	'agent.activity.readingAtLine': 'Reading {{path}} L{{line}}',
+	'agent.activity.readAtLine': 'Read {{path}} L{{line}}',
+	'agent.activity.readOpenEditor': 'Open in editor and highlight this range',
 	'agent.activity.writing': 'Writing {{path}}…',
 	'agent.activity.wrote': 'Wrote {{path}}',
 	'agent.activity.created': 'Created {{path}}',

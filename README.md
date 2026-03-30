@@ -38,7 +38,7 @@ Async Shell is an open-source, AI-native desktop application designed to be the 
 ### 📸 Preview
 
 <p align="center">
-  <img src="docs/assets/async-main-screenshot.png" width="920" alt="Async Main Interface" />
+  <img src="docs/assets/async-main-screenshot.png" width="1024" alt="Async Main Interface" />
 </p>
 
 ### 📋 Plan mode
@@ -46,7 +46,7 @@ Async Shell is an open-source, AI-native desktop application designed to be the 
 In **Plan** mode, the model produces a structured plan (title, description, checklist, optional clarifying questions). You review the draft, adjust todos, then use **Start execution** (开始执行) to let the agent carry out the plan. Draft plans are saved under the app user-data directory (e.g. `.async/plans/`).
 
 <p align="center">
-  <img src="docs/assets/async-plan-mode.png" width="920" alt="Async Plan mode — draft plan, task checklist, and Start execution" />
+  <img src="docs/assets/async-plan-mode.png" width="1024" alt="Async Plan mode — draft plan, task checklist, and Start execution" />
 </p>
 
 ## ✨ Core Features

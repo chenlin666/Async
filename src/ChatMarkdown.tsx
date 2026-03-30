@@ -15,7 +15,7 @@ type Props = {
 	content: string;
 	agentUi?: boolean;
 	workspaceRoot?: string | null;
-	onOpenAgentFile?: (relPath: string, revealLine?: number) => void;
+	onOpenAgentFile?: (relPath: string, revealLine?: number, revealEndLine?: number) => void;
 	onRunCommand?: (cmd: string) => void;
 	streamingToolPreview?: StreamingToolPreview | null;
 	showAgentWorking?: boolean;
@@ -91,12 +91,35 @@ export function ChatMarkdown({
 						);
 					case 'file_changes':
 						return null;
-					case 'activity':
+					case 'activity': {
+						const readLink = seg.agentReadLink;
+						const openHintRaw = t('agent.activity.readOpenEditor');
+						const openHint =
+							openHintRaw === 'agent.activity.readOpenEditor'
+								? 'Open in editor and highlight this range'
+								: openHintRaw;
 						return (
 							<div key={i} className={`ref-agent-activity ref-agent-activity--${seg.status}`}>
 								<div className="ref-agent-activity-main">
 									<span className="ref-agent-activity-dot" aria-hidden />
-									<span className="ref-agent-activity-text">{seg.text}</span>
+									{readLink && onOpenAgentFile ? (
+										<button
+											type="button"
+											className="ref-agent-activity-ref-link"
+											title={openHint}
+											onClick={() =>
+												onOpenAgentFile(
+													readLink.path,
+													readLink.startLine,
+													readLink.endLine
+												)
+											}
+										>
+											{seg.text}
+										</button>
+									) : (
+										<span className="ref-agent-activity-text">{seg.text}</span>
+									)}
 									{seg.summary ? (
 										<span className="ref-agent-activity-summary">{seg.summary}</span>
 									) : null}
@@ -106,6 +129,7 @@ export function ChatMarkdown({
 								) : null}
 							</div>
 						);
+					}
 					case 'tool_call':
 						return (
 							<p key={i} className="ref-agent-activity">
