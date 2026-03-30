@@ -29,11 +29,11 @@ Async Shell is an open-source, AI-native desktop application designed to be the 
 
 ### Why use Async?
 
-- **Agent-First Workflow**: Not just a side-chat. The agent has first-class access to your workspace, tools, and terminal.
-- **Complete Control**: Self-hosted and fully customizable. Use your own API keys with OpenAI, Anthropic, or Gemini.
-- **Lightweight & Fast**: Built with Electron and React, focusing on a clean three-pane layout for maximum productivity.
-- **Transparent Execution**: See exactly what the agent is doing with tool trajectory visualization, streaming tool input, and **Plan / Agent** workflows.
-- **Git-Aware UI**: Where Git is available, the agent file-change strip uses real `git status` / `git diff` stats; it falls back to chat-parsed counts in non-repo or no-Git environments.
+- **Agent-First Workflow**: Not just a side-chat. The agent has first-class access to your workspace, tools, and terminal. It follows a robust **Autonomous Loop** (Think -> Plan -> Execute -> Observe).
+- **Extreme Transparency**: See the "brain" at work. Watch real-time **Streaming Tool Inputs** as the model generates JSON parameters, and review the **Tool Trajectory** with clear visual cards.
+- **Complete Control**: Self-hosted and privacy-conscious. Use your own API keys with OpenAI, Anthropic, or Gemini. Your code and conversations stay on your machine.
+- **Git-Native Experience**: Built-in Git service for status tracking, diff previews, and seamless integration between Agent changes and your repository state.
+- **Lightweight & Fast**: A high-performance desktop shell built with Electron and React, featuring a clean three-pane layout for maximum productivity.
 
 ### 📸 Preview
 
@@ -51,23 +51,33 @@ In **Plan** mode, the model produces a structured plan (title, description, chec
 
 ## ✨ Core Features
 
-### 🤖 Autonomous Agent
-- **Tool trajectory**: Live cards for reads, writes, search, shell commands, and streaming file-edit previews when the model streams tool JSON.
-- **Agent vs Plan**: **Agent** runs the native tool loop (`read_file`, `write_to_file`, `str_replace`, etc.). **Plan** focuses on structured planning and gated execution after you confirm.
-- **Multi-thread sessions**: Separate, persistent threads stored on disk (see **Persistence** below).
-- **Streaming**: Token streaming, optional thinking blocks, and tool-input deltas for a Cursor-like sense of progress.
+### 🤖 Autonomous Agent Loop
+- **Streaming Tool Input**: Watch the model "type" its tool parameters (JSON) in real-time. This provides immediate feedback on what the agent is planning to do.
+- **Tool Trajectory Visualization**: Live cards for `read_file`, `write_to_file`, `str_replace`, `search_files`, and shell commands.
+- **Plan vs. Agent Mode**: 
+  - **Plan Mode**: Model generates a structured Markdown plan with checklists and clarifying questions. You review and approve before execution.
+  - **Agent Mode**: Direct tool-execution loop for rapid iteration and autonomous task completion.
+- **Smart Context**: Automatic file-line positioning and highlighted ranges when the agent modifies code.
 
 ### 🧠 Multi-Model Intelligence
-- **Anthropic**, **OpenAI-compatible**, and **Gemini** request paths in the main-process LLM layer.
-- Any OpenAI-compatible base URL (local LLMs, aggregators) works with the compatible adapter.
-- Switch models from the composer without losing thread context.
+- **Native Adapters**: Optimized request paths for **Anthropic** (with Extended Thinking support), **OpenAI**, and **Gemini**.
+- **Model Agnostic**: Any OpenAI-compatible API (Local LLMs via Ollama/vLLM, or aggregators) works out-of-the-box.
+- **Thinking Support**: Built-in support for reasoning models (Claude 3.7 Thinking, o1-series) with dedicated streaming thinking blocks.
 
-### 🛠️ Developer Experience
-- **Monaco Editor** for in-app editing and diffs.
-- **Git**: Status, diff previews, stage, commit, push (when `git` is installed and the workspace is a repository).
-- **Integrated terminal** via xterm.js.
-- **@-mentions** to reference workspace files in the composer.
-- **i18n**: English and Simplified Chinese UI strings.
+### 🛠️ Professional Developer Experience
+- **Monaco Editor Integration**: Full-featured code editor with syntax highlighting, diff views, and multi-file management.
+- **Git-Aware Workflow**: Integrated Git service handles status, diffs, staging, commits, and pushes directly from the UI.
+- **Integrated xterm.js Terminal**: A dedicated terminal pane for running commands and observing agent-driven shell actions.
+- **Rich Composer**: Support for **@-mentions** to reference files, multi-segment user messages, and persistent thread management.
+
+## 🏗️ Technical Architecture
+
+Async Shell is engineered for stability, security, and performance:
+
+- **Main/Renderer Separation**: Clean IPC (Inter-Process Communication) architecture using Electron's `contextBridge` and `ipcMain`.
+- **Stream-Centric Engine**: A custom `agentLoop.ts` handles the multi-round tool calling logic, supporting partial JSON parsing for real-time streaming.
+- **Local-First Persistence**: Thread history, settings, and plans are stored locally as JSON/Markdown files in the user's data directory. No cloud sync required.
+- **Git Service Layer**: A dedicated Node.js service for porcelain Git operations, ensuring the UI stays in sync with your local repository state.
 
 ## 🏗️ Project Structure
 

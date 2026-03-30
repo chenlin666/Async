@@ -25,15 +25,15 @@
 
 ## 🌟 什么是 Async Shell？
 
-Async Shell 是一款开源的 AI 原生桌面应用，作为你与 AI Agent 之间的主界面。与「在现有 IDE 里挂一个聊天窗」不同，Async 从底层围绕 **Agent 循环** 设计，把多模型对话、自主工具执行与代码审阅放在同一套工作区里。
+Async Shell 是一款开源的 AI 原生桌面应用，旨在作为你与 AI Agent 交互的核心界面。与传统的 IDE 插件不同，Async 从底层围绕 **Agent 循环 (Agent Loop)** 构建，提供了一个集多模型对话、自主工具执行、代码审阅于一体的统一环境。
 
 ### 为什么选择 Async？
 
-- **Agent 优先**：不仅是侧边对话；Agent 对工作区、工具和终端有一致的访问能力。
-- **自主可控**：自托管、可配置；使用你自己的 OpenAI / Anthropic / Gemini 等密钥。
-- **轻量三栏布局**：Electron + React，左侧会话、中间对话与 Plan/Agent、右侧资源管理器 / Git / 编辑器。
-- **过程可见**：工具调用轨迹、流式工具参数、思考块等，接近主流 AI IDE 的反馈体验。
-- **Git 感知**：在可用 Git 且为仓库时，底部「改动文件」条以 **`git status` / `git diff`** 为准判断是否真的改动及行数；无 Git 或非仓库时回退为从对话解析的统计。
+- **Agent 优先的工作流**：Agent 不仅仅是一个侧边聊天框，它拥有一等公民权限，可以访问你的工作区、工具和终端。遵循完备的 **自主循环** (思考 -> 规划 -> 执行 -> 观察)。
+- **极致的透明度**：实时观察 Agent 的“大脑”运作。支持 **流式工具输入**，在模型生成 JSON 参数时即可同步预览；通过清晰的 **工具执行轨迹** 卡片掌控每一步操作。
+- **完全自主可控**：自托管且注重隐私。使用你自己的 OpenAI、Anthropic 或 Gemini API 密钥，代码和对话数据均保留在本地。
+- **原生 Git 体验**：内置 Git 服务，支持状态追踪、Diff 预览，并将 Agent 的文件修改与你的仓库状态无缝集成。
+- **轻量且高效**：基于 Electron 和 React 构建的高性能桌面外壳，采用简洁的三栏布局，最大化开发效率。
 
 ### 📸 界面预览
 
@@ -43,7 +43,7 @@ Async Shell 是一款开源的 AI 原生桌面应用，作为你与 AI Agent 之
 
 ### 📋 Plan 模式
 
-**Plan** 模式下，模型会输出结构化计划（标题、说明、任务勾选列表，以及可选的澄清问题）。你审阅草稿、勾选或理解任务后，点击 **「开始执行」** 再让 Agent 按计划在仓库里落地修改。草稿计划会保存到应用用户数据目录（例如 **`.async/plans/`**）下的 Markdown 文件。
+在 **Plan** 模式下，模型会生成结构化计划（标题、任务列表、澄清问题）。你可以在执行前审阅草稿、调整任务。点击 **「开始执行」** 后，Agent 将按照确定的计划自动完成任务。
 
 <p align="center">
   <img src="docs/assets/async-plan-mode.png" width="1024" alt="Async Plan 模式：草稿计划、任务列表与开始执行" />
@@ -51,65 +51,73 @@ Async Shell 是一款开源的 AI 原生桌面应用，作为你与 AI Agent 之
 
 ## ✨ 核心特性
 
-### 🤖 自主 Agent
-- **工具轨迹**：读文件、写文件、搜索、终端命令等以卡片形式展示；模型流式输出工具参数时支持实时预览。
-- **Agent / Plan 分流**：**Agent** 走原生工具循环（`read_file`、`write_to_file`、`str_replace` 等）；**Plan** 侧重结构化规划与确认后再执行。
-- **多线程会话**：多条会话并行，状态持久化到磁盘（见下文 **持久化**）。
-- **流式输出**：正文流式、可选思考内容、工具入参增量，减少「一次性蹦出结果」的突兀感。
+### 🤖 自主 Agent 循环
+- **流式工具输入**：实时观察模型“输入”工具参数的过程，对 Agent 即将执行的操作获得即时反馈。
+- **可视化轨迹**：为 `read_file`, `write_to_file`, `str_replace`, `search_files` 和终端命令提供动态卡片展示。
+- **Plan 与 Agent 双模式**：
+  - **Plan 模式**：模型生成 Markdown 计划，支持任务勾选与人工确认。
+  - **Agent 模式**：直接的工具执行循环，适用于快速迭代和自主任务完成。
+- **智能上下文**：Agent 修改代码时，编辑器自动定位行号并高亮显示改动范围。
 
-### 🧠 多模型
-- 主进程 LLM 层支持 **Anthropic**、**OpenAI 兼容**、**Gemini** 等请求路径。
-- 任意 OpenAI 兼容 Base URL（本地模型、中转服务）可走兼容适配器。
-- 在输入区切换模型，线程上下文仍保留。
+### 🧠 多模型智能
+- **原生适配器**：针对 **Anthropic** (支持 Extended Thinking)、**OpenAI** 和 **Gemini** 优化请求路径。
+- **模型无关性**：支持任何兼容 OpenAI 接口的 API（如通过 Ollama/vLLM 运行的本地模型）。
+- **深度推理支持**：内置对推理模型（Claude 3.7 Thinking, o1 系列）的支持，配备专用的流式思考块展示。
 
-### 🛠️ 开发体验
-- **Monaco 编辑器**：应用内编辑与 Diff。
-- **Git**：状态、Diff 预览、暂存、提交、推送（需本机安装 `git` 且工作区为 Git 仓库）。
-- **集成终端**：基于 xterm.js。
-- **@ 提及**：在输入区引用工作区文件。
-- **国际化**：界面支持英文与简体中文。
+### 🛠️ 专业级开发体验
+- **Monaco 编辑器集成**：全功能代码编辑器，支持语法高亮、Diff 视图和多文件管理。
+- **Git 感知流**：直接在 UI 中处理 Git 状态、暂存、提交和推送。
+- **集成 xterm.js 终端**：专用终端面板，用于运行命令和观察 Agent 驱动的 Shell 行为。
+- **增强型输入框 (Composer)**：支持 **@ 提及** 引用文件、多段消息输入及持久化线程管理。
+
+## 🏗️ 技术架构
+
+Async Shell 为稳定性、安全性和性能而设计：
+
+- **主/渲染进程分离**：清晰的 IPC 架构，利用 Electron 的 `contextBridge` 确保安全。
+- **流式驱动引擎**：自定义 `agentLoop.ts` 处理多轮工具调用逻辑，支持部分 JSON 解析以实现实时流式反馈。
+- **本地优先持久化**：线程历史、配置和计划均以 JSON/Markdown 格式存储在本地用户目录，无需云端同步。
+- **Git 服务层**：专用的 Node.js 服务处理底层 Git 操作，确保 UI 与本地仓库状态实时同步。
 
 ## 🏗️ 项目结构
 
 ```text
 async-shell/
-├── main-src/                 # 经 esbuild 打包为 electron/main.bundle.cjs
-│   ├── index.ts              # 入口：窗口、userData、注册 IPC
-│   ├── agent/                # agentLoop、工具执行、工具定义
-│   ├── llm/                  # 各厂商适配与流式解析
-│   ├── ipc/register.ts       # ipcMain：聊天、线程、git、fs、agent 等
-│   ├── threadStore.ts        # 线程与消息持久化（JSON）
-│   ├── settingsStore.ts      # settings.json
-│   ├── gitService.ts         # porcelain 状态、diff 预览、提交推送
-│   └── workspace.ts          # 工作区根路径与安全路径解析
+├── main-src/                 # 源码 -> 打包至 electron/main.bundle.cjs
+│   ├── index.ts              # 应用入口：窗口管理、IPC 注册
+│   ├── agent/                # Agent 引擎、工具执行器、工具定义
+│   ├── llm/                  # 各厂商适配器与流式处理
+│   ├── ipc/register.ts       # IPC 处理函数 (聊天, 线程, Git, 文件系统等)
+│   ├── threadStore.ts        # 线程与消息持久化
+│   ├── settingsStore.ts      # 设置持久化
+│   ├── gitService.ts         # Git 状态与操作服务
+│   └── workspace.ts          # 工作区管理与安全路径解析
 ├── src/                      # Vite + React 渲染进程
-│   ├── App.tsx               # 壳布局、聊天、Composer 模式、Git/资源管理器
-│   ├── i18n/                 # 文案
-│   └── …                     # Agent UI、Plan 审阅、Monaco、终端等
+│   ├── App.tsx               # 核心布局与状态管理
+│   ├── i18n/                 # 国际化文案
+│   └── …                     # Agent UI, Monaco, 终端等组件
 ├── electron/
-│   ├── main.bundle.cjs       # esbuild 产物（勿手改）
-│   └── preload.cjs           # contextBridge → window.asyncShell
-├── esbuild.main.mjs          # 主进程构建
-├── vite.config.ts            # 渲染进程构建
+│   ├── main.bundle.cjs       # 自动生成的主进程产物
+│   └── preload.cjs           # 预加载脚本
+├── esbuild.main.mjs          # 主进程构建配置
+├── vite.config.ts            # 渲染进程构建配置
 └── package.json
 ```
 
-## 💾 持久化（本地）
+## 💾 数据存储
 
-默认情况下，数据位于 Electron **`userData`** 下：
+数据默认存储在 Electron 的 **`userData`** 目录下：
 
-- **`userData/async/threads.json`** — 线程列表与聊天记录。
-- **`userData/async/settings.json`** — 模型、密钥（仅存本机）、布局、Agent 相关选项等。
-- **`userData/.async/plans/`** — Plan 模式落盘的计划 Markdown。
-
-渲染进程可能使用 **localStorage** 保存少量 UI 状态（例如 Agent 底部改动条的收起状态）；**对话正文以 `threads.json` 为准**。
+- **`async/threads.json`** — 聊天记录与线程列表。
+- **`async/settings.json`** — 模型配置、密钥及应用设置。
+- **`.async/plans/`** — 存储 Plan 模式生成的 Markdown 计划文件。
 
 ## 🚀 快速开始
 
-### 环境要求
+### 前置要求
 - **Node.js** ≥ 18  
 - **npm** ≥ 9  
-- **Git**（可选；不装则内置 Git 能力不可用或降级）
+- **Git** (推荐)
 
 ### 安装与运行
 
@@ -128,27 +136,18 @@ async-shell/
    ```bash
    npm run desktop
    ```
-   会构建主进程与渲染产物到 `dist/`，再以 Electron 加载 `dist/index.html`。
 
 ### 开发模式
-
-渲染进程热更新 + 主进程 watch 构建：
 
 ```bash
 npm run dev
 ```
 
-可选打开开发者工具：
-
-```bash
-npm run dev:debug
-```
-
 ## 🗺️ 路线图
-- [ ] **完整 PTY 终端**（如 `node-pty`）。
-- [ ] **LSP 集成**，在编辑器内跳转、诊断等。
-- [ ] **插件系统**，扩展工具与 Agent 行为。
-- [ ] **更强上下文**（RAG / 索引）以支撑超大仓库。
+- [ ] **完整 PTY 终端** 支持更丰富的 Shell 交互。
+- [ ] **LSP 集成** 提供更强的代码跳转和诊断功能。
+- [ ] **插件系统** 允许自定义工具和 Agent 扩展。
+- [ ] **增强型上下文** 引入 RAG 或索引技术支持超大规模项目。
 
 ## 📜 许可证
-本项目采用 [Apache License 2.0](./LICENSE) 开源协议。
+本项目基于 [Apache License 2.0](./LICENSE) 协议开源。
