@@ -1175,6 +1175,45 @@ body {
 	flex: 1 1 auto;
 	min-height: 0;
 	max-height: none;
+	/* 长对话滚到底时与底部输入区拉开距离（在原有 16px 基础上再加 300px） */
+	padding-bottom: calc(16px + 300px);
+	/* Firefox：仅悬停对话区时显示滑块；移到输入区等区域时淡出 */
+	scrollbar-color: rgba(58, 58, 66, 0) transparent;
+	transition: scrollbar-color 0.35s var(--void-ease-out-expo);
+}
+
+.ref-center--chat .ref-messages:hover {
+	scrollbar-color: var(--void-scrollbar-thumb) transparent;
+}
+
+/* Chromium / Electron：对话区滚动条悬停渐入，离开（含移到下方输入区）渐隐 */
+.ref-center--chat .ref-messages::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.ref-center--chat .ref-messages::-webkit-scrollbar-thumb {
+	background: transparent;
+	border: 2px solid transparent;
+	background-clip: padding-box;
+	transition:
+		background 0.35s var(--void-ease-out-expo),
+		border-color 0.35s var(--void-ease-out-expo);
+}
+
+.ref-center--chat .ref-messages:hover::-webkit-scrollbar-thumb {
+	background: var(--void-scrollbar-thumb);
+	border: 2px solid transparent;
+	background-clip: padding-box;
+}
+
+.ref-center--chat .ref-messages:hover::-webkit-scrollbar-thumb:hover {
+	background: var(--void-scrollbar-thumb-hover);
+	border: 2px solid transparent;
+	background-clip: padding-box;
+}
+
+.ref-center--chat .ref-messages:hover::-webkit-scrollbar-thumb:active {
+	background: var(--void-scrollbar-thumb-active);
 }
 
 .ref-center--chat .ref-command-stack {
