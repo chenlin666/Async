@@ -40,8 +40,10 @@ function createWindow(): void {
 	const preloadPath = path.join(__dirname, 'preload.cjs');
 	const primary = screen.getPrimaryDisplay();
 	const wa = primary.workArea;
-	const w = Math.max(800, Math.round((wa.width * 2) / 3));
-	const h = Math.max(600, Math.round((wa.height * 2) / 3));
+	const DEFAULT_WIN_W = 1920;
+	const DEFAULT_WIN_H = 1080;
+	const w = Math.max(800, Math.min(DEFAULT_WIN_W, wa.width));
+	const h = Math.max(600, Math.min(DEFAULT_WIN_H, wa.height));
 	const x = wa.x + Math.round((wa.width - w) / 2);
 	const y = wa.y + Math.round((wa.height - h) / 2);
 
@@ -52,10 +54,12 @@ function createWindow(): void {
 			: process.platform === 'win32'
 				? {
 						titleBarStyle: 'hidden' as const,
+						/* 须与 renderer `.ref-menubar { height }` 一致，否则系统按钮与自定义顶栏纵向对不齐 */
 						titleBarOverlay: {
-							color: '#0c0c0e',
+							/* 与 renderer `--ref-menubar-chrome-bg` 同色；overlay 不支持渐变/毛玻璃 */
+							color: '#16161c',
 							symbolColor: '#d4d4d8',
-							height: 32,
+							height: 44,
 						},
 					}
 				: {};

@@ -631,7 +631,7 @@ export default function App() {
 	const [enabledModelIds, setEnabledModelIds] = useState<string[]>([]);
 	const [agentCustomization, setAgentCustomization] = useState<AgentCustomization>(() => defaultAgentCustomization());
 	const [editorSettings, setEditorSettings] = useState<EditorSettings>(() => defaultEditorSettings());
-	const [layoutMode, setLayoutMode] = useState<LayoutMode>('agent');
+	const [layoutMode, setLayoutMode] = useState<LayoutMode>('editor');
 	const [homeRecents, setHomeRecents] = useState<string[]>([]);
 	const [openTabs, setOpenTabs] = useState<EditorTab[]>([]);
 	const [activeTabId, setActiveTabId] = useState<string | null>(null);

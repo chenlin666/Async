@@ -30,6 +30,10 @@
 	--void-scrollbar-thumb-hover: #4d4d56;
 	--void-scrollbar-thumb-active: #5c5c66;
 	--void-scrollbar-size: 8px;
+	/* 与 main-src/index.ts Windows titleBarOverlay.height 保持一致 */
+	--ref-menubar-height: 44px;
+	/* 与 main-src/index.ts titleBarOverlay.color 保持一致（系统三键区仅支持纯色） */
+	--ref-menubar-chrome-bg: #16161c;
 	font-family:
 		'Inter',
 		system-ui,
@@ -604,7 +608,8 @@ body {
 	display: grid;
 	grid-template-columns: 1fr auto 1fr;
 	align-items: center;
-	height: 44px;
+	height: var(--ref-menubar-height);
+	min-height: var(--ref-menubar-height);
 	padding: 0 14px 0 10px;
 	/* 隐藏系统标题栏后：顶栏可拖动窗口；右侧为 Windows 标题栏按钮区留白（Electron titleBarOverlay + CSS env） */
 	-webkit-app-region: drag;
@@ -613,9 +618,7 @@ body {
 		calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px))
 	);
 	border-bottom: 1px solid var(--void-border-soft);
-	background: linear-gradient(180deg, rgba(22, 22, 28, 0.88) 0%, rgba(14, 14, 17, 0.94) 100%);
-	backdrop-filter: blur(16px);
-	-webkit-backdrop-filter: blur(16px);
+	background: var(--ref-menubar-chrome-bg);
 	box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 40px rgba(0, 0, 0, 0.25);
 	flex-shrink: 0;
 }
