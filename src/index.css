@@ -1303,7 +1303,7 @@ body {
 	z-index: 1;
 }
 
-/* 已发送用户话：宽胶囊 + 浅底 + 细边框，提示可点（对齐 Cursor） */
+/* 已发送用户话：圆角矩形 + 浅底 + 细边框，提示可点（不用 999px，避免长文变竖向胶囊/椭圆） */
 .ref-msg-user {
 	display: block;
 	width: 100%;
@@ -1312,7 +1312,7 @@ body {
 	margin: 0;
 	padding: 12px 20px;
 	border: 1px solid var(--void-border-soft);
-	border-radius: 999px;
+	border-radius: 18px;
 	background: var(--void-bg-3);
 	color: var(--void-fg-0);
 	font-size: 14px;
