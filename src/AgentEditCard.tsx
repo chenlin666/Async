@@ -40,8 +40,14 @@ export function AgentEditCard({ edit, onOpenFile }: Props) {
 	const name = basename(edit.path) || t('agent.review.unknownPath');
 	const previewLines = useMemo(() => buildPreviewLines(edit), [edit]);
 	const [expanded, setExpanded] = useState(false);
-	const canExpand = previewLines.length > COLLAPSED_PREVIEW_LINES;
-	const visibleLines = expanded ? previewLines : previewLines.slice(0, COLLAPSED_PREVIEW_LINES);
+	const canExpand = !edit.isStreaming && previewLines.length > COLLAPSED_PREVIEW_LINES;
+	// While streaming: show the latest lines (tail) so the user sees new code as it arrives.
+	// After streaming: show the first lines with an expand toggle.
+	const visibleLines = edit.isStreaming
+		? previewLines.slice(-COLLAPSED_PREVIEW_LINES)
+		: expanded
+			? previewLines
+			: previewLines.slice(0, COLLAPSED_PREVIEW_LINES);
 	const canOpenFile = edit.path.trim().length > 0;
 
 	return (

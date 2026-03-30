@@ -214,6 +214,11 @@ async function runOpenAILoop(
 
 			fullContent += toolCallMarker(tc.name, args);
 			handlers.onToolCall(tc.name, args);
+			// Yield to the event loop so the IPC tool_call message is flushed to the
+			// renderer before we execute the tool and immediately send tool_result.
+			// Without this, synchronous tools (write_to_file, str_replace) cause both
+			// messages to be batched together and the frontend never sees the pending state.
+			await new Promise<void>((r) => setTimeout(r, 0));
 
 			const result = await executeTool(toolCall, options.toolHooks);
 
@@ -389,6 +394,7 @@ async function runAnthropicLoop(
 
 			fullContent += toolCallMarker(tu.name, args);
 			handlers.onToolCall(tu.name, args);
+			await new Promise<void>((r) => setTimeout(r, 0));
 
 			const result = await executeTool(toolCall, options.toolHooks);
 

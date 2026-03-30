@@ -872,6 +872,7 @@ export default function App() {
 				const marker = `\n<tool_call tool="${payload.name}">${payload.args}</tool_call>\n`;
 				setStreaming((s) => s + marker);
 			} else if (payload.type === 'tool_result') {
+				setStreamingToolPreview(null);
 				const truncated = payload.result.length > 3000 ? payload.result.slice(0, 3000) + '\n... (truncated)' : payload.result;
 				const safe = truncated.split('</tool_result>').join('</tool\u200c_result>');
 				const marker = `<tool_result tool="${payload.name}" success="${payload.success}">${safe}</tool_result>\n`;
