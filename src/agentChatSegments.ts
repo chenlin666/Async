@@ -885,6 +885,18 @@ function extractToolSegments(content: string, t: TFunction): { segments: Assista
 			prev.result = r.body;
 			prev.success = r.success;
 			prev.end = r.fullEnd;
+		} else {
+			// 孤立的 tool_result：没有对应 tool_call，合成虚拟 marker 避免原始 XML 泄漏
+			const isStreaming = r.fullEnd === content.length && !content.endsWith('</tool_result>');
+			markers.push({
+				start: r.index,
+				end: r.fullEnd,
+				name: r.name || 'tool',
+				args: {},
+				result: isStreaming ? undefined : r.body,
+				success: r.success,
+				isStreaming,
+			});
 		}
 	}
 

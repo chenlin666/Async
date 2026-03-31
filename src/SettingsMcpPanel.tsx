@@ -145,35 +145,35 @@ function McpServerEditForm({ config, onChange, onSave, onCancel, onDelete, isNew
 	const updateEnv = useCallback((idx: number, field: 'key' | 'value', val: string) => {
 		const entries = [...envEntries];
 		entries[idx] = { ...entries[idx], [field]: val };
-		onChange({ ...config, env: Object.fromEntries(entries.filter(e => e.key.trim())) });
+		onChange({ ...config, env: Object.fromEntries(entries.filter(e => e.key.trim()).map(e => [e.key, e.value] as const)) });
 	}, [config, onChange, envEntries]);
 	
 	const addEnvEntry = useCallback(() => {
 		const entries = [...envEntries, { key: '', value: '' }];
-		onChange({ ...config, env: Object.fromEntries(entries.filter(e => e.key.trim())) });
+		onChange({ ...config, env: Object.fromEntries(entries.filter(e => e.key.trim()).map(e => [e.key, e.value] as const)) });
 		setShowEnv(true);
 	}, [config, onChange, envEntries]);
 	
 	const removeEnvEntry = useCallback((idx: number) => {
 		const entries = envEntries.filter((_, i) => i !== idx);
-		onChange({ ...config, env: Object.fromEntries(entries.filter(e => e.key.trim())) });
+		onChange({ ...config, env: Object.fromEntries(entries.filter(e => e.key.trim()).map(e => [e.key, e.value] as const)) });
 	}, [config, onChange, envEntries]);
 	
 	const updateHeader = useCallback((idx: number, field: 'key' | 'value', val: string) => {
 		const entries = [...headerEntries];
 		entries[idx] = { ...entries[idx], [field]: val };
-		onChange({ ...config, headers: Object.fromEntries(entries.filter(e => e.key.trim())) });
+		onChange({ ...config, headers: Object.fromEntries(entries.filter(e => e.key.trim()).map(e => [e.key, e.value] as const)) });
 	}, [config, onChange, headerEntries]);
 	
 	const addHeaderEntry = useCallback(() => {
 		const entries = [...headerEntries, { key: '', value: '' }];
-		onChange({ ...config, headers: Object.fromEntries(entries.filter(e => e.key.trim())) });
+		onChange({ ...config, headers: Object.fromEntries(entries.filter(e => e.key.trim()).map(e => [e.key, e.value] as const)) });
 		setShowHeaders(true);
 	}, [config, onChange, headerEntries]);
 	
 	const removeHeaderEntry = useCallback((idx: number) => {
 		const entries = headerEntries.filter((_, i) => i !== idx);
-		onChange({ ...config, headers: Object.fromEntries(entries.filter(e => e.key.trim())) });
+		onChange({ ...config, headers: Object.fromEntries(entries.filter(e => e.key.trim()).map(e => [e.key, e.value] as const)) });
 	}, [config, onChange, headerEntries]);
 	
 	return (

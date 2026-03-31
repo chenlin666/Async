@@ -182,7 +182,7 @@ type Props = {
 	onStartMcpServer: (id: string) => void;
 	onStopMcpServer: (id: string) => void;
 	onRestartMcpServer: (id: string) => void;
-	shell: { invoke: (channel: string, ...args: unknown[]) => Promise<unknown> } | null;
+	shell: NonNullable<Window['asyncShell']> | null;
 	workspaceOpen: boolean;
 };
 

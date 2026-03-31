@@ -243,11 +243,17 @@ export function patchSettings(partial: Partial<ShellSettings>): ShellSettings {
 					streamIdleWatchdogEnabled:
 						partial.agent.streamIdleWatchdogEnabled ?? cached.agent?.streamIdleWatchdogEnabled,
 					roundHardTimeoutMs: partial.agent.roundHardTimeoutMs ?? cached.agent?.roundHardTimeoutMs,
+					maxToolRounds: partial.agent.maxToolRounds ?? cached.agent?.maxToolRounds,
 				}
 			: cached.agent;
 
 	const mergedUi =
 		partialUi !== undefined ? { ...(cached.ui ?? {}), ...partialUi } : cached.ui;
+
+	const mergedMcp =
+		partial.mcp !== undefined && Array.isArray(partial.mcp.servers)
+			? partial.mcp.servers
+			: cached.mcpServers;
 
 	cached = {
 		...cached,
@@ -260,6 +266,7 @@ export function patchSettings(partial: Partial<ShellSettings>): ShellSettings {
 		agent: nextAgent,
 		ui: mergedUi,
 		indexing: partialIndexing !== undefined ? mergedIndexing : cached.indexing,
+		mcpServers: mergedMcp,
 	};
 	cached = migrateThinkingByModel(cached).next;
 	save();

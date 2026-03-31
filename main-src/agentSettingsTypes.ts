@@ -77,4 +77,9 @@ export type AgentCustomization = {
 	 * 环境变量 `ASYNC_AGENT_ROUND_HARD_MS` 优先。
 	 */
 	roundHardTimeoutMs?: number;
+	/**
+	 * Agent 工具循环最大轮次（每轮 = 一次 LLM + 工具执行）。未设置且环境变量未指定时**不限制**（与 Claude Code `maxTurns` 可选语义一致）。
+	 * 环境变量 `ASYNC_AGENT_MAX_ROUNDS` 优先；设为 `0` / `unlimited` / `off` 表示不限制。
+	 */
+	maxToolRounds?: number;
 };

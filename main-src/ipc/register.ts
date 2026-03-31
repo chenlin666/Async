@@ -1056,6 +1056,11 @@ export function registerIpc(): void {
 	// ─── MCP IPC handlers ─────────────────────────────────────────────────────
 
 	/** 获取所有 MCP 服务器配置 */
+	ipcMain.handle('mcp:getServers', () => {
+		return { ok: true as const, servers: getMcpServerConfigs() };
+	});
+
+	/** 获取所有 MCP 服务器配置（别名） */
 	ipcMain.handle('mcp:listServers', () => {
 		return { ok: true as const, servers: getMcpServerConfigs() };
 	});

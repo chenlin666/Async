@@ -74,6 +74,7 @@ import { BrandLogo } from './BrandLogo';
 import { defaultAgentCustomization, type AgentCustomization } from './agentSettingsTypes';
 import { normalizeIndexingSettings, type IndexingSettingsState } from './indexingSettingsTypes';
 import { defaultEditorSettings, editorSettingsToMonacoOptions, type EditorSettings } from './EditorSettingsPanel';
+import type { McpServerConfig, McpServerStatus } from './mcpTypes';
 import { EditorTabBar, tabIdFromPath, type EditorTab } from './EditorTabBar';
 import { MenubarFileMenu } from './MenubarFileMenu';
 import { QuickOpenPalette, quickOpenPrimaryShortcutLabel, saveShortcutLabel } from './quickOpenPalette';
@@ -686,6 +687,8 @@ export default function App() {
 	const [agentCustomization, setAgentCustomization] = useState<AgentCustomization>(() => defaultAgentCustomization());
 	const [editorSettings, setEditorSettings] = useState<EditorSettings>(() => defaultEditorSettings());
 	const [indexingSettings, setIndexingSettings] = useState<IndexingSettingsState>(() => normalizeIndexingSettings());
+	const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
+	const [mcpStatuses, setMcpStatuses] = useState<McpServerStatus[]>([]);
 	const [layoutMode, setLayoutMode] = useState<LayoutMode>('editor');
 	const [homeRecents, setHomeRecents] = useState<string[]>([]);
 	/** 文件菜单「打开最近的文件夹」：与是否打开工作区无关 */
@@ -1119,6 +1122,11 @@ export default function App() {
 					setEditorSettings({ ...defaultEditorSettings(), ...st.editor });
 				}
 				setIndexingSettings(normalizeIndexingSettings(st.indexing));
+				// Load MCP servers
+				const mcpSt = (await shell.invoke('mcp:getServers')) as { servers?: McpServerConfig[] } | undefined;
+				setMcpServers(mcpSt?.servers ?? []);
+				const mcpStatusRes = (await shell.invoke('mcp:getStatuses')) as { statuses?: McpServerStatus[] } | undefined;
+				setMcpStatuses(mcpStatusRes?.statuses ?? []);
 				await refreshGit();
 			} catch (e) {
 				setIpcOk(String(e));
@@ -1154,6 +1162,7 @@ export default function App() {
 					window.clearTimeout(streamingToolPreviewClearTimerRef.current);
 					streamingToolPreviewClearTimerRef.current = null;
 				}
+				console.log(`[UI] tool_input_delta: name=${payload.name}, jsonLen=${payload.partialJson.length}`);
 				setStreamingToolPreview({
 					name: payload.name,
 					partialJson: payload.partialJson,
@@ -1166,7 +1175,7 @@ export default function App() {
 					window.clearTimeout(streamingToolPreviewClearTimerRef.current);
 					streamingToolPreviewClearTimerRef.current = null;
 				}
-				// 工具参数已完整，streaming 中的 <tool_call> 标记接管渲染，清除流式预览避免重复
+				console.log(`[UI] tool_call: name=${payload.name}`);
 				setStreamingToolPreview(null);
 				const marker = `\n<tool_call tool="${payload.name}">${payload.args}</tool_call>\n`;
 				setStreaming((s) => s + marker);
@@ -1780,6 +1789,7 @@ export default function App() {
 				semanticIndexEnabled: indexingSettings.semanticIndexEnabled,
 				tsLspEnabled: indexingSettings.tsLspEnabled,
 			},
+			mcp: { servers: mcpServers },
 		});
 	}, [
 		shell,
@@ -1797,6 +1807,7 @@ export default function App() {
 		editorSettings,
 		indexingSettings,
 		locale,
+		mcpServers,
 	]);
 
 	/** 离开设置页时写入磁盘（返回、点遮罩、Esc 等） */
@@ -1851,6 +1862,30 @@ export default function App() {
 		},
 		[shell]
 	);
+
+	const onRefreshMcpStatuses = useCallback(async () => {
+		if (!shell) return;
+		const r = (await shell.invoke('mcp:getStatuses')) as { statuses?: McpServerStatus[] } | undefined;
+		setMcpStatuses(r?.statuses ?? []);
+	}, [shell]);
+
+	const onStartMcpServer = useCallback(async (id: string) => {
+		if (!shell) return;
+		await shell.invoke('mcp:startServer', id);
+		await onRefreshMcpStatuses();
+	}, [shell, onRefreshMcpStatuses]);
+
+	const onStopMcpServer = useCallback(async (id: string) => {
+		if (!shell) return;
+		await shell.invoke('mcp:stopServer', id);
+		await onRefreshMcpStatuses();
+	}, [shell, onRefreshMcpStatuses]);
+
+	const onRestartMcpServer = useCallback(async (id: string) => {
+		if (!shell) return;
+		await shell.invoke('mcp:restartServer', id);
+		await onRefreshMcpStatuses();
+	}, [shell, onRefreshMcpStatuses]);
 
 	const modelPickerItems = useMemo((): ModelPickerItem[] => {
 		const auto: ModelPickerItem = {
@@ -4796,6 +4831,13 @@ export default function App() {
 							indexingSettings={indexingSettings}
 							onChangeIndexingSettings={setIndexingSettings}
 							onPersistIndexingPatch={onPersistIndexingPatch}
+							mcpServers={mcpServers}
+							onChangeMcpServers={setMcpServers}
+							mcpStatuses={mcpStatuses}
+							onRefreshMcpStatuses={onRefreshMcpStatuses}
+							onStartMcpServer={onStartMcpServer}
+							onStopMcpServer={onStopMcpServer}
+							onRestartMcpServer={onRestartMcpServer}
 							shell={shell ?? null}
 							workspaceOpen={!!workspace}
 						/>

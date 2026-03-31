@@ -5,7 +5,7 @@
  * 1. 将对话消息 + 工具定义发给 LLM
  * 2. 如果 LLM 返回工具调用 → 执行 → 把结果加入对话 → 再次调用 LLM
  * 3. 如果 LLM 只返回文本 → 结束循环
- * 4. 循环最多 MAX_ROUNDS 轮
+ * 4. 工具循环轮次：默认不限制（与 Claude Code 可选 `maxTurns` 一致）；可通过 `ASYNC_AGENT_MAX_ROUNDS` 或 `settings.agent.maxToolRounds` 设上限。
  */
 
 import OpenAI from 'openai';
@@ -39,8 +39,29 @@ export type { MistakeLimitContext, MistakeLimitDecision } from './mistakeLimitGa
 /** 执行工具前闸门；返回 proceed:false 时不调用 executeTool，结果写入对话为失败 tool_result */
 export type BeforeExecuteToolResult = { proceed: true } | { proceed: false; rejectionMessage: string };
 
-const MAX_ROUNDS = 80;
 const DEFAULT_MAX_CONSECUTIVE_MISTAKES = 5;
+
+/**
+ * 与 Claude Code `query.ts` 的 `maxTurns?: number` 一致：未配置时为 `null`（不限制）。
+ */
+function resolveAgentMaxRounds(settings: ShellSettings): number | null {
+	const raw = process.env.ASYNC_AGENT_MAX_ROUNDS?.trim();
+	if (raw !== undefined && raw !== '') {
+		const lower = raw.toLowerCase();
+		if (lower === '0' || lower === 'unlimited' || lower === 'off' || lower === 'infinity') {
+			return null;
+		}
+		const n = parseInt(raw, 10);
+		if (Number.isFinite(n) && n > 0) {
+			return n;
+		}
+	}
+	const s = settings.agent?.maxToolRounds;
+	if (typeof s === 'number' && Number.isFinite(s) && s > 0) {
+		return Math.floor(s);
+	}
+	return null;
+}
 
 export type ToolInputDeltaPayload = { name: string; partialJson: string; index: number };
 
@@ -426,9 +447,12 @@ async function runOpenAILoop(
 	}
 
 	const streamTimeoutConfig = resolveStreamTimeouts(settings);
-	console.log(`[AgentLoop] OpenAI loop start — idleMs=${streamTimeoutConfig.idleMs} hardMs=${streamTimeoutConfig.hardMs} watchdog=${streamTimeoutConfig.idleWatchdogEnabled}`);
+	const maxRounds = resolveAgentMaxRounds(settings);
+	console.log(
+		`[AgentLoop] OpenAI loop start — idleMs=${streamTimeoutConfig.idleMs} hardMs=${streamTimeoutConfig.hardMs} watchdog=${streamTimeoutConfig.idleWatchdogEnabled} maxRounds=${maxRounds ?? '∞'}`
+	);
 
-	for (let round = 0; round < MAX_ROUNDS; round++) {
+	for (let round = 0; maxRounds == null || round < maxRounds; round++) {
 		if (options.signal.aborted) { console.log(`[AgentLoop] round ${round} — aborted before start`); break; }
 
 		if (await handleMistakeLimitBeforeRound()) {
@@ -579,10 +603,10 @@ async function runOpenAILoop(
 		await flushOpenAIToolsInOrder(turnToolCalls);
 		console.log(`[AgentLoop] round ${round} — tools done (${Date.now() - toolsStart}ms)`);
 
-		if (round === MAX_ROUNDS - 1) {
-			console.warn(`[AgentLoop] MAX_ROUNDS (${MAX_ROUNDS}) exhausted — ending loop`);
-			fullContent += `\n\n---\n⚠ 已达到单次对话最大工具轮次 (${MAX_ROUNDS})，自动停止。请发送新消息继续。`;
-			handlers.onTextDelta(`\n\n---\n⚠ 已达到单次对话最大工具轮次 (${MAX_ROUNDS})，自动停止。请发送新消息继续。`);
+		if (maxRounds != null && round === maxRounds - 1) {
+			console.warn(`[AgentLoop] max tool rounds (${maxRounds}) exhausted — ending loop`);
+			fullContent += `\n\n---\n⚠ 已达到单次对话最大工具轮次 (${maxRounds})，自动停止。请发送新消息继续。`;
+			handlers.onTextDelta(`\n\n---\n⚠ 已达到单次对话最大工具轮次 (${maxRounds})，自动停止。请发送新消息继续。`);
 		}
 	}
 
@@ -764,9 +788,12 @@ async function runAnthropicLoop(
 
 	const toolDeltaBatcherA = createToolInputDeltaBatcher((p) => handlers.onToolInputDelta?.(p));
 	const streamTimeoutConfigA = resolveStreamTimeouts(settings);
-	console.log(`[AgentLoop] Anthropic loop start — idleMs=${streamTimeoutConfigA.idleMs} hardMs=${streamTimeoutConfigA.hardMs} watchdog=${streamTimeoutConfigA.idleWatchdogEnabled}`);
+	const maxRoundsA = resolveAgentMaxRounds(settings);
+	console.log(
+		`[AgentLoop] Anthropic loop start — idleMs=${streamTimeoutConfigA.idleMs} hardMs=${streamTimeoutConfigA.hardMs} watchdog=${streamTimeoutConfigA.idleWatchdogEnabled} maxRounds=${maxRoundsA ?? '∞'}`
+	);
 
-	for (let round = 0; round < MAX_ROUNDS; round++) {
+	for (let round = 0; maxRoundsA == null || round < maxRoundsA; round++) {
 		if (options.signal.aborted) { console.log(`[AgentLoop/A] round ${round} — aborted before start`); break; }
 
 		if (await handleMistakeLimitBeforeRoundAnthropic()) {
@@ -944,10 +971,10 @@ async function runAnthropicLoop(
 
 		conversation.push({ role: 'user', content: toolResults });
 
-		if (round === MAX_ROUNDS - 1) {
-			console.warn(`[AgentLoop/A] MAX_ROUNDS (${MAX_ROUNDS}) exhausted — ending loop`);
-			fullContent += `\n\n---\n⚠ 已达到单次对话最大工具轮次 (${MAX_ROUNDS})，自动停止。请发送新消息继续。`;
-			handlers.onTextDelta(`\n\n---\n⚠ 已达到单次对话最大工具轮次 (${MAX_ROUNDS})，自动停止。请发送新消息继续。`);
+		if (maxRoundsA != null && round === maxRoundsA - 1) {
+			console.warn(`[AgentLoop/A] max tool rounds (${maxRoundsA}) exhausted — ending loop`);
+			fullContent += `\n\n---\n⚠ 已达到单次对话最大工具轮次 (${maxRoundsA})，自动停止。请发送新消息继续。`;
+			handlers.onTextDelta(`\n\n---\n⚠ 已达到单次对话最大工具轮次 (${maxRoundsA})，自动停止。请发送新消息继续。`);
 		}
 	}
 

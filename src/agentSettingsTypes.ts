@@ -62,6 +62,8 @@ export type AgentCustomization = {
 	streamIdleWatchdogEnabled?: boolean;
 	/** 单轮硬超时（ms） */
 	roundHardTimeoutMs?: number;
+	/** Agent 最大工具轮次；未设则不限制 */
+	maxToolRounds?: number;
 };
 
 export const defaultAgentCustomization = (): AgentCustomization => ({
