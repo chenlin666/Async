@@ -39,14 +39,17 @@ export type AgentPendingPatch = {
 	relPath: string | null;
 };
 
+/** 子 Agent 嵌套流：与主线程事件共用 type，凭 parentToolCallId 区分 */
+export type ChatStreamNest = { parentToolCallId?: string; nestingDepth?: number };
+
 export type ChatStreamPayload =
-	| { threadId: string; type: 'delta'; text: string }
+	| ({ threadId: string; type: 'delta'; text: string } & ChatStreamNest)
 	| { threadId: string; type: 'done'; text: string; pendingAgentPatches?: AgentPendingPatch[]; usage?: TurnTokenUsage }
 	| { threadId: string; type: 'error'; message: string }
-	| { threadId: string; type: 'tool_call'; name: string; args: string }
-	| { threadId: string; type: 'tool_result'; name: string; result: string; success: boolean }
-	| { threadId: string; type: 'tool_input_delta'; name: string; partialJson: string; index: number }
-	| { threadId: string; type: 'thinking_delta'; text: string }
+	| ({ threadId: string; type: 'tool_call'; name: string; args: string } & ChatStreamNest)
+	| ({ threadId: string; type: 'tool_result'; name: string; result: string; success: boolean } & ChatStreamNest)
+	| ({ threadId: string; type: 'tool_input_delta'; name: string; partialJson: string; index: number } & ChatStreamNest)
+	| ({ threadId: string; type: 'thinking_delta'; text: string } & ChatStreamNest)
 	| {
 			threadId: string;
 			type: 'tool_approval_request';
@@ -61,6 +64,13 @@ export type ChatStreamPayload =
 			recoveryId: string;
 			consecutiveFailures: number;
 			threshold: number;
+	  }
+	| {
+			threadId: string;
+			type: 'sub_agent_background_done';
+			parentToolCallId: string;
+			result: string;
+			success: boolean;
 	  };
 
 /** Skill 创建向导：用户输入在 `userNote`；主进程注入内置系统提示并写入简短可见气泡 */

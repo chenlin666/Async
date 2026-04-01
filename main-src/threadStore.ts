@@ -332,3 +332,23 @@ export function touchFileInThread(
 	}
 	save();
 }
+
+function sanitizeTranscriptFilePart(s: string): string {
+	return s.replace(/[^a-zA-Z0-9_.-]+/g, '_').slice(0, 120);
+}
+
+/** 追加子 Agent 运行日志到数据目录（不污染主对话 JSON）。 */
+export function appendSubagentTranscript(threadId: string, parentToolCallId: string, chunk: string): void {
+	if (!chunk || !storePath) {
+		return;
+	}
+	try {
+		const root = path.dirname(storePath);
+		const dir = path.join(root, 'subagent_transcripts', sanitizeTranscriptFilePart(threadId));
+		fs.mkdirSync(dir, { recursive: true });
+		const file = path.join(dir, `${sanitizeTranscriptFilePart(parentToolCallId)}.md`);
+		fs.appendFileSync(file, chunk, 'utf8');
+	} catch (e) {
+		console.warn('[threadStore] appendSubagentTranscript:', e instanceof Error ? e.message : e);
+	}
+}

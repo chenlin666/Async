@@ -71,6 +71,12 @@ export type AgentCustomization = {
 	 */
 	mistakeLimitEnabled?: boolean;
 	/**
+	 * 对齐 Claude Code `FORK_SUBAGENT`：开启后，调用 Agent 时**省略** `subagent_type` 则子 Agent 在后台运行，
+	 * 工具立即返回占位说明，过程通过嵌套流展示，结束时前端提示。也可用参数 `run_in_background: true` 强制后台。
+	 * 环境变量 `ASYNC_AGENT_BACKGROUND_FORK=1` 等同开启。
+	 */
+	backgroundForkAgent?: boolean;
+	/**
 	 * 单轮流式「无新 chunk」最长等待（毫秒）。大文件工具 JSON 可能长时间无 SSE。
 	 * 环境变量 `ASYNC_AGENT_STREAM_IDLE_MS` 优先。
 	 */

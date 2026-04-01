@@ -170,22 +170,36 @@ export const AGENT_TOOLS: AgentToolDef[] = [
 		},
 	},
 	{
-		name: 'delegate_task',
+		name: 'Agent',
 		description:
-			'Delegate a focused sub-task to a nested agent loop. Use this for well-scoped, independent tasks that can be completed autonomously (e.g. "refactor this single file", "write tests for this module"). The sub-agent has access to all the same tools. Returns the sub-agent\'s final output as a string. Maximum nesting depth is 1 — do not call delegate_task from within a delegated task.',
+			'Spawn a focused sub-agent (Claude Code–style). Use for scoped, autonomous work: deep codebase exploration, refactors isolated to a module, or keeping your main context clean. The sub-agent runs a full tool loop and returns its final text (or runs in background when configured like Claude Code fork). Set subagent_type to "explore" for read-only exploration; use a custom name from user subagent settings for tailored instructions. Omit subagent_type with background-fork enabled in settings (or set run_in_background) to run async: tool returns immediately while work continues. Nested Agent calls are blocked. Maximum nesting depth is 1.',
 		parameters: {
 			type: 'object',
 			properties: {
-				task: {
+				prompt: {
 					type: 'string',
-					description: 'A clear, self-contained description of the task for the sub-agent to execute',
+					description: 'Clear instructions for the sub-agent (same as Claude Code `prompt`)',
+				},
+				subagent_type: {
+					type: 'string',
+					description:
+						'Optional: "explore" for read-only exploration; or match a configured subagent name/id for tailored instructions. Omit when using background fork (settings / env) for async execution.',
 				},
 				context: {
 					type: 'string',
-					description: 'Optional additional context, file paths, or constraints for the sub-agent',
+					description: 'Optional paths, constraints, or background for the sub-agent',
+				},
+				task: {
+					type: 'string',
+					description: 'Legacy alias for `prompt` (either prompt or task is required)',
+				},
+				run_in_background: {
+					type: 'boolean',
+					description:
+						'If true, sub-agent runs in the background: tool returns immediately with a short notice; streamed nested activity still appears; user gets a completion toast. Same spirit as Claude Code async Agent when fork is enabled.',
 				},
 			},
-			required: ['task'],
+			required: [],
 		},
 	},
 	{

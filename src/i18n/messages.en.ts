@@ -369,6 +369,13 @@ export const messagesEn: Record<string, string> = {
 	'agent.tool.list_dir': 'List directory',
 	'agent.tool.search_files': 'Search files',
 	'agent.tool.execute_command': 'Run command',
+	'agent.tool.Agent': 'Sub-agent',
+	'agent.tool.delegate_task': 'Sub-agent',
+	'agent.tool.Task': 'Sub-agent',
+	'agent.subAgent.output': 'Sub-agent',
+	'agent.subAgent.thinking': 'Sub-agent thinking',
+	'agent.subAgentBg.done': 'Background sub-agent finished: {{preview}}',
+	'agent.subAgentBg.fail': 'Background sub-agent failed: {{preview}}',
 	'agent.toolCard.args': 'Arguments',
 	'agent.toolCard.result': 'Result',
 	'agent.toolApproval.titleShell': 'Allow this command in the terminal?',
@@ -384,6 +391,9 @@ export const messagesEn: Record<string, string> = {
 	'agent.mistakeLimit.sendHint': 'Send hint & continue',
 	'agent.mistakeLimit.hintPlaceholder':
 		'e.g. Read only lines 20–40 of src/foo.ts first; do not edit package.json.',
+	'agentSettings.backgroundForkTitle': 'Background fork (Claude Code style)',
+	'agentSettings.backgroundForkDesc':
+		'When on, omitting `subagent_type` on the Agent tool runs the sub-agent in the background: the tool returns immediately while work continues; nested activity still streams, and you get a toast when done. You can also set `run_in_background: true` on any Agent call. Env `ASYNC_AGENT_BACKGROUND_FORK=1` enables the same gate.',
 	'agentSettings.mistakeLimitTitle': 'Pause after repeated failures',
 	'agentSettings.mistakeLimitDesc':
 		'After several failed tool calls or denials, show a dialog to continue, add a hint, or stop (Cline-style).',

@@ -342,6 +342,21 @@ export function SettingsAgentPanel({
 				</div>
 				<div className="ref-settings-agent-card-row" style={{ marginTop: 12 }}>
 					<div>
+						<div className="ref-settings-agent-card-title">{t('agentSettings.backgroundForkTitle')}</div>
+						<p className="ref-settings-agent-card-desc">{t('agentSettings.backgroundForkDesc')}</p>
+					</div>
+					<button
+						type="button"
+						className={`ref-settings-toggle ${v.backgroundForkAgent === true ? 'is-on' : ''}`}
+						role="switch"
+						aria-checked={v.backgroundForkAgent === true}
+						onClick={() => patch({ backgroundForkAgent: v.backgroundForkAgent !== true })}
+					>
+						<span className="ref-settings-toggle-knob" />
+					</button>
+				</div>
+				<div className="ref-settings-agent-card-row" style={{ marginTop: 12 }}>
+					<div>
 						<div className="ref-settings-agent-card-title">{t('agentSettings.mistakeLimitTitle')}</div>
 						<p className="ref-settings-agent-card-desc">{t('agentSettings.mistakeLimitDesc')}</p>
 					</div>

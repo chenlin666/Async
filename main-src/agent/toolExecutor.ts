@@ -15,6 +15,12 @@ import type { AgentLoopOptions, AgentLoopHandlers } from './agentLoop.js';
 import type { ShellSettings } from '../settingsStore.js';
 import { getMcpManager } from '../mcp/index.js';
 import type { McpToolResult } from '../mcp/mcpTypes.js';
+import type { NestedAgentStreamEmit } from '../ipc/nestedAgentStream.js';
+import { appendSubagentTranscript } from '../threadStore.js';
+import { assembleAgentToolPool } from './agentToolPool.js';
+import type { ComposerMode } from '../llm/composerMode.js';
+import { buildSubagentSystemAppend, resolveSubagentProfile } from './subagentProfile.js';
+import { shouldRunAgentInBackground } from './agentForkPolicy.js';
 
 /** 工具执行器持有的 LSP 会话引用（由 register.ts 通过 setToolLspSession 注入）。 */
 let _lspSession: TsLspSession | null = null;
@@ -23,20 +29,62 @@ export function setToolLspSession(session: TsLspSession): void {
 	_lspSession = session;
 }
 
-/** delegate_task 用于嵌套子 Agent 的上下文（由 register.ts 注入）。 */
+export type SubAgentBackgroundDonePayload = {
+	parentToolCallId: string;
+	result: string;
+	success: boolean;
+};
+
+/** Agent / delegate_task 嵌套子循环上下文（由 register.ts 注入）。 */
 let _delegateContext: {
 	settings: ShellSettings;
 	options: Omit<AgentLoopOptions, 'signal'>;
-	depth: number;
+	parentSignal: AbortSignal;
+	nestedEmit?: (evt: NestedAgentStreamEmit) => void;
+	threadId: string | null;
+	onSubAgentBackgroundDone?: (payload: SubAgentBackgroundDonePayload) => void;
 } | null = null;
 
 export function setDelegateContext(
 	settings: ShellSettings,
 	options: Omit<AgentLoopOptions, 'signal'>,
-	depth: number
+	parentSignal: AbortSignal,
+	nestedEmit?: (evt: NestedAgentStreamEmit) => void,
+	threadId?: string | null,
+	onSubAgentBackgroundDone?: (payload: SubAgentBackgroundDonePayload) => void
 ): void {
-	_delegateContext = { settings, options, depth };
+	_delegateContext = {
+		settings,
+		options,
+		parentSignal,
+		nestedEmit,
+		threadId: threadId ?? null,
+		onSubAgentBackgroundDone,
+	};
 }
+
+export function clearDelegateContext(): void {
+	_delegateContext = null;
+}
+
+const DELEGATE_TOOL_ALIASES = new Set(['Agent', 'Task', 'delegate_task']);
+
+function coerceAgentDelegateArgs(call: ToolCall): {
+	task: string;
+	context: string;
+	subagentType?: string;
+	runInBackground: boolean;
+} {
+	const a = call.arguments;
+	const task = String(a.task ?? a.prompt ?? a.description ?? '').trim();
+	const context = String(a.context ?? '').trim();
+	const subagentType = typeof a.subagent_type === 'string' && a.subagent_type.trim() ? a.subagent_type.trim() : undefined;
+	const runInBackground = a.run_in_background === true || a.run_in_background === 'true';
+	return { task, context, subagentType, runInBackground };
+}
+
+const BACKGROUND_AGENT_TOOL_RESULT =
+	'[Background] Sub-agent started (Claude Code–style fork). Nested activity streams above; you will get a UI notice when it finishes. / 后台子 Agent 已启动，过程见上方嵌套区域，结束后会弹出提示。';
 
 const execFileAsync = promisify(execFile);
 
@@ -183,7 +231,15 @@ async function executeMcpAgentTool(call: ToolCall): Promise<ToolResult> {
 	}
 }
 
-export async function executeTool(call: ToolCall, hooks: ToolExecutionHooks = {}): Promise<ToolResult> {
+export type ToolExecutionContext = {
+	delegateExecutionDepth?: number;
+};
+
+export async function executeTool(
+	call: ToolCall,
+	hooks: ToolExecutionHooks = {},
+	execCtx: ToolExecutionContext = {}
+): Promise<ToolResult> {
 	try {
 		switch (call.name) {
 			case 'read_file':
@@ -200,8 +256,10 @@ export async function executeTool(call: ToolCall, hooks: ToolExecutionHooks = {}
 			return await executeCommand(call);
 		case 'get_diagnostics':
 			return await executeGetDiagnostics(call);
+		case 'Agent':
+		case 'Task':
 		case 'delegate_task':
-			return await executeDelegateTask(call);
+			return await executeAgentDelegate(call, execCtx);
 		case 'ListMcpResourcesTool':
 			return await executeListMcpResources(call);
 		case 'ReadMcpResourceTool':
@@ -538,27 +596,32 @@ async function executeCommand(call: ToolCall): Promise<ToolResult> {
 
 const SEVERITY_LABEL: Record<number, string> = { 1: 'error', 2: 'warning', 3: 'info', 4: 'hint' };
 
-async function executeDelegateTask(call: ToolCall): Promise<ToolResult> {
-	const task = String(call.arguments.task ?? '').trim();
-	const context = String(call.arguments.context ?? '').trim();
+async function executeAgentDelegate(call: ToolCall, execCtx: ToolExecutionContext = {}): Promise<ToolResult> {
+	const { task, context, subagentType, runInBackground } = coerceAgentDelegateArgs(call);
 	if (!task) {
-		return { toolCallId: call.id, name: call.name, content: 'Error: task is required', isError: true };
+		return {
+			toolCallId: call.id,
+			name: call.name,
+			content: 'Error: prompt/task is required (use `prompt` or `task`).',
+			isError: true,
+		};
 	}
 
 	if (!_delegateContext) {
 		return {
 			toolCallId: call.id,
 			name: call.name,
-			content: 'delegate_task is not available in this context.',
+			content: 'Agent tool is not available in this context.',
 			isError: true,
 		};
 	}
 
-	if (_delegateContext.depth >= 1) {
+	const depth = execCtx.delegateExecutionDepth ?? 0;
+	if (depth >= 1) {
 		return {
 			toolCallId: call.id,
 			name: call.name,
-			content: 'delegate_task cannot be called from within a delegated task (max nesting depth: 1).',
+			content: 'Nested Agent calls are not allowed (max nesting depth: 1).',
 			isError: true,
 		};
 	}
@@ -568,34 +631,138 @@ async function executeDelegateTask(call: ToolCall): Promise<ToolResult> {
 		{ role: 'user', content: context ? `${task}\n\nContext:\n${context}` : task },
 	];
 
-	const subAc = new AbortController();
+	const parentToolCallId = call.id;
+	const nestingDepth = 1;
+	const prevCtx = _delegateContext!;
+	const emit = prevCtx.nestedEmit;
+	const tid = prevCtx.threadId;
+	const onBgDone = prevCtx.onSubAgentBackgroundDone;
 
-	let output = '';
-	let errorMsg = '';
+	const profile = resolveSubagentProfile(subagentType);
+	const subComposerMode: ComposerMode = profile === 'explore' ? 'plan' : prevCtx.options.composerMode;
+	const subAppend = buildSubagentSystemAppend(prevCtx.settings, subagentType);
+	const mergedAppend = [prevCtx.options.agentSystemAppend?.trim(), subAppend?.trim()].filter(Boolean).join('\n\n');
 
-	await new Promise<void>((resolve) => {
-		const handlers: AgentLoopHandlers = {
-			onTextDelta: (text) => { output += text; },
-			onToolCall: () => {},
-			onToolResult: () => {},
-			onThinkingDelta: () => {},
-			onDone: () => resolve(),
-			onError: (msg) => { errorMsg = msg; resolve(); },
-		};
+	let baseToolDefs = assembleAgentToolPool(subComposerMode, {
+		mcpToolDenyPrefixes: prevCtx.settings.mcpToolDenyPrefixes,
+	});
+	baseToolDefs = baseToolDefs.filter((d) => !DELEGATE_TOOL_ALIASES.has(d.name));
 
-		// 子 Agent 使用相同的模型配置，但嵌套深度 +1
-		const prevCtx = _delegateContext!;
-		setDelegateContext(prevCtx.settings, prevCtx.options, prevCtx.depth + 1);
-
-		// 注意：onDone/onError 已负责 resolve，此处仅用 .catch 兜底未预期的 throw
-		void runAgentLoop(
-			prevCtx.settings,
-			subMessages,
-			{ ...prevCtx.options, signal: subAc.signal },
-			handlers
-		).catch((e) => { errorMsg = String(e); resolve(); });
+	const childDepth = depth + 1;
+	const useBackgroundFork = shouldRunAgentInBackground({
+		backgroundForkAgentSetting: prevCtx.settings.agent?.backgroundForkAgent,
+		envAsyncAgentBackgroundFork: process.env.ASYNC_AGENT_BACKGROUND_FORK,
+		subagentType,
+		runInBackground,
 	});
 
+	const logTranscript = (chunk: string) => {
+		if (tid) {
+			appendSubagentTranscript(tid, parentToolCallId, chunk);
+		}
+	};
+
+	const runSubAgent = async (): Promise<{ output: string; errorMsg: string }> => {
+		let output = '';
+		let errorMsg = '';
+		const handlers: AgentLoopHandlers = {
+			onTextDelta: (text) => {
+				output += text;
+				logTranscript(text);
+				emit?.({
+					type: 'delta',
+					text,
+					parentToolCallId,
+					nestingDepth,
+				});
+			},
+			onToolInputDelta: (p) => {
+				emit?.({
+					type: 'tool_input_delta',
+					name: p.name,
+					partialJson: p.partialJson,
+					index: p.index,
+					parentToolCallId,
+					nestingDepth,
+				});
+			},
+			onThinkingDelta: (text) => {
+				logTranscript(text);
+				emit?.({
+					type: 'thinking_delta',
+					text,
+					parentToolCallId,
+					nestingDepth,
+				});
+			},
+			onToolCall: (name, args) => {
+				const line = `\n[tool] ${name} ${JSON.stringify(args).slice(0, 200)}\n`;
+				logTranscript(line);
+				emit?.({
+					type: 'tool_call',
+					name,
+					args: JSON.stringify(args),
+					parentToolCallId,
+					nestingDepth,
+				});
+			},
+			onToolResult: (name, result, success) => {
+				const line = `\n[result] ${name} success=${success}\n`;
+				logTranscript(line);
+				emit?.({
+					type: 'tool_result',
+					name,
+					result,
+					success,
+					parentToolCallId,
+					nestingDepth,
+				});
+			},
+			onDone: () => {},
+			onError: (msg) => {
+				errorMsg = msg;
+			},
+		};
+
+		try {
+			await runAgentLoop(
+				prevCtx.settings,
+				subMessages,
+				{
+					...prevCtx.options,
+					signal: prevCtx.parentSignal,
+					composerMode: subComposerMode,
+					toolPoolOverride: baseToolDefs,
+					delegateExecutionDepth: childDepth,
+					...(mergedAppend ? { agentSystemAppend: mergedAppend } : {}),
+				},
+				handlers
+			);
+		} catch (e) {
+			errorMsg = String(e);
+		}
+		return { output, errorMsg };
+	};
+
+	if (useBackgroundFork) {
+		void (async () => {
+			const { output, errorMsg } = await runSubAgent();
+			onBgDone?.({
+				parentToolCallId,
+				result: errorMsg ? `Sub-agent error: ${errorMsg}` : output || '(sub-agent completed with no output)',
+				success: !errorMsg,
+			});
+		})();
+
+		return {
+			toolCallId: call.id,
+			name: call.name,
+			content: BACKGROUND_AGENT_TOOL_RESULT,
+			isError: false,
+		};
+	}
+
+	const { output, errorMsg } = await runSubAgent();
 	if (errorMsg) {
 		return { toolCallId: call.id, name: call.name, content: `Sub-agent error: ${errorMsg}`, isError: true };
 	}

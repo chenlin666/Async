@@ -52,6 +52,9 @@ const READ_TOOLS_SKIP_INPUT_DELTA = new Set([
 	'search_files',
 	'ListMcpResourcesTool',
 	'ReadMcpResourceTool',
+	'Agent',
+	'delegate_task',
+	'Task',
 ]);
 
 function shouldEmitToolInputDelta(toolName: string): boolean {
@@ -136,6 +139,8 @@ export type AgentLoopOptions = {
 	signal: AbortSignal;
 	/** 与主界面 Composer 模式一致；Plan 仅注册只读工具 */
 	composerMode: ComposerMode;
+	/** 子 Agent 等场景覆盖默认工具池（非空则跳过 assembleAgentToolPool） */
+	toolPoolOverride?: AgentToolDef[];
 	agentSystemAppend?: string;
 	toolHooks?: ToolExecutionHooks;
 	/** 在 executeTool 之前调用；用于 shell 写入等需用户确认的闸门 */
@@ -146,6 +151,10 @@ export type AgentLoopOptions = {
 	maxConsecutiveMistakes?: number;
 	/** 默认 true */
 	mistakeLimitEnabled?: boolean;
+	/**
+	 * 当前嵌套深度：根循环为 0；子 Agent 内为 1。用于禁止多层 Agent 而不依赖全局状态。
+	 */
+	delegateExecutionDepth?: number;
 };
 
 /**
@@ -205,6 +214,8 @@ function inferOpenAIToolNameFromPartialArguments(partial: string): string {
 	if (c.includes('"content"')) return 'write_to_file';
 	if (c.includes('"pattern"')) return 'search_files';
 	if (c.includes('"command"')) return 'execute_command';
+	if (c.includes('"run_in_background"')) return 'Agent';
+	if (c.includes('"prompt"') || c.includes('"subagent_type"')) return 'Agent';
 	// read_file 常带行号；仅有 path 的片段多是 write_to_file 正在流出 path，content 尚未到
 	if (c.includes('"start_line"') || c.includes('"end_line"')) return 'read_file';
 	if (c.includes('"path"')) return 'write_to_file';
@@ -216,7 +227,14 @@ function inferOpenAIToolNameFromPartialArguments(partial: string): string {
  * - Plan：仅只读内置工具 + List/Read MCP 资源工具；不注册动态 `mcp__*` 工具。
  * - Agent：内置 + 过滤后的动态 MCP 工具；同名以内置为准。
  */
-function agentToolDefsForLoop(composerMode: ComposerMode, settings: ShellSettings): AgentToolDef[] {
+function agentToolDefsForLoop(
+	composerMode: ComposerMode,
+	settings: ShellSettings,
+	override?: AgentToolDef[]
+): AgentToolDef[] {
+	if (override && override.length > 0) {
+		return override;
+	}
 	return assembleAgentToolPool(composerMode, {
 		mcpToolDenyPrefixes: settings.mcpToolDenyPrefixes,
 	});
@@ -388,7 +406,9 @@ async function runOpenAILoop(
 	);
 	const temperature = temperatureForMode(options.composerMode);
 
-	const tools = toOpenAITools(agentToolDefsForLoop(options.composerMode, settings));
+	const tools = toOpenAITools(
+		agentToolDefsForLoop(options.composerMode, settings, options.toolPoolOverride)
+	);
 
 	const conversation: OAIMsg[] = threadToOpenAI(threadMessages, systemContent);
 	let fullContent = '';
@@ -476,7 +496,9 @@ async function runOpenAILoop(
 
 		const execStart = Date.now();
 		console.log(`[AgentLoop] tool=${tc.name} — executeTool start`);
-		const result = await executeTool(toolCall, options.toolHooks);
+		const result = await executeTool(toolCall, options.toolHooks, {
+			delegateExecutionDepth: options.delegateExecutionDepth ?? 0,
+		});
 		console.log(`[AgentLoop] tool=${tc.name} — executeTool done (${Date.now() - execStart}ms, error=${result.isError})`);
 		if (mistakeLimitEnabled) {
 			if (result.isError) {
@@ -732,7 +754,9 @@ async function runAnthropicLoop(
 	const conversation: MessageParam[] = threadToAnthropic(threadMessages);
 	if (conversation.length === 0) { handlers.onError('没有可发送的对话消息。'); return; }
 
-	const tools = toAnthropicTools(agentToolDefsForLoop(options.composerMode, settings));
+	const tools = toAnthropicTools(
+		agentToolDefsForLoop(options.composerMode, settings, options.toolPoolOverride)
+	);
 	let fullContent = '';
 	const thinkBudget = anthropicThinkingBudget(options.thinkingLevel ?? 'off');
 	let accUsage: TurnTokenUsage | undefined;
@@ -816,7 +840,9 @@ async function runAnthropicLoop(
 
 		const execStart = Date.now();
 		console.log(`[AgentLoop/A] tool=${tu.name} — executeTool start`);
-		const result = await executeTool(toolCall, options.toolHooks);
+		const result = await executeTool(toolCall, options.toolHooks, {
+			delegateExecutionDepth: options.delegateExecutionDepth ?? 0,
+		});
 		console.log(`[AgentLoop/A] tool=${tu.name} — executeTool done (${Date.now() - execStart}ms, error=${result.isError})`);
 		if (mistakeLimitEnabled) {
 			if (result.isError) {

@@ -80,6 +80,40 @@ function skipJsonObject(s: string, i: number): number {
 
 type ToolCallSpan = { start: number; end: number; name: string };
 
+function parseToolCallHeaderForRepair(
+	content: string,
+	absStart: number
+): { name: string; jsonStart: number } | null {
+	if (!content.startsWith(TOOL_CALL_OPEN, absStart)) return null;
+	const nameStart = absStart + TOOL_CALL_OPEN.length;
+	const nameQuote = content.indexOf('"', nameStart);
+	if (nameQuote === -1) return null;
+	const name = content.slice(nameStart, nameQuote);
+	let pos = nameQuote + 1;
+	while (pos < content.length && /\s/.test(content[pos]!)) pos++;
+	while (pos < content.length && content[pos] !== '>') {
+		if (content.startsWith('sub_parent="', pos)) {
+			pos += 'sub_parent="'.length;
+			const eq = content.indexOf('"', pos);
+			if (eq === -1) return null;
+			pos = eq + 1;
+			while (pos < content.length && /\s/.test(content[pos]!)) pos++;
+			continue;
+		}
+		if (content.startsWith('sub_depth="', pos)) {
+			pos += 'sub_depth="'.length;
+			const eq = content.indexOf('"', pos);
+			if (eq === -1) return null;
+			pos = eq + 1;
+			while (pos < content.length && /\s/.test(content[pos]!)) pos++;
+			continue;
+		}
+		return null;
+	}
+	if (pos >= content.length || content[pos] !== '>') return null;
+	return { name, jsonStart: pos + 1 };
+}
+
 function findAllCompleteToolCallSpans(content: string, resultSpans: ToolResultSpan[]): ToolCallSpan[] {
 	const out: ToolCallSpan[] = [];
 	const close = '</tool_call>';
@@ -91,11 +125,9 @@ function findAllCompleteToolCallSpans(content: string, resultSpans: ToolResultSp
 			from = start + TOOL_CALL_OPEN.length;
 			continue;
 		}
-		const nameStart = start + TOOL_CALL_OPEN.length;
-		const nameEnd = content.indexOf('">', nameStart);
-		if (nameEnd === -1) break;
-		const name = content.slice(nameStart, nameEnd);
-		const jsonStart = nameEnd + 2;
+		const hdr = parseToolCallHeaderForRepair(content, start);
+		if (!hdr) break;
+		const { name, jsonStart } = hdr;
 		const jsonEnd = skipJsonObject(content, jsonStart);
 		if (jsonEnd === -1) break;
 		const closeIdx = content.indexOf(close, jsonEnd);

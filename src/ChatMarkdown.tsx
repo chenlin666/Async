@@ -114,6 +114,22 @@ export function ChatMarkdown({
 					);
 					case 'file_changes':
 						return null;
+					case 'sub_agent_markdown': {
+						const label =
+							seg.variant === 'thinking' ? t('agent.subAgent.thinking') : t('agent.subAgent.output');
+						return (
+							<div
+								key={i}
+								className="ref-sub-agent-md"
+								style={{ marginLeft: Math.min(12 + (seg.depth - 1) * 10, 40) }}
+							>
+								<div className="ref-sub-agent-md-label">{label}</div>
+								<div className="ref-md-root ref-md-root--agent-chat ref-sub-agent-md-body">
+									<ReactMarkdown remarkPlugins={[remarkGfm]}>{seg.text}</ReactMarkdown>
+								</div>
+							</div>
+						);
+					}
 					case 'activity': {
 						const readLink = seg.agentReadLink;
 						const openHintRaw = t('agent.activity.readOpenEditor');
@@ -122,7 +138,15 @@ export function ChatMarkdown({
 								? 'Open in editor and highlight this range'
 								: openHintRaw;
 						return (
-							<div key={i} className={`ref-agent-activity ref-agent-activity--${seg.status}`}>
+							<div
+								key={i}
+								className={`ref-agent-activity ref-agent-activity--${seg.status}${seg.nestParent ? ' ref-agent-activity--nested' : ''}`}
+								style={
+									seg.nestParent
+										? { marginLeft: Math.min(12 + ((seg.nestDepth ?? 1) - 1) * 10, 40) }
+										: undefined
+								}
+							>
 								<div className="ref-agent-activity-main">
 									<span className="ref-agent-activity-dot" aria-hidden />
 									{readLink && onOpenAgentFile ? (

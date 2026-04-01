@@ -9,6 +9,9 @@ const TOOL_ICONS: Record<string, string> = {
 	list_dir: '📁',
 	search_files: '🔍',
 	execute_command: '⚡',
+	Agent: '🤖',
+	delegate_task: '🤖',
+	Task: '🤖',
 };
 
 function summarizeArgs(name: string, args: Record<string, unknown>): string {
@@ -25,6 +28,10 @@ function summarizeArgs(name: string, args: Record<string, unknown>): string {
 			return String(args.pattern ?? '');
 		case 'execute_command':
 			return String(args.command ?? '');
+		case 'Agent':
+		case 'delegate_task':
+		case 'Task':
+			return String(args.prompt ?? args.task ?? '').slice(0, 100);
 		default:
 			return JSON.stringify(args).slice(0, 80);
 	}

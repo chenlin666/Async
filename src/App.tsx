@@ -200,6 +200,14 @@ const RIGHT_RAIL_MIN = 260;
 const RIGHT_RAIL_MAX = 1280;
 const CENTER_MIN_PX = 320;
 
+function escapeSubAgentXmlText(s: string): string {
+	return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function escapeStreamAttr(s: string): string {
+	return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
 function workspacePathDisplayName(full: string): string {
 	const norm = full.replace(/\\/g, '/');
 	const parts = norm.split('/').filter(Boolean);
@@ -829,6 +837,8 @@ export default function App() {
 	const [editorValue, setEditorValue] = useState('');
 	const [saveToastKey, setSaveToastKey] = useState(0);
 	const [saveToastVisible, setSaveToastVisible] = useState(false);
+	const [subAgentBgToast, setSubAgentBgToast] = useState<{ key: number; ok: boolean; text: string } | null>(null);
+	const subAgentBgToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const monacoEditorRef = useRef<MonacoEditorNS.IStandaloneCodeEditor | null>(null);
 	const [tsLspStatus, setTsLspStatus] = useState<'off' | 'starting' | 'ready' | 'error'>('off');
 	/** 打开文件后在 Monaco 中高亮的行范围（1-based，含 end） */
@@ -1307,6 +1317,7 @@ export default function App() {
 					confirmWritesBeforeExecute: ag?.confirmWritesBeforeExecute ?? defs.confirmWritesBeforeExecute,
 					maxConsecutiveMistakes: ag?.maxConsecutiveMistakes ?? defs.maxConsecutiveMistakes,
 					mistakeLimitEnabled: ag?.mistakeLimitEnabled ?? defs.mistakeLimitEnabled,
+					backgroundForkAgent: ag?.backgroundForkAgent ?? defs.backgroundForkAgent,
 				});
 				if (st.editor) {
 					setEditorSettings({ ...defaultEditorSettings(), ...st.editor });
@@ -1342,35 +1353,62 @@ export default function App() {
 			}
 			if (payload.type === 'delta') {
 				setStreaming((s) => {
+					if (payload.parentToolCallId) {
+						const inner = escapeSubAgentXmlText(payload.text);
+						const p = escapeStreamAttr(payload.parentToolCallId);
+						const d = payload.nestingDepth ?? 1;
+						return `${s}<sub_agent_delta parent="${p}" depth="${d}">${inner}</sub_agent_delta>`;
+					}
 					if (s.length === 0 && payload.text.length > 0) {
 						firstTokenAtRef.current = Date.now();
 					}
 					return s + payload.text;
 				});
 			} else if (payload.type === 'tool_input_delta') {
-				if (streamingToolPreviewClearTimerRef.current !== null) {
-					window.clearTimeout(streamingToolPreviewClearTimerRef.current);
-					streamingToolPreviewClearTimerRef.current = null;
+				if (payload.parentToolCallId) {
+					// 嵌套工具参数流式预览易与主线程混淆，仅写入正文标记
+				} else {
+					if (streamingToolPreviewClearTimerRef.current !== null) {
+						window.clearTimeout(streamingToolPreviewClearTimerRef.current);
+						streamingToolPreviewClearTimerRef.current = null;
+					}
+					console.log(`[UI] tool_input_delta: name=${payload.name}, jsonLen=${payload.partialJson.length}`);
+					setStreamingToolPreview({
+						name: payload.name,
+						partialJson: payload.partialJson,
+						index: payload.index,
+					});
 				}
-				console.log(`[UI] tool_input_delta: name=${payload.name}, jsonLen=${payload.partialJson.length}`);
-				setStreamingToolPreview({
-					name: payload.name,
-					partialJson: payload.partialJson,
-					index: payload.index,
-				});
 			} else if (payload.type === 'thinking_delta') {
-				setStreamingThinking((s) => s + payload.text);
-			} else if (payload.type === 'tool_call') {
-				if (streamingToolPreviewClearTimerRef.current !== null) {
-					window.clearTimeout(streamingToolPreviewClearTimerRef.current);
-					streamingToolPreviewClearTimerRef.current = null;
+				if (payload.parentToolCallId) {
+					setStreaming((s) => {
+						const inner = escapeSubAgentXmlText(payload.text);
+						const p = escapeStreamAttr(payload.parentToolCallId);
+						const d = payload.nestingDepth ?? 1;
+						return `${s}<sub_agent_thinking parent="${p}" depth="${d}">${inner}</sub_agent_thinking>`;
+					});
+				} else {
+					setStreamingThinking((s) => s + payload.text);
 				}
-				console.log(`[UI] tool_call: name=${payload.name}`);
-				setStreamingToolPreview(null);
-				const marker = `\n<tool_call tool="${payload.name}">${payload.args}</tool_call>\n`;
+			} else if (payload.type === 'tool_call') {
+				if (!payload.parentToolCallId) {
+					if (streamingToolPreviewClearTimerRef.current !== null) {
+						window.clearTimeout(streamingToolPreviewClearTimerRef.current);
+						streamingToolPreviewClearTimerRef.current = null;
+					}
+					console.log(`[UI] tool_call: name=${payload.name}`);
+					setStreamingToolPreview(null);
+				}
+				const nest =
+					payload.parentToolCallId != null
+						? ` sub_parent="${escapeStreamAttr(payload.parentToolCallId)}" sub_depth="${payload.nestingDepth ?? 1}"`
+						: '';
+				const marker = `\n<tool_call tool="${payload.name}"${nest}>${payload.args}</tool_call>\n`;
 				setStreaming((s) => s + marker);
 			} else if (payload.type === 'tool_result') {
-				setStreamingToolPreview(null);
+				if (!payload.parentToolCallId) {
+					setStreamingToolPreview(null);
+				}
 				const truncated = payload.result.length > 3000 ? payload.result.slice(0, 3000) + '\n... (truncated)' : payload.result;
 				const safe = truncated.split('</tool_result>').join('</tool\u200c_result>');
 				const marker = `<tool_result tool="${payload.name}" success="${payload.success}">${safe}</tool_result>\n`;
@@ -1388,6 +1426,25 @@ export default function App() {
 					consecutiveFailures: payload.consecutiveFailures,
 					threshold: payload.threshold,
 				});
+			} else if (payload.type === 'sub_agent_background_done') {
+				if (subAgentBgToastTimerRef.current !== null) {
+					window.clearTimeout(subAgentBgToastTimerRef.current);
+					subAgentBgToastTimerRef.current = null;
+				}
+				const preview =
+					payload.result.length > 240 ? `${payload.result.slice(0, 240)}…` : payload.result;
+				const text = payload.success
+					? t('agent.subAgentBg.done', { preview })
+					: t('agent.subAgentBg.fail', { preview });
+				setSubAgentBgToast((prev) => ({
+					key: (prev?.key ?? 0) + 1,
+					ok: payload.success,
+					text,
+				}));
+				subAgentBgToastTimerRef.current = window.setTimeout(() => {
+					setSubAgentBgToast(null);
+					subAgentBgToastTimerRef.current = null;
+				}, 6500);
 			} else if (payload.type === 'done') {
 				const start = streamStartedAtRef.current;
 				const ft = firstTokenAtRef.current;
@@ -2009,6 +2066,7 @@ export default function App() {
 				confirmWritesBeforeExecute: agentCustomization.confirmWritesBeforeExecute,
 				maxConsecutiveMistakes: agentCustomization.maxConsecutiveMistakes,
 				mistakeLimitEnabled: agentCustomization.mistakeLimitEnabled,
+				backgroundForkAgent: agentCustomization.backgroundForkAgent,
 			},
 			editor: editorSettings,
 			indexing: {
@@ -5241,6 +5299,15 @@ export default function App() {
 			/>
 
 			{saveToastVisible ? <div key={saveToastKey} className="ref-save-toast">Saved ✓</div> : null}
+			{subAgentBgToast ? (
+				<div
+					key={subAgentBgToast.key}
+					className={`ref-sub-agent-bg-toast ${subAgentBgToast.ok ? 'is-ok' : 'is-err'}`}
+					role="status"
+				>
+					{subAgentBgToast.text}
+				</div>
+			) : null}
 		</div>
 	);
 }

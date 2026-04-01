@@ -51,6 +51,9 @@ export type ActivitySegment = {
 	type: 'activity';
 	text: string;
 	status: ActivityStatus;
+	/** 嵌套子 Agent 工具活动：归属父 tool_call id */
+	nestParent?: string;
+	nestDepth?: number;
 	detail?: string;
 	summary?: string;
 	/** 仅 read_file：可点击跳转 Monaco 并高亮 */
@@ -100,7 +103,8 @@ export type AssistantSegment =
 	| { type: 'file_changes'; files: FileChangeSummary[] }
 	| FileEditSegment
 	| ToolCallSegment
-	| PlanTodoSegment;
+	| PlanTodoSegment
+	| { type: 'sub_agent_markdown'; parentToolCallId: string; depth: number; text: string; variant: 'text' | 'thinking' };
 
 const ACTIVITY_PARAGRAPH =
 	/^(Explored\b|Ran\b|Verified\b|Verify\b|Linting\b|Linted\b|Searched\b|Checked\b|Reading\b|Editing\b|Searching\b|Wrote\b|Updated\b|Applied\b|Running\b)[\s\S]{0,500}$/i;
@@ -203,6 +207,8 @@ type ParsedMarker = {
 	isStreaming?: boolean;
 	rawJson?: string;
 	isPlan?: boolean;
+	subParent?: string;
+	subDepth?: number;
 };
 
 type ToolResultBlock = {
@@ -212,6 +218,70 @@ type ToolResultBlock = {
 	body: string;
 	fullEnd: number;
 };
+
+/**
+ * 解析 `<tool_call tool="NAME" [sub_parent="…"] [sub_depth="…"]>{json}</tool_call>` 的开头。
+ */
+function parseToolCallOpen(
+	content: string,
+	absStart: number
+): { name: string; jsonStart: number; subParent?: string; subDepth?: number } | null {
+	if (!content.startsWith(TOOL_CALL_OPEN, absStart)) {
+		return null;
+	}
+	const nameStart = absStart + TOOL_CALL_OPEN.length;
+	const nameQuote = content.indexOf('"', nameStart);
+	if (nameQuote === -1) {
+		return null;
+	}
+	const name = content.slice(nameStart, nameQuote);
+	let pos = nameQuote + 1;
+	let subParent: string | undefined;
+	let subDepth: number | undefined;
+	while (pos < content.length && /\s/.test(content[pos]!)) {
+		pos++;
+	}
+	while (pos < content.length && content[pos] !== '>') {
+		if (content.startsWith('sub_parent="', pos)) {
+			pos += 'sub_parent="'.length;
+			const eq = content.indexOf('"', pos);
+			if (eq === -1) {
+				return null;
+			}
+			subParent = content.slice(pos, eq);
+			pos = eq + 1;
+			while (pos < content.length && /\s/.test(content[pos]!)) {
+				pos++;
+			}
+			continue;
+		}
+		if (content.startsWith('sub_depth="', pos)) {
+			pos += 'sub_depth="'.length;
+			const eq = content.indexOf('"', pos);
+			if (eq === -1) {
+				return null;
+			}
+			subDepth = parseInt(content.slice(pos, eq), 10) || 1;
+			pos = eq + 1;
+			while (pos < content.length && /\s/.test(content[pos]!)) {
+				pos++;
+			}
+			continue;
+		}
+		return null;
+	}
+	if (pos >= content.length || content[pos] !== '>') {
+		return null;
+	}
+	return { name, jsonStart: pos + 1, subParent, subDepth };
+}
+
+function withNestActivity(seg: ActivitySegment, mk: ParsedMarker): ActivitySegment {
+	if (!mk.subParent) {
+		return seg;
+	}
+	return { ...seg, nestParent: mk.subParent, nestDepth: mk.subDepth ?? 1 };
+}
 
 function skipJsonObject(s: string, i: number): number {
 	if (s[i] !== '{') {
@@ -274,13 +344,11 @@ function findAllToolCallMarkers(content: string, resultBlocks: ToolResultBlock[]
 			from = containingResult.fullEnd;
 			continue;
 		}
-		const nameStart = start + TOOL_CALL_OPEN.length;
-		const nameEnd = content.indexOf('">', nameStart);
-		if (nameEnd === -1) {
+		const openParsed = parseToolCallOpen(content, start);
+		if (!openParsed) {
 			break;
 		}
-		const name = content.slice(nameStart, nameEnd);
-		const jsonStart = nameEnd + 2;
+		const { name, jsonStart, subParent, subDepth } = openParsed;
 		const jsonEnd = skipJsonObject(content, jsonStart);
 		const close = '</tool_call>';
 
@@ -328,6 +396,8 @@ function findAllToolCallMarkers(content: string, resultBlocks: ToolResultBlock[]
 			args,
 			isStreaming,
 			rawJson,
+			subParent,
+			subDepth,
 		});
 
 		if (isStreaming) {
@@ -620,7 +690,7 @@ function summarizeToolActivity(mk: ParsedMarker, t: TFunction): ActivitySegment 
 	const inProgress = mk.result === undefined;
 	const failed = mk.success === false;
 	const detail = failed ? compactActivityDetail(mk.result, t) : undefined;
-	const summary = (!inProgress && !failed) ? extractResultSummary(mk.name, mk.result, t) : undefined;
+	const summary = !inProgress && !failed ? extractResultSummary(mk.name, mk.result, t) : undefined;
 	
 	const getPath = (argName = 'path') => {
 		if (mk.args[argName]) return String(mk.args[argName]);
@@ -636,16 +706,19 @@ function summarizeToolActivity(mk: ParsedMarker, t: TFunction): ActivitySegment 
 				!inProgress && !failed && mk.result
 					? parseReadFileResultLines(mk.result)
 					: undefined;
-			return {
-				type: 'activity',
-				text: readFileActivityLabel(t, p, agentReadLink, inProgress, failed),
-				status: inProgress ? 'pending' : failed ? 'error' : 'success',
-				detail,
-				summary,
-				agentReadLink,
-				resultLines,
-				resultKind: resultLines ? 'read' : undefined,
-			};
+			return withNestActivity(
+				{
+					type: 'activity',
+					text: readFileActivityLabel(t, p, agentReadLink, inProgress, failed),
+					status: inProgress ? 'pending' : failed ? 'error' : 'success',
+					detail,
+					summary,
+					agentReadLink,
+					resultLines,
+					resultKind: resultLines ? 'read' : undefined,
+				},
+				mk
+			);
 		}
 		case 'write_to_file': {
 			const p = getPath();
@@ -654,29 +727,35 @@ function summarizeToolActivity(mk: ParsedMarker, t: TFunction): ActivitySegment 
 				if (mk.result.startsWith('Created ')) text = t('agent.activity.created', { path: p });
 				else if (mk.result.startsWith('Updated ')) text = t('agent.activity.updated', { path: p });
 			}
-			return {
-				type: 'activity',
-				text: failed
-					? t('agent.activity.writeFailed', { path: p })
-					: inProgress
-						? t('agent.activity.writing', { path: p })
-						: text,
-				status: failed ? 'error' : inProgress ? 'pending' : 'success',
-				detail,
-			};
+			return withNestActivity(
+				{
+					type: 'activity',
+					text: failed
+						? t('agent.activity.writeFailed', { path: p })
+						: inProgress
+							? t('agent.activity.writing', { path: p })
+							: text,
+					status: failed ? 'error' : inProgress ? 'pending' : 'success',
+					detail,
+				},
+				mk
+			);
 		}
 		case 'str_replace': {
 			const p = getPath();
-			return {
-				type: 'activity',
-				text: failed
-					? t('agent.activity.editFailed', { path: p })
-					: inProgress
-						? t('agent.activity.editing', { path: p })
-						: t('agent.activity.edited', { path: p }),
-				status: failed ? 'error' : inProgress ? 'pending' : 'success',
-				detail,
-			};
+			return withNestActivity(
+				{
+					type: 'activity',
+					text: failed
+						? t('agent.activity.editFailed', { path: p })
+						: inProgress
+							? t('agent.activity.editing', { path: p })
+							: t('agent.activity.edited', { path: p }),
+					status: failed ? 'error' : inProgress ? 'pending' : 'success',
+					detail,
+				},
+				mk
+			);
 		}
 		case 'list_dir': {
 			const p = getPath() || '.';
@@ -684,15 +763,18 @@ function summarizeToolActivity(mk: ParsedMarker, t: TFunction): ActivitySegment 
 				!inProgress && !failed && mk.result
 					? parseDirResultLines(mk.result)
 					: undefined;
-			return {
-				type: 'activity',
-				text: inProgress ? t('agent.activity.listing', { path: p }) : t('agent.activity.listed', { path: p }),
-				status: inProgress ? 'pending' : 'success',
-				detail,
-				summary,
-				resultLines,
-				resultKind: resultLines ? 'dir' : undefined,
-			};
+			return withNestActivity(
+				{
+					type: 'activity',
+					text: inProgress ? t('agent.activity.listing', { path: p }) : t('agent.activity.listed', { path: p }),
+					status: inProgress ? 'pending' : 'success',
+					detail,
+					summary,
+					resultLines,
+					resultKind: resultLines ? 'dir' : undefined,
+				},
+				mk
+			);
 		}
 		case 'search_files': {
 			const pat = getPath('pattern');
@@ -700,17 +782,20 @@ function summarizeToolActivity(mk: ParsedMarker, t: TFunction): ActivitySegment 
 				!inProgress && !failed && mk.result && mk.result !== 'No matches found.'
 					? parseSearchResultLines(mk.result)
 					: undefined;
-			return {
-				type: 'activity',
-				text: inProgress
-					? t('agent.activity.searching', { pattern: pat })
-					: t('agent.activity.searched', { pattern: pat }),
-				status: inProgress ? 'pending' : 'success',
-				detail,
-				summary,
-				resultLines,
-				resultKind: resultLines ? 'search' : undefined,
-			};
+			return withNestActivity(
+				{
+					type: 'activity',
+					text: inProgress
+						? t('agent.activity.searching', { pattern: pat })
+						: t('agent.activity.searched', { pattern: pat }),
+					status: inProgress ? 'pending' : 'success',
+					detail,
+					summary,
+					resultLines,
+					resultKind: resultLines ? 'search' : undefined,
+				},
+				mk
+			);
 		}
 		case 'execute_command': {
 			const cmd = getPath('command').slice(0, 60);
@@ -718,27 +803,54 @@ function summarizeToolActivity(mk: ParsedMarker, t: TFunction): ActivitySegment 
 				!inProgress && !failed && mk.result
 					? parseCommandResultLines(mk.result)
 					: undefined;
-			return {
-				type: 'activity',
-				text: failed
-					? t('agent.activity.cmdFailed', { cmd })
-					: inProgress
-						? t('agent.activity.running', { cmd })
-						: t('agent.activity.ran', { cmd }),
-				status: failed ? 'error' : inProgress ? 'pending' : 'success',
-				detail,
-				summary,
-				resultLines: resultLines?.length ? resultLines : undefined,
-				resultKind: resultLines?.length ? 'plain' : undefined,
-			};
+			return withNestActivity(
+				{
+					type: 'activity',
+					text: failed
+						? t('agent.activity.cmdFailed', { cmd })
+						: inProgress
+							? t('agent.activity.running', { cmd })
+							: t('agent.activity.ran', { cmd }),
+					status: failed ? 'error' : inProgress ? 'pending' : 'success',
+					detail,
+					summary,
+					resultLines: resultLines?.length ? resultLines : undefined,
+					resultKind: resultLines?.length ? 'plain' : undefined,
+				},
+				mk
+			);
+		}
+		case 'Agent':
+		case 'delegate_task':
+		case 'Task': {
+			const hint = String(mk.args.prompt ?? mk.args.task ?? '').trim().slice(0, 72);
+			const subT = String(mk.args.subagent_type ?? '').trim();
+			const label =
+				subT && hint
+					? `${mk.name} (${subT}): ${hint}${hint.length >= 72 ? '…' : ''}`
+					: hint
+						? `${mk.name}: ${hint}${hint.length >= 72 ? '…' : ''}`
+						: mk.name;
+			return withNestActivity(
+				{
+					type: 'activity',
+					text: inProgress ? t('agent.toolPending', { name: label }) : label,
+					status: inProgress ? 'pending' : failed ? 'error' : 'info',
+					detail,
+				},
+				mk
+			);
 		}
 		default:
-			return {
-				type: 'activity',
-				text: inProgress ? t('agent.toolPending', { name: mk.name }) : mk.name,
-				status: inProgress ? 'pending' : failed ? 'error' : 'info',
-				detail,
-			};
+			return withNestActivity(
+				{
+					type: 'activity',
+					text: inProgress ? t('agent.toolPending', { name: mk.name }) : mk.name,
+					status: inProgress ? 'pending' : failed ? 'error' : 'info',
+					detail,
+				},
+				mk
+			);
 	}
 }
 
@@ -1035,8 +1147,66 @@ export type SegmentAssistantOptions = {
 	t?: TFunction;
 };
 
-export function segmentAssistantContent(content: string, options?: SegmentAssistantOptions): AssistantSegment[] {
-	const t = options?.t ?? defaultT;
+function unescapeSubAgentXmlEntities(s: string): string {
+	return s
+		.replace(/&quot;/g, '"')
+		.replace(/&gt;/g, '>')
+		.replace(/&lt;/g, '<')
+		.replace(/&amp;/g, '&');
+}
+
+function expandSubAgentsInSegments(segs: AssistantSegment[]): AssistantSegment[] {
+	const out: AssistantSegment[] = [];
+	const re =
+		/<sub_agent_delta parent="([^"]*)" depth="(\d+)">([\s\S]*?)<\/sub_agent_delta>|<sub_agent_thinking parent="([^"]*)" depth="(\d+)">([\s\S]*?)<\/sub_agent_thinking>/g;
+	for (const s of segs) {
+		if (s.type !== 'markdown') {
+			out.push(s);
+			continue;
+		}
+		const text = s.text;
+		let last = 0;
+		let matched = false;
+		let m: RegExpExecArray | null;
+		re.lastIndex = 0;
+		while ((m = re.exec(text)) !== null) {
+			matched = true;
+			if (m.index > last) {
+				const chunk = text.slice(last, m.index).trim();
+				if (chunk) out.push(...segmentParagraphsForActivity(chunk));
+			}
+			if (m[1] !== undefined) {
+				out.push({
+					type: 'sub_agent_markdown',
+					parentToolCallId: m[1],
+					depth: parseInt(m[2]!, 10) || 1,
+					text: unescapeSubAgentXmlEntities(m[3]!),
+					variant: 'text',
+				});
+			} else {
+				out.push({
+					type: 'sub_agent_markdown',
+					parentToolCallId: m[4]!,
+					depth: parseInt(m[5]!, 10) || 1,
+					text: unescapeSubAgentXmlEntities(m[6]!),
+					variant: 'thinking',
+				});
+			}
+			last = m.index + m[0].length;
+		}
+		if (matched) {
+			if (last < text.length) {
+				const chunk = text.slice(last).trim();
+				if (chunk) out.push(...segmentParagraphsForActivity(chunk));
+			}
+		} else {
+			out.push(s);
+		}
+	}
+	return out;
+}
+
+function segmentAssistantContentCore(content: string, t: TFunction): AssistantSegment[] {
 	const { segments: toolSegments, hasTools } = extractToolSegments(content, t);
 	if (hasTools) return toolSegments;
 
@@ -1051,13 +1221,22 @@ export function segmentAssistantContent(content: string, options?: SegmentAssist
 
 	while (i < n) {
 		const fence = content.indexOf('```', i);
-		if (fence === -1) { pushText(content.slice(i)); break; }
+		if (fence === -1) {
+			pushText(content.slice(i));
+			break;
+		}
 		pushText(content.slice(i, fence));
 		const langEnd = content.indexOf('\n', fence + 3);
-		if (langEnd === -1) { out.push({ type: 'markdown', text: content.slice(fence) }); break; }
+		if (langEnd === -1) {
+			out.push({ type: 'markdown', text: content.slice(fence) });
+			break;
+		}
 		const lang = content.slice(fence + 3, langEnd).trim();
 		const close = content.indexOf('```', langEnd + 1);
-		if (close === -1) { out.push({ type: 'markdown', text: content.slice(fence) }); break; }
+		if (close === -1) {
+			out.push({ type: 'markdown', text: content.slice(fence) });
+			break;
+		}
 		const body = content.slice(langEnd + 1, close);
 		if (lang === 'diff' || isUnifiedDiffBody(body)) {
 			for (const piece of splitUnifiedDiffFiles(body)) {
@@ -1072,6 +1251,11 @@ export function segmentAssistantContent(content: string, options?: SegmentAssist
 	}
 
 	return mergeAdjacentMarkdown(out);
+}
+
+export function segmentAssistantContent(content: string, options?: SegmentAssistantOptions): AssistantSegment[] {
+	const t = options?.t ?? defaultT;
+	return expandSubAgentsInSegments(segmentAssistantContentCore(content, t));
 }
 
 function mergeAdjacentMarkdown(segs: AssistantSegment[]): AssistantSegment[] {
@@ -1129,8 +1313,15 @@ function groupActivities(segs: AssistantSegment[]): AssistantSegment[] {
 		// 收集连续的 activity（允许中间夹 file_edit，file_edit 不进 group）
 		const groupItems: ActivitySegment[] = [];
 		let j = i;
+		const firstNest = (s as ActivitySegment).nestParent ?? '';
 		while (j < segs.length && (segs[j]!.type === 'activity' || segs[j]!.type === 'file_edit')) {
-			if (segs[j]!.type === 'activity') groupItems.push(segs[j] as ActivitySegment);
+			if (segs[j]!.type === 'activity') {
+				const aj = segs[j] as ActivitySegment;
+				if ((aj.nestParent ?? '') !== firstNest) {
+					break;
+				}
+				groupItems.push(aj);
+			}
 			j++;
 		}
 		// 单行 pending 不折叠（保持原来的进行中指示器）

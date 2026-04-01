@@ -77,7 +77,7 @@ import {
 import { summarizeThreadForSidebar, isTimestampToday } from '../threadListSummary.js';
 import { registerTerminalPtyIpc } from '../terminalPty.js';
 import { TsLspSession } from '../lsp/tsLspSession.js';
-import { setToolLspSession, setDelegateContext } from '../agent/toolExecutor.js';
+import { setToolLspSession, setDelegateContext, clearDelegateContext } from '../agent/toolExecutor.js';
 import {
 	searchWorkspaceSymbols,
 	clearWorkspaceSymbolIndex,
@@ -195,39 +195,54 @@ function runChatStream(
 					mistakeLimitEnabled: ag?.mistakeLimitEnabled,
 					onMistakeLimitReached,
 				};
-			setDelegateContext(settings, agentOptions, 0);
-			await runAgentLoop(
-				settings,
-				sendMessages,
-				{
-					requestModelId: resolved.requestModelId,
-					paradigm: resolved.paradigm,
-					requestApiKey: resolved.apiKey,
-					requestBaseURL: resolved.baseURL,
-					maxOutputTokens: resolved.maxOutputTokens,
-					signal: ac.signal,
-					composerMode: mode,
-					thinkingLevel,
-					beforeExecuteTool,
-					maxConsecutiveMistakes: ag?.maxConsecutiveMistakes,
-					mistakeLimitEnabled: ag?.mistakeLimitEnabled,
-					onMistakeLimitReached,
-					toolHooks: {
-						beforeWrite: ({ path, previousContent }) => {
-							const snapshots = agentRevertSnapshotsByThread.get(threadId);
-							if (!snapshots || snapshots.has(path)) {
-								touchFileInThread(threadId, path, 'modified', false);
-								return;
-							}
-							snapshots.set(path, previousContent);
-							touchFileInThread(
-								threadId,
-								path,
-								previousContent === null ? 'created' : 'modified',
-								previousContent === null
-							);
+			try {
+				setDelegateContext(
+					settings,
+					agentOptions,
+					ac.signal,
+					(evt) => send({ threadId, ...evt }),
+					threadId,
+					(payload) =>
+						send({
+							threadId,
+							type: 'sub_agent_background_done',
+							parentToolCallId: payload.parentToolCallId,
+							result: payload.result,
+							success: payload.success,
+						})
+				);
+				await runAgentLoop(
+					settings,
+					sendMessages,
+					{
+						requestModelId: resolved.requestModelId,
+						paradigm: resolved.paradigm,
+						requestApiKey: resolved.apiKey,
+						requestBaseURL: resolved.baseURL,
+						maxOutputTokens: resolved.maxOutputTokens,
+						signal: ac.signal,
+						composerMode: mode,
+						thinkingLevel,
+						beforeExecuteTool,
+						maxConsecutiveMistakes: ag?.maxConsecutiveMistakes,
+						mistakeLimitEnabled: ag?.mistakeLimitEnabled,
+						onMistakeLimitReached,
+						toolHooks: {
+							beforeWrite: ({ path, previousContent }) => {
+								const snapshots = agentRevertSnapshotsByThread.get(threadId);
+								if (!snapshots || snapshots.has(path)) {
+									touchFileInThread(threadId, path, 'modified', false);
+									return;
+								}
+								snapshots.set(path, previousContent);
+								touchFileInThread(
+									threadId,
+									path,
+									previousContent === null ? 'created' : 'modified',
+									previousContent === null
+								);
+							},
 						},
-					},
 						...(agentSystemAppend?.trim() ? { agentSystemAppend: agentSystemAppend.trim() } : {}),
 					},
 					{
@@ -236,15 +251,19 @@ function runChatStream(
 							send({ threadId, type: 'tool_input_delta', name: p.name, partialJson: p.partialJson, index: p.index }),
 						onThinkingDelta: (text) => send({ threadId, type: 'thinking_delta', text }),
 						onToolCall: (name, args) => send({ threadId, type: 'tool_call', name, args: JSON.stringify(args) }),
-						onToolResult: (name, result, success) => send({ threadId, type: 'tool_result', name, result, success }),
-					onDone: (full, usage) => {
-						updateLastAssistant(threadId, full);
-						accumulateTokenUsage(threadId, usage?.inputTokens, usage?.outputTokens);
-						send({ threadId, type: 'done', text: full, usage });
-					},
-					onError: (message) => send({ threadId, type: 'error', message }),
-				}
-			);
+						onToolResult: (name, result, success) =>
+							send({ threadId, type: 'tool_result', name, result, success }),
+						onDone: (full, usage) => {
+							updateLastAssistant(threadId, full);
+							accumulateTokenUsage(threadId, usage?.inputTokens, usage?.outputTokens);
+							send({ threadId, type: 'done', text: full, usage });
+						},
+						onError: (message) => send({ threadId, type: 'error', message }),
+					}
+				);
+			} finally {
+				clearDelegateContext();
+			}
 			return;
 		}
 

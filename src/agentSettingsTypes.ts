@@ -64,6 +64,8 @@ export type AgentCustomization = {
 	maxConsecutiveMistakes?: number;
 	/** 是否启用连续失败暂停，默认 true */
 	mistakeLimitEnabled?: boolean;
+	/** 省略 subagent_type 时 Agent 后台运行（对齐 Claude Code fork），默认 false */
+	backgroundForkAgent?: boolean;
 	/** 无新 chunk 最长等待（ms），见主进程 agentSettingsTypes */
 	streamIdleTimeoutMs?: number;
 	/** 是否启用静默 watchdog，默认 true */
@@ -82,6 +84,7 @@ export const defaultAgentCustomization = (): AgentCustomization => ({
 	commands: [],
 	maxConsecutiveMistakes: 5,
 	mistakeLimitEnabled: true,
+	backgroundForkAgent: false,
 });
 
 /** 主进程从 `.claude` / `.cursor` / `.async` 的 skills 目录扫描出的项，id 形如 `ws-skill-*`；不应写入 settings 或 `.async/agent.json`。 */
