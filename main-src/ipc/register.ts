@@ -64,6 +64,11 @@ import {
 	type MistakeLimitDecision,
 } from '../agent/mistakeLimitGate.js';
 import { createToolApprovalBeforeExecute, resolveToolApproval } from '../agent/toolApprovalGate.js';
+import { setPlanQuestionRuntime } from '../agent/planQuestionRuntime.js';
+import {
+	abortPlanQuestionWaitersForThread,
+	resolvePlanQuestionTool,
+} from '../agent/planQuestionTool.js';
 import { loadClaudeWorkspaceSkills, prepareUserTurnForChat } from '../llm/agentMessagePrep.js';
 import {
 	buildSkillCreatorSystemAppend,
@@ -213,6 +218,13 @@ function runChatStream(
 							success: payload.success,
 						})
 				);
+				if (mode === 'plan') {
+					setPlanQuestionRuntime({
+						threadId,
+						signal: ac.signal,
+						emit: (evt) => send({ threadId, ...evt }),
+					});
+				}
 				await runAgentLoop(
 					settings,
 					sendMessages,
@@ -265,6 +277,9 @@ function runChatStream(
 				);
 			} finally {
 				clearDelegateContext();
+				if (mode === 'plan') {
+					setPlanQuestionRuntime(null);
+				}
 			}
 			return;
 		}
@@ -926,6 +941,7 @@ export function registerIpc(): void {
 	);
 
 	ipcMain.handle('chat:abort', (_e, threadId: string) => {
+		abortPlanQuestionWaitersForThread(threadId);
 		abortByThread.get(threadId)?.abort();
 		abortByThread.delete(threadId);
 		const prefix = `ta-${threadId}-`;
@@ -952,6 +968,22 @@ export function registerIpc(): void {
 			if (!id) return { ok: false as const, error: 'missing id' };
 			resolveToolApproval(toolApprovalWaiters, id, Boolean(payload.approved));
 			return { ok: true as const };
+		}
+	);
+
+	ipcMain.handle(
+		'plan:toolQuestionRespond',
+		(
+			_e,
+			payload: { requestId?: string; skipped?: boolean; answerText?: string }
+		) => {
+			const requestId = String(payload?.requestId ?? '');
+			if (!requestId) return { ok: false as const, error: 'missing requestId' as const };
+			const ok = resolvePlanQuestionTool(requestId, {
+				skipped: Boolean(payload?.skipped),
+				answerText: typeof payload?.answerText === 'string' ? payload.answerText : undefined,
+			});
+			return ok ? ({ ok: true as const } as const) : ({ ok: false as const, error: 'unknown request' as const });
 		}
 	);
 

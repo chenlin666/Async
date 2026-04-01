@@ -55,10 +55,11 @@ import { SkillScopeDialog } from './SkillScopeDialog';
 import { ToolApprovalInlineCard } from './ToolApprovalCard';
 import { AgentMistakeLimitDialog } from './AgentMistakeLimitDialog';
 import { PlanReviewPanel } from './PlanReviewPanel';
+import { flattenAssistantTextPartsForSearch } from './agentStructuredMessage';
 import {
 	parseQuestions,
+	pendingPlanQuestionFromMessages,
 	parsePlanDocument,
-	stripPlanBodyForChatDisplay,
 	toPlanMd,
 	generatePlanFilename,
 	type PlanQuestion,
@@ -676,6 +677,10 @@ export default function App() {
 	fileChangesDismissedRef.current = fileChangesDismissed;
 	/** Plan 模式 — 结构化问题弹窗 */
 	const [planQuestion, setPlanQuestion] = useState<PlanQuestion | null>(null);
+	/** 若来自 ask_plan_question 工具，需在 IPC 中回传主进程以解除 execute 阻塞 */
+	const [planQuestionRequestId, setPlanQuestionRequestId] = useState<string | null>(null);
+	/** 用户在某线程对「当前最后一条助手消息」点了跳过，切回该线程时不再自动弹出同一题 */
+	const planQuestionDismissedByThreadRef = useRef(new Map<string, string>());
 	/** /create-skill 发送前：选择 Skill 适用范围 */
 	const [skillScopePending, setSkillScopePending] = useState<{
 		tailSegments: ComposerSegment[];
@@ -1431,6 +1436,9 @@ export default function App() {
 					command: payload.command,
 					path: payload.path,
 				});
+			} else if (payload.type === 'plan_question_request') {
+				setPlanQuestion(payload.question);
+				setPlanQuestionRequestId(payload.requestId);
 			} else if (payload.type === 'agent_mistake_limit') {
 				setMistakeLimitRequest({
 					recoveryId: payload.recoveryId,
@@ -1480,6 +1488,7 @@ export default function App() {
 				setStreamingThinking('');
 				setToolApprovalRequest(null);
 				setMistakeLimitRequest(null);
+				setPlanQuestionRequestId(null);
 				clearStreamingToolPreviewNow();
 				setFileChangesDismissed(false);
 				setDismissedFiles(new Set());
@@ -1493,6 +1502,8 @@ export default function App() {
 				}
 
 				const fullText = payload.text ?? '';
+				/** 助手落盘为结构化 JSON；Plan 的 QUESTIONS / # Plan: 只在 text 块里，需展开后再解析 */
+				const textForPlanMarkers = flattenAssistantTextPartsForSearch(fullText);
 				/**
 				 * 避免「先关掉 awaiting/streaming、再等 loadMessages」的一帧空窗：
 				 * 那时 displayMessages 只用 messages，而库里的助手消息尚未写入，列表会瞬间变短，
@@ -1505,14 +1516,16 @@ export default function App() {
 						return [...m, { role: 'assistant', content: fullText }];
 					});
 				}
-				const q = parseQuestions(fullText);
+				const q = parseQuestions(textForPlanMarkers);
 				if (q) {
 					setPlanQuestion(q);
+					setPlanQuestionRequestId(null);
 				} else {
 					setPlanQuestion(null);
+					setPlanQuestionRequestId(null);
 				}
 
-				const plan = parsePlanDocument(fullText);
+				const plan = parsePlanDocument(textForPlanMarkers);
 				if (plan) {
 					setParsedPlan(plan);
 					const filename = generatePlanFilename(plan.name);
@@ -1566,6 +1579,7 @@ export default function App() {
 				setStreamingThinking('');
 				setToolApprovalRequest(null);
 				setMistakeLimitRequest(null);
+				setPlanQuestionRequestId(null);
 				clearStreamingToolPreviewNow();
 				setMessages((m) => [
 					...m,
@@ -1855,6 +1869,7 @@ export default function App() {
 			}
 			await shell.invoke('threads:delete', id);
 			clearPersistedAgentFileChanges(id);
+			planQuestionDismissedByThreadRef.current.delete(id);
 			await refreshThreads();
 		},
 		[shell, currentId, awaitingReply, refreshThreads, clearStreamingToolPreviewNow]
@@ -1931,6 +1946,8 @@ export default function App() {
 		if (!text) {
 			return;
 		}
+		setPlanQuestion(null);
+		setPlanQuestionRequestId(null);
 		if (opts?.threadId && opts.threadId !== currentId) {
 			await shell.invoke('threads:select', opts.threadId);
 			setCurrentId(opts.threadId);
@@ -1995,14 +2012,37 @@ export default function App() {
 	};
 
 	const onPlanQuestionSubmit = (answer: string) => {
-		setPlanQuestion(null);
+		const rid = planQuestionRequestId;
 		const reply = `我选择：${answer}`;
+		if (rid && shell) {
+			setPlanQuestion(null);
+			setPlanQuestionRequestId(null);
+			void shell.invoke('plan:toolQuestionRespond', { requestId: rid, answerText: reply });
+			return;
+		}
+		setPlanQuestion(null);
+		setPlanQuestionRequestId(null);
 		void onSend(reply);
 	};
 
 	const onPlanQuestionSkip = useCallback(() => {
+		const id = currentIdRef.current;
+		const last = [...messagesRef.current].reverse().find((m) => m.role === 'assistant');
+		if (id && last) {
+			planQuestionDismissedByThreadRef.current.set(id, hashAgentAssistantContent(last.content));
+		}
+		const rid = planQuestionRequestId;
+		const skipText = t('plan.q.skipUserMessage');
+		if (rid && shell) {
+			setPlanQuestion(null);
+			setPlanQuestionRequestId(null);
+			void shell.invoke('plan:toolQuestionRespond', { requestId: rid, skipped: true, answerText: skipText });
+			return;
+		}
 		setPlanQuestion(null);
-	}, []);
+		setPlanQuestionRequestId(null);
+		void onSend(skipText);
+	}, [t, onSend, shell, planQuestionRequestId]);
 
 	const onPlanTodoToggle = useCallback(
 		(id: string) => {
@@ -2995,6 +3035,58 @@ export default function App() {
 		setDismissedFiles(new Set(stored.dismissedPaths));
 	}, [currentId, messages, messagesThreadId]);
 
+	/** Plan：切回线程或 loadMessages 完成后，若最后一条仍是带 QUESTIONS 的助手消息则恢复弹窗 */
+	useLayoutEffect(() => {
+		if (!currentId || messagesThreadId !== currentId) {
+			setPlanQuestion(null);
+			setPlanQuestionRequestId(null);
+			return;
+		}
+		if (composerMode !== 'plan') {
+			setPlanQuestion(null);
+			setPlanQuestionRequestId(null);
+			return;
+		}
+		if (resendFromUserIndex !== null) {
+			setPlanQuestion(null);
+			setPlanQuestionRequestId(null);
+			return;
+		}
+		if (awaitingReply || streaming !== '') {
+			/* ask_plan_question 阻塞主进程时仍需保留弹窗与 requestId */
+			if (!planQuestionRequestId) {
+				setPlanQuestion(null);
+				setPlanQuestionRequestId(null);
+			}
+			return;
+		}
+		const pending = pendingPlanQuestionFromMessages(messages);
+		const lastAsst = [...messages].reverse().find((m) => m.role === 'assistant');
+		const hash = lastAsst ? hashAgentAssistantContent(lastAsst.content) : '';
+		const dismissedHash = planQuestionDismissedByThreadRef.current.get(currentId);
+		if (pending && dismissedHash === hash) {
+			setPlanQuestion(null);
+			setPlanQuestionRequestId(null);
+			return;
+		}
+		if (pending) {
+			setPlanQuestion(pending);
+			setPlanQuestionRequestId(null);
+		} else {
+			setPlanQuestion(null);
+			setPlanQuestionRequestId(null);
+		}
+	}, [
+		currentId,
+		messagesThreadId,
+		messages,
+		composerMode,
+		resendFromUserIndex,
+		awaitingReply,
+		streaming,
+		planQuestionRequestId,
+	]);
+
 	const onKeepAllEdits = useCallback(async () => {
 		if (!currentId) {
 			return;
@@ -3621,6 +3713,8 @@ export default function App() {
 								if (awaitingReply) {
 									return;
 								}
+								setPlanQuestion(null);
+								setPlanQuestionRequestId(null);
 								setResendFromUserIndex(userMessageIndex);
 								setInlineResendSegments(userMessageToSegments(m.content, workspaceFileList));
 							}}
@@ -3653,15 +3747,13 @@ export default function App() {
 							</span>
 						) : (
 							<ChatMarkdown
-								content={
-									composerMode === 'plan'
-										? stripPlanBodyForChatDisplay(m.content)
-										: m.content
-								}
+								content={m.content}
 								agentUi={
+									composerMode === 'plan' ||
 									composerMode === 'agent' ||
 									assistantMessageUsesAgentToolProtocol(m.content)
 								}
+								planUi={composerMode === 'plan'}
 								workspaceRoot={workspace}
 								onOpenAgentFile={(rel, line, end) => void onExplorerOpenFile(rel, line, end)}
 								onRunCommand={(cmd) => {

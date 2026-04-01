@@ -27,6 +27,7 @@ function dropParsedStreamingFileEditWhilePreview(
 type Props = {
 	content: string;
 	agentUi?: boolean;
+	planUi?: boolean;
 	workspaceRoot?: string | null;
 	onOpenAgentFile?: (relPath: string, revealLine?: number, revealEndLine?: number) => void;
 	onRunCommand?: (cmd: string) => void;
@@ -37,6 +38,7 @@ type Props = {
 export function ChatMarkdown({
 	content,
 	agentUi = false,
+	planUi = false,
 	workspaceRoot,
 	onOpenAgentFile,
 	onRunCommand,
@@ -54,7 +56,7 @@ export function ChatMarkdown({
 	const parsedSegments = useMemo(() => {
 		if (!agentUi) return [] as AssistantSegment[];
 		const t0 = performance.now();
-		const result = segmentAssistantContentUnified(content, { t });
+		const result = segmentAssistantContentUnified(content, { t, planUi });
 		if (import.meta.env.DEV) {
 			const elapsed = performance.now() - t0;
 			if (elapsed > 8) {
@@ -65,7 +67,7 @@ export function ChatMarkdown({
 			}
 		}
 		return result;
-	}, [agentUi, content, t]);
+	}, [agentUi, content, t, planUi]);
 
 	const renderSegments = useMemo(() => {
 		if (!agentUi) {

@@ -438,6 +438,13 @@ export const messagesZhCN: Record<string, string> = {
 	'plan.q.title': '问题',
 	'plan.q.aria': '计划相关问题',
 	'plan.q.customPh': '请输入你的想法…',
+	'plan.q.chatActivity': '已弹出计划澄清选项（见上方问题卡片）',
+	'plan.q.chatActivityPending': '正在整理计划澄清选项…',
+	'plan.q.toolActivityPending': '计划澄清：等待用户选择…',
+	'plan.q.toolActivityDone': '计划澄清：已收到用户选择',
+	'plan.q.toolActivityFailed': '计划澄清：调用失败',
+	'plan.q.skipUserMessage':
+		'我选择跳过：请按你推荐的默认方案继续，不必再就这一点追问。',
 	'plan.review.aria': '审阅计划',
 	'plan.review.label': '审阅计划',
 	'plan.review.fullShow': '查看完整计划（含表格与风险说明）',

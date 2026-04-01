@@ -70,6 +70,7 @@ const READ_TOOLS_SKIP_INPUT_DELTA = new Set([
 	'search_files',
 	'ListMcpResourcesTool',
 	'ReadMcpResourceTool',
+	'ask_plan_question',
 	'Agent',
 	'delegate_task',
 	'Task',
@@ -220,6 +221,7 @@ function inferOpenAIToolNameFromPartialArguments(partial: string): string {
 	// read_file 常带行号；仅有 path 的片段多是 write_to_file 正在流出 path，content 尚未到
 	if (c.includes('"start_line"') || c.includes('"end_line"')) return 'read_file';
 	if (c.includes('"path"')) return 'write_to_file';
+	if (c.includes('"question"') && c.includes('"options"')) return 'ask_plan_question';
 	return '';
 }
 

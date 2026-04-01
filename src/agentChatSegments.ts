@@ -9,6 +9,10 @@ import {
 	parseAgentAssistantPayload,
 	structuredToLegacyAgentXml,
 } from './agentStructuredMessage';
+import {
+	assistantDisplayStripQuestionBlock,
+	stripPlanDocumentForChatDisplay,
+} from './planParser';
 
 /**
  * 将助手消息拆成 Markdown / 活动行 / 内联文件编辑卡片（Cursor 风格）。
@@ -904,6 +908,21 @@ function summarizeToolActivity(mk: ParsedMarker, t: TFunction): ActivitySegment 
 				mk
 			);
 		}
+		case 'ask_plan_question': {
+			return withNestActivity(
+				{
+					type: 'activity',
+					text: inProgress
+						? t('plan.q.toolActivityPending')
+						: failed
+							? t('plan.q.toolActivityFailed')
+							: t('plan.q.toolActivityDone'),
+					status: inProgress ? 'pending' : failed ? 'error' : 'success',
+					detail,
+				},
+				mk
+			);
+		}
 		case 'execute_command': {
 			const cmd = getPath('command').slice(0, 60);
 			const resultLines =
@@ -1274,6 +1293,7 @@ export function collectFileChanges(segments: AssistantSegment[]): FileChangeSumm
 
 export type SegmentAssistantOptions = {
 	t?: TFunction;
+	planUi?: boolean;
 };
 
 function unescapeSubAgentXmlEntities(s: string): string {
@@ -1335,36 +1355,60 @@ function expandSubAgentsInSegments(segs: AssistantSegment[]): AssistantSegment[]
 	return out;
 }
 
-function segmentAssistantContentCore(content: string, t: TFunction): AssistantSegment[] {
+function segmentAssistantContentCore(
+	content: string,
+	t: TFunction,
+	planUi = false
+): AssistantSegment[] {
 	const dbg = agentSegmentDebugEnabled();
 	const t0 = dbg ? performance.now() : 0;
-	const { segments: toolSegments, hasTools } = extractToolSegments(content, t);
+	const questionDisplay = planUi
+		? assistantDisplayStripQuestionBlock(content)
+		: { text: content, questionState: 'none' as const };
+	const displayText = planUi
+		? stripPlanDocumentForChatDisplay(questionDisplay.text)
+		: questionDisplay.text;
+	const planQuestionActivity =
+		questionDisplay.questionState === 'none'
+			? null
+			: ({
+					type: 'activity',
+					text:
+						questionDisplay.questionState === 'pending'
+							? t('plan.q.chatActivityPending')
+							: t('plan.q.chatActivity'),
+					status: questionDisplay.questionState === 'pending' ? 'pending' : 'info',
+				} satisfies ActivitySegment);
+
+	const { segments: toolSegments, hasTools } = extractToolSegments(displayText, t);
 	if (hasTools) {
+		const out = planQuestionActivity ? [...toolSegments, planQuestionActivity] : toolSegments;
 		if (dbg) {
 			agentSegmentDebugLog('segmentAssistantContentCore:tools', {
 				ms: Number((performance.now() - t0).toFixed(2)),
 				contentLen: content.length,
-				segmentCount: toolSegments.length,
-				histogram: segmentTypeHistogram(toolSegments),
+				segmentCount: out.length,
+				histogram: segmentTypeHistogram(out),
 			});
 		}
-		return toolSegments;
+		return out;
 	}
-	const plain = segmentTextWithFenceSupport(content);
+	const plain = segmentTextWithFenceSupport(displayText);
+	const out = planQuestionActivity ? [...plain, planQuestionActivity] : plain;
 	if (dbg) {
 		agentSegmentDebugLog('segmentAssistantContentCore:plain', {
 			ms: Number((performance.now() - t0).toFixed(2)),
 			contentLen: content.length,
-			segmentCount: plain.length,
-			histogram: segmentTypeHistogram(plain),
+			segmentCount: out.length,
+			histogram: segmentTypeHistogram(out),
 		});
 	}
-	return plain;
+	return out;
 }
 
 export function segmentAssistantContent(content: string, options?: SegmentAssistantOptions): AssistantSegment[] {
 	const t = options?.t ?? defaultT;
-	return expandSubAgentsInSegments(segmentAssistantContentCore(content, t));
+	return expandSubAgentsInSegments(segmentAssistantContentCore(content, t, options?.planUi));
 }
 
 /**
@@ -1381,7 +1425,7 @@ export function segmentAssistantContentUnified(content: string, options?: Segmen
 		const merged: AssistantSegment[] = [];
 		for (const part of p.parts) {
 			if (part.type === 'text') {
-				if (part.text) merged.push(...segmentAssistantContentCore(part.text, t));
+				if (part.text) merged.push(...segmentAssistantContentCore(part.text, t, options?.planUi));
 			} else {
 				const mini = structuredToLegacyAgentXml({ _asyncAssistant: 1, v: 1, parts: [part] });
 				merged.push(...extractToolSegments(mini, t).segments);

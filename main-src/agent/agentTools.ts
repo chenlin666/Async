@@ -42,9 +42,9 @@ export function isReadOnlyAgentTool(name: string): boolean {
 
 export function agentToolsForComposerMode(mode: 'agent' | 'plan', all: AgentToolDef[] = AGENT_TOOLS): AgentToolDef[] {
 	if (mode === 'plan') {
-		return all.filter((d) => isReadOnlyAgentTool(d.name));
+		return all.filter((d) => isReadOnlyAgentTool(d.name) || d.name === 'ask_plan_question');
 	}
-	return all;
+	return all.filter((d) => d.name !== 'ask_plan_question');
 }
 
 export const AGENT_TOOLS: AgentToolDef[] = [
@@ -229,6 +229,39 @@ export const AGENT_TOOLS: AgentToolDef[] = [
 				uri: { type: 'string', description: 'Resource URI to read' },
 			},
 			required: ['server', 'uri'],
+		},
+	},
+	{
+		name: 'ask_plan_question',
+		description:
+			'Plan mode only: ask the user ONE multiple-choice clarification. Keep the old Plan UX shape: provide exactly 4 options total, where the first 3 are concrete recommendations and the 4th is an Other/custom option for free text. The app shows a picker and custom input; your next turn receives the user answer as this tool\'s result text. Call at most one per assistant turn; wait for the result before asking another or drafting `# Plan:`. Do not duplicate the same question in markdown.',
+		parameters: {
+			type: 'object',
+			properties: {
+				question: {
+					type: 'string',
+					description: 'Single concrete question (1–2 short sentences), same language as the user.',
+				},
+				options: {
+					type: 'array',
+					description:
+						'Exactly 4 options: the first 3 are concrete answer choices, and the 4th must be Other/custom so the user can type their own answer. Each item may be a string label, or an object { id, label }.',
+					items: {
+						oneOf: [
+							{ type: 'string' },
+							{
+								type: 'object',
+								properties: {
+									id: { type: 'string' },
+									label: { type: 'string' },
+								},
+								required: ['label'],
+							},
+						],
+					},
+				},
+			},
+			required: ['question', 'options'],
 		},
 	},
 ];

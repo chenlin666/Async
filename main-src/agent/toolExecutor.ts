@@ -18,6 +18,7 @@ import type { McpToolResult } from '../mcp/mcpTypes.js';
 import type { NestedAgentStreamEmit } from '../ipc/nestedAgentStream.js';
 import { appendSubagentTranscript } from '../threadStore.js';
 import { assembleAgentToolPool } from './agentToolPool.js';
+import { executeAskPlanQuestionTool } from './planQuestionTool.js';
 import type { ComposerMode } from '../llm/composerMode.js';
 import { buildSubagentSystemAppend, resolveSubagentProfile } from './subagentProfile.js';
 import { shouldRunAgentInBackground } from './agentForkPolicy.js';
@@ -265,6 +266,8 @@ export async function executeTool(
 			return await executeListMcpResources(call);
 		case 'ReadMcpResourceTool':
 			return await executeReadMcpResource(call);
+		case 'ask_plan_question':
+			return await executeAskPlanQuestionTool(call);
 		default:
 			if (getMcpManager().isMcpTool(call.name)) {
 				return await executeMcpAgentTool(call);

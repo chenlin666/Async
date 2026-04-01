@@ -1,3 +1,5 @@
+import { flattenAssistantTextPartsForSearch } from './agentStructuredMessage';
+
 /**
  * Parse Plan-mode AI output into structured questions and plan documents.
  *
@@ -68,6 +70,24 @@ export function parseQuestions(text: string): PlanQuestion | null {
 }
 
 /**
+ * 若线程最后一条是助手消息且内含 QUESTIONS 块，则视为「尚未继续对话、待用户作答」。
+ * 用于切回线程时恢复 Plan 问题弹窗（助手内容为结构化 JSON 时会先展平文本再解析）。
+ */
+export function pendingPlanQuestionFromMessages(
+	messages: ReadonlyArray<{ role: string; content: string }>
+): PlanQuestion | null {
+	if (messages.length === 0) {
+		return null;
+	}
+	const last = messages[messages.length - 1]!;
+	if (last.role !== 'assistant') {
+		return null;
+	}
+	const flat = flattenAssistantTextPartsForSearch(last.content);
+	return parseQuestions(flat);
+}
+
+/**
  * Strip the entire ---QUESTIONS--- block (including content) from the message
  * so the chat bubble only shows the conversational context around it.
  */
@@ -75,20 +95,55 @@ export function stripQuestionMarkers(text: string): string {
 	return text.replace(/---QUESTIONS---[\s\S]*?---\/QUESTIONS---/g, '').trim();
 }
 
+const Q_BLOCK_OPEN_MARKER = '---QUESTIONS---';
+const Q_BLOCK_CLOSE_MARKER = '---/QUESTIONS---';
+
+/**
+ * 助手气泡渲染：去掉 ---QUESTIONS--- 块（弹窗已承载选项），避免用户看到原始标记；
+ * 未闭合时也会先隐藏流式标记，避免原始协议泄漏到聊天气泡。
+ */
+export function assistantDisplayStripQuestionBlock(content: string): {
+	text: string;
+	questionState: 'none' | 'pending' | 'ready';
+} {
+	const openIdx = content.indexOf(Q_BLOCK_OPEN_MARKER);
+	if (openIdx === -1) {
+		return { text: content, questionState: 'none' };
+	}
+
+	const closeIdx = content.indexOf(Q_BLOCK_CLOSE_MARKER, openIdx + Q_BLOCK_OPEN_MARKER.length);
+	const endIdx =
+		closeIdx === -1 ? content.length : closeIdx + Q_BLOCK_CLOSE_MARKER.length;
+	const text = `${content.slice(0, openIdx)}${content.slice(endIdx)}`
+		.replace(/\n{3,}/g, '\n\n')
+		.trim();
+
+	return {
+		text,
+		questionState: closeIdx === -1 ? 'pending' : 'ready',
+	};
+}
+
+/**
+ * 去掉 `# Plan:` 文档正文，聊天区只保留前言。
+ */
+export function stripPlanDocumentForChatDisplay(text: string): string {
+	const m = text.match(/^#\s+Plan:\s/im);
+	if (!m || m.index === undefined) {
+		return text.trim();
+	}
+	const preamble = text.slice(0, m.index).trim();
+	return preamble.length > 0
+		? preamble
+		: '计划已生成，请查看下方 **Review Plan**；完整正文已保存为 `.plan.md`。';
+}
+
 /**
  * Remove the `# Plan:` document from chat when Review Plan panel shows the same content.
  * Keeps any preamble (e.g. short intro before the plan).
  */
 export function stripPlanBodyForChatDisplay(text: string): string {
-	const noQuestions = stripQuestionMarkers(text);
-	const m = noQuestions.match(/^#\s+Plan:\s/im);
-	if (!m || m.index === undefined) {
-		return noQuestions;
-	}
-	const preamble = noQuestions.slice(0, m.index).trim();
-	return preamble.length > 0
-		? preamble
-		: '计划已生成，请查看下方 **Review Plan**；完整正文已保存为 `.plan.md`。';
+	return stripPlanDocumentForChatDisplay(stripQuestionMarkers(text));
 }
 
 const PLAN_HEADING = /^#\s+Plan:\s*(.+)$/m;

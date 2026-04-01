@@ -64,19 +64,20 @@ export function PlanQuestionDialog({ question, onSubmit, onSkip }: Props) {
 			<div className="ref-plan-q-body">
 				<p className="ref-plan-q-text">{renderBoldMarkdown(question.text)}</p>
 				<div className="ref-plan-q-options" role="radiogroup">
-					{question.options.map((opt, idx) => {
-						const isOtherSlot = isLastOther && idx === question.options.length - 1;
-						const active = selectedId === opt.id;
-						return (
-							<button
-								key={opt.id}
-								type="button"
-								role="radio"
-								aria-checked={active}
-								className={`ref-plan-q-opt ${active ? 'is-selected' : ''}`}
-								onClick={() => handleSelect(opt.id)}
-							>
-								<span className="ref-plan-q-opt-id">{opt.id}</span>
+				{question.options.map((opt, idx) => {
+					const isOtherSlot = isLastOther && idx === question.options.length - 1;
+					const active = selectedId === opt.id;
+					const displayId = String.fromCharCode(65 + idx); // A, B, C, …
+					return (
+						<button
+							key={opt.id}
+							type="button"
+							role="radio"
+							aria-checked={active}
+							className={`ref-plan-q-opt ${active ? 'is-selected' : ''}`}
+							onClick={() => handleSelect(opt.id)}
+						>
+							<span className="ref-plan-q-opt-id">{displayId}</span>
 								{isOtherSlot ? (
 									<span className="ref-plan-q-opt-label ref-plan-q-opt-label--other">
 										<span className="ref-plan-q-opt-other-prefix">

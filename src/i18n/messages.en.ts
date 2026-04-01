@@ -430,6 +430,13 @@ export const messagesEn: Record<string, string> = {
 	'plan.q.title': 'Questions',
 	'plan.q.aria': 'Plan questions',
 	'plan.q.customPh': 'Your answer…',
+	'plan.q.chatActivity': 'Plan clarification options shown (see question card above)',
+	'plan.q.chatActivityPending': 'Preparing plan clarification options…',
+	'plan.q.toolActivityPending': 'Plan question: waiting for user…',
+	'plan.q.toolActivityDone': 'Plan question: user answered',
+	'plan.q.toolActivityFailed': 'Plan question: failed',
+	'plan.q.skipUserMessage':
+		"I'm skipping this: proceed with your recommended default and don't ask this choice again.",
 	'plan.review.aria': 'Review plan',
 	'plan.review.label': 'Review Plan',
 	'plan.review.fullShow': 'Show full plan (tables & risks)',

@@ -60,6 +60,12 @@ export type ChatStreamPayload =
 	  }
 	| {
 			threadId: string;
+			type: 'plan_question_request';
+			requestId: string;
+			question: { text: string; options: { id: string; label: string }[] };
+	  }
+	| {
+			threadId: string;
 			type: 'agent_mistake_limit';
 			recoveryId: string;
 			consecutiveFailures: number;
