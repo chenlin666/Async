@@ -2017,7 +2017,9 @@ export default function App() {
 		if (rid && shell) {
 			setPlanQuestion(null);
 			setPlanQuestionRequestId(null);
-			void shell.invoke('plan:toolQuestionRespond', { requestId: rid, answerText: reply });
+			void shell
+				.invoke('plan:toolQuestionRespond', { requestId: rid, answerText: reply })
+				.catch((e) => console.error('[plan:toolQuestionRespond]', e));
 			return;
 		}
 		setPlanQuestion(null);
@@ -2036,7 +2038,9 @@ export default function App() {
 		if (rid && shell) {
 			setPlanQuestion(null);
 			setPlanQuestionRequestId(null);
-			void shell.invoke('plan:toolQuestionRespond', { requestId: rid, skipped: true, answerText: skipText });
+			void shell
+				.invoke('plan:toolQuestionRespond', { requestId: rid, skipped: true, answerText: skipText })
+				.catch((e) => console.error('[plan:toolQuestionRespond]', e));
 			return;
 		}
 		setPlanQuestion(null);
