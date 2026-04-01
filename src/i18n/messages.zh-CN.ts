@@ -450,7 +450,7 @@ export const messagesZhCN: Record<string, string> = {
 
 	// agent settings (Rules / Skills panel)
 	'agentSettings.leadCursor':
-		'Rules、Skills 与 Subagents 可按存储范围放在「所有项目」（用户设置）或「当前项目」（写入工作区 `.async/agent.json`）。顶部筛选可查看全部、仅全局或仅本项目。「对话创建」会新开对话并在输入框放入蓝色 `/create-skill` 标签，你只需在标签后写需求；亦可「手动添加」直接填表。',
+		'为 Agent 提供规则、技能与子代理。顶部可筛选「全部 / 全局 / 本项目」。工作区会自动读取 `.cursor`、`.claude`、`.async` 等约定目录。',
 	'agentSettings.scopeFilterAll': '全部',
 	'agentSettings.scopeFilterUser': '所有项目',
 	'agentSettings.scopeFilterProject': '当前项目',
@@ -464,6 +464,7 @@ export const messagesZhCN: Record<string, string> = {
 	'agentSettings.subEmptyFiltered': '当前筛选下没有 Subagent。切换到「全部」或更换范围。',
 	'agentSettings.newSkillChat': '对话创建',
 	'agentSettings.newSkillManual': '手动添加',
+	'agentSettings.skillsNew': '+ 新建',
 	'agentSettings.skillCreatorThreadTitle': 'Skill 创建向导',
 	'agentSettings.skillCreatorHelp':
 		'输入框会显示蓝色 `/create-skill` 标签，其后填写说明；发送前会询问适用范围，内置系统提示会引导模型按 SKILL.md 规范输出（无需自行粘贴长提示词）。',
@@ -486,14 +487,11 @@ export const messagesZhCN: Record<string, string> = {
 	'slashCmd.createRuleDesc': '在设置中编写规则，约束模型行为与代码风格（占位：后续可接规则向导）。',
 	'slashCmd.createSubagentDesc': '添加子代理角色说明，用于复杂任务分工（占位：后续可接向导）。',
 
-	'agentSettings.lead1':
-		'为 Agent 提供领域知识与固定流程：规则注入系统提示；Manual 规则在消息中写 @rule:规则名 或 @rule:uuid；Skills 用 ',
-	'agentSettings.lead2':
-		' 在输入框触发（项目内 `.claude/skills` 与 `.async/skills` 下各 `<slug>/SKILL.md` 会与设置合并；同名 slug 时 `.async` 优先于 `.claude`）；Commands 用 ',
-	'agentSettings.lead3': ' 展开模板；Subagents 作为可扮演的子角色说明一并注入。',
+	'agentSettings.lead1': '',
+	'agentSettings.lead2': '',
+	'agentSettings.lead3': '',
 	'agentSettings.importTitle': '导入第三方配置',
-	'agentSettings.importDesc':
-		'开启后从工作区读取：`.cursor/rules`（Cursor）、根目录与 `.claude/CLAUDE.md`、`.claude/rules/*.md`（Claude Code 约定），并附加到本轮系统上下文。',
+	'agentSettings.importDesc': '',
 	'agentSettings.safetyTitle': '工具与安全',
 	'agentSettings.safetyShellDesc': '关闭后 Agent 将直接执行终端命令（仍有工作区目录限制）。',
 	'agentSettings.safetySkipDesc': '开启时，git status、npm test 等常见命令不再弹窗。',
@@ -502,7 +500,7 @@ export const messagesZhCN: Record<string, string> = {
 	'agentSettings.rulesInfo': '按作用域注入系统提示',
 	'agentSettings.new': '新建',
 	'agentSettings.rulesDesc':
-		'Always：每条对话生效；Glob：当用户消息里 @ 引用的路径匹配 glob（如 **/*.ts）时生效；Manual：仅当消息中出现 @rule:规则名 或 @rule:uuid 时注入（标记会从正文移除）。',
+		'Always：每轮对话；Glob：@ 路径匹配 glob 时；Manual：消息中含 @rule: 名称或 uuid 时注入（标记会从正文去掉）。',
 	'agentSettings.ruleNameAria': '规则名称',
 	'agentSettings.scope': '作用域',
 	'agentSettings.scopeAlways': 'Always',
@@ -513,16 +511,24 @@ export const messagesZhCN: Record<string, string> = {
 	'agentSettings.ruleBodyPh': '写给模型的约束与风格…',
 	'agentSettings.rulesEmpty': '暂无规则。点击「新建」添加。',
 	'agentSettings.skillsTitle': 'Skills',
-	'agentSettings.skillsInfo': '可用「对话创建」生成；输入框 ./slug 也可触发',
+	'agentSettings.skillsInfo': '对话中创建；或在工作区放置 SKILL.md；输入框可用 ./slug',
 	'agentSettings.skillsDesc':
-		'Skill 用于专项任务说明。推荐用「对话创建」新开向导会话；也可「手动添加」或在与助手的对话中以 ./slug 开头（前缀会去掉后再发送）。开启「导入第三方配置」时，会合并工作区内 `.claude/skills/<slug>/` 与 `.async/skills/<slug>/` 下的 `SKILL.md`（同名时 `.async` 优先）。',
+		'专项能力说明。请用「+ 新建」在对话中创建；或在仓库中添加 `.cursor/skills/<名称>/SKILL.md`（及 `.claude` / `.async` 下同类路径）。对话里也可 `./slug` 触发。',
 	'agentSettings.skillNameAria': 'Skill 名称',
 	'agentSettings.slugLabel': 'slug（不含 ./）',
 	'agentSettings.skillIntro': '简介',
 	'agentSettings.skillIntroPh': '一句话说明用途',
 	'agentSettings.skillBody': 'Skill 正文',
 	'agentSettings.skillBodyPh': '模型应遵循的步骤与输出格式…',
-	'agentSettings.skillsEmpty': '还没有 Skill。Skill 帮助 Agent 完成特定任务。',
+	'agentSettings.skillDiskImportedHint': '此项来自工作区内的 SKILL.md，请直接编辑磁盘上的文件。',
+	'agentSettings.skillDiskImportedNote': '只读：来自工作区内上述目录的 SKILL.md，请直接改文件。',
+	'agentSettings.skillDiskSectionTitle': '项目目录中的 Skills',
+	'agentSettings.skillDiskDeleteConfirm':
+		'将删除整个技能文件夹（含 SKILL.md 与同目录下其它文件）：\n{{path}}\n\n确定吗？',
+	'agentSettings.skillDiskDeleteFailed': '删除失败，请检查文件是否被占用或权限不足。',
+	'agentSettings.skillDiskOpenAria': '在编辑器中打开 {{name}}',
+	'agentSettings.skillDiskDeleteTitle': '从磁盘删除此技能',
+	'agentSettings.skillsEmpty': '还没有 Skill。点击「+ 新建」在对话中创建，或在仓库中添加 SKILL.md。',
 	'agentSettings.newSkill': '新建 Skill',
 	'agentSettings.subagentsTitle': 'Subagents',
 	'agentSettings.subagentsInfo': '系统提示中的子角色说明',

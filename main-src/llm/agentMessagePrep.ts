@@ -75,6 +75,7 @@ function scanSkillsDirectory(
 			if (!slug) {
 				continue;
 			}
+			const skillSourceRelPath = [...segments, dirName, 'SKILL.md'].join('/');
 			out.push({
 				id: `ws-skill-${sourceLabel}:${slug}`,
 				name: title?.trim() || dirName,
@@ -84,6 +85,8 @@ function scanSkillsDirectory(
 				slug,
 				content: body.trim(),
 				enabled: true,
+				origin: 'project',
+				skillSourceRelPath,
 			});
 		}
 	} catch {
@@ -93,16 +96,20 @@ function scanSkillsDirectory(
 }
 
 /**
- * 从工作区加载磁盘技能：`.claude/skills/<slug>/SKILL.md`（Claude Code）与 `.async/skills/<slug>/SKILL.md`（本应用约定）。
- * 与设置里 Skills 合并时按 slug；**同名 slug 时 `.async` 覆盖 `.claude`**，二者均可覆盖仅来自设置的同名项。
+ * 从工作区加载磁盘技能：
+ * - `.claude/skills/<slug>/SKILL.md`（Claude Code）
+ * - `.cursor/skills/<slug>/SKILL.md`（Cursor）
+ * - `.async/skills/<slug>/SKILL.md`（本应用约定）
+ * 与设置里 Skills 合并时按 slug；**优先级：`.async` > `.cursor` > `.claude`**（后者可被前者覆盖）。
  */
 export function loadClaudeWorkspaceSkills(workspaceRoot: string | null): AgentSkill[] {
 	if (!workspaceRoot) {
 		return [];
 	}
 	const claude = scanSkillsDirectory(workspaceRoot, ['.claude', 'skills'], 'claude');
+	const cursor = scanSkillsDirectory(workspaceRoot, ['.cursor', 'skills'], 'cursor');
 	const asyncShell = scanSkillsDirectory(workspaceRoot, ['.async', 'skills'], 'async');
-	return [...claude, ...asyncShell];
+	return [...claude, ...cursor, ...asyncShell];
 }
 
 function mergeSkillsBySlug(settingsSkills: AgentSkill[] | undefined, workspaceSkills: AgentSkill[]): AgentSkill[] {
@@ -353,15 +360,12 @@ export function prepareUserTurnForChat(
 ): PreparedUserTurn {
 	const afterCmd = applySlashCommands(rawText, agent?.commands);
 	const { userText: afterManual, manualBlocks } = applyManualRuleInvocations(afterCmd, agent?.rules);
-	const wsSkills =
-		agent?.importThirdPartyConfigs && workspaceRoot ? loadClaudeWorkspaceSkills(workspaceRoot) : [];
+	const wsSkills = workspaceRoot ? loadClaudeWorkspaceSkills(workspaceRoot) : [];
 	const mergedSkills = mergeSkillsBySlug(agent?.skills, wsSkills);
 	const { userText, skillSystemBlock } = applySkillInvocation(afterManual, mergedSkills);
 	const atPaths = workspaceRoot ? collectAtWorkspacePathsInText(userText, workspaceFiles) : [];
-	const cursorRules =
-		agent?.importThirdPartyConfigs && workspaceRoot ? loadThirdPartyAgentRules(workspaceRoot) : '';
-	const claudeRules =
-		agent?.importThirdPartyConfigs && workspaceRoot ? loadClaudeProjectRulesMarkdown(workspaceRoot) : '';
+	const cursorRules = workspaceRoot ? loadThirdPartyAgentRules(workspaceRoot) : '';
+	const claudeRules = workspaceRoot ? loadClaudeProjectRulesMarkdown(workspaceRoot) : '';
 	const thirdPartyMerged = [cursorRules, claudeRules].filter((s) => s.trim().length > 0).join('\n\n---\n\n');
 	const agentSystemAppend = buildAgentSystemAppend({
 		agent,

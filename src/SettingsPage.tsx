@@ -167,6 +167,10 @@ type Props = {
 	onChangeAgentCustomization: (v: AgentCustomization) => void;
 	/** 打开 Skill Creator：新建对话并发送引导消息 */
 	onOpenSkillCreator?: () => void | Promise<void>;
+	/** 在编辑器中打开工作区内的 SKILL.md（设置里磁盘技能卡片） */
+	onOpenWorkspaceSkillFile?: (relPath: string) => void | Promise<void>;
+	/** 删除磁盘上的技能目录（SKILL.md 相对路径）；成功返回 true */
+	onDeleteWorkspaceSkillDisk?: (skillMdRelPath: string) => Promise<boolean>;
 	editorSettings: EditorSettings;
 	onChangeEditorSettings: (v: EditorSettings) => void;
 	/** 语言切换后立即持久化（与关闭设置页时的全量保存配合） */
@@ -210,6 +214,8 @@ export function SettingsPage({
 	agentCustomization,
 	onChangeAgentCustomization,
 	onOpenSkillCreator,
+	onOpenWorkspaceSkillFile,
+	onDeleteWorkspaceSkillDisk,
 	editorSettings,
 	onChangeEditorSettings,
 	onPersistLanguage,
@@ -694,6 +700,8 @@ export function SettingsPage({
 								onChange={onChangeAgentCustomization}
 								workspaceOpen={workspaceOpen}
 								onOpenSkillCreator={onOpenSkillCreator}
+								onOpenWorkspaceSkillFile={onOpenWorkspaceSkillFile}
+								onDeleteWorkspaceSkillDisk={onDeleteWorkspaceSkillDisk}
 							/>
 						) : null}
 

@@ -440,7 +440,7 @@ export const messagesEn: Record<string, string> = {
 	'thought.totalBlock': '\n\nTotal generation time ~{{sec}}s.',
 
 	'agentSettings.leadCursor':
-		'Rules, Skills, and Subagents can live in “all projects” (user settings) or “this project” (`.async/agent.json`). Use the scope filter to view all, global-only, or project-only. “Create in chat” opens a thread with a blue `/create-skill` chip—type after it; or use “Add manually”.',
+		'Rules, skills, and subagents for the agent. Filter by scope above. Workspace folders for `.cursor`, `.claude`, and `.async` are merged automatically.',
 	'agentSettings.scopeFilterAll': 'All',
 	'agentSettings.scopeFilterUser': 'All projects',
 	'agentSettings.scopeFilterProject': 'This project',
@@ -454,6 +454,7 @@ export const messagesEn: Record<string, string> = {
 	'agentSettings.subEmptyFiltered': 'No subagents match this filter. Switch to “All” or another scope.',
 	'agentSettings.newSkillChat': 'Create in chat',
 	'agentSettings.newSkillManual': 'Add manually',
+	'agentSettings.skillsNew': '+ New',
 	'agentSettings.skillCreatorThreadTitle': 'Skill creator',
 	'agentSettings.skillCreatorHelp':
 		'The composer shows a blue `/create-skill` chip; type your request after it. Before send you pick scope, and the app injects a built-in system brief for SKILL.md-style output—no long prompt paste needed.',
@@ -476,14 +477,11 @@ export const messagesEn: Record<string, string> = {
 	'slashCmd.createRuleDesc': 'Author rules for model behavior (placeholder; wizard later).',
 	'slashCmd.createSubagentDesc': 'Add a subagent role (placeholder; wizard later).',
 
-	'agentSettings.lead1':
-		'Give the agent domain knowledge: rules in the system prompt; Manual rules via @rule:name or @rule:uuid in the message; Skills use ',
-	'agentSettings.lead2':
-		' in the input (`.claude/skills` and `.async/skills` each use `<slug>/SKILL.md`; merged with settings—on slug clash `.async` overrides `.claude`); Commands use ',
-	'agentSettings.lead3': ' to expand templates; Subagents add role descriptions.',
+	'agentSettings.lead1': '',
+	'agentSettings.lead2': '',
+	'agentSettings.lead3': '',
 	'agentSettings.importTitle': 'Import third-party config',
-	'agentSettings.importDesc':
-		'When on, loads `.cursor/rules`, root / `.claude/CLAUDE.md`, and `.claude/rules/*.md` from the workspace and appends to system context.',
+	'agentSettings.importDesc': '',
 	'agentSettings.safetyTitle': 'Tools & safety',
 	'agentSettings.safetyShellDesc': 'When off, the agent runs terminal commands without a prompt (still scoped to the workspace).',
 	'agentSettings.safetySkipDesc': 'When on, common read-only commands like git status or npm test skip the prompt.',
@@ -492,7 +490,7 @@ export const messagesEn: Record<string, string> = {
 	'agentSettings.rulesInfo': 'Inject by scope into system prompt',
 	'agentSettings.new': 'New',
 	'agentSettings.rulesDesc':
-		'Always: every chat. Glob: when @ paths match (e.g. **/*.ts). Manual: only when the message contains @rule:name or @rule:uuid (markers are stripped from the user text).',
+		'Always: every chat. Glob: when @ paths match your pattern. Manual: when the message contains @rule:name or @rule:uuid (markers are stripped).',
 	'agentSettings.ruleNameAria': 'Rule name',
 	'agentSettings.scope': 'Scope',
 	'agentSettings.scopeAlways': 'Always',
@@ -503,16 +501,24 @@ export const messagesEn: Record<string, string> = {
 	'agentSettings.ruleBodyPh': 'Constraints and style for the model…',
 	'agentSettings.rulesEmpty': 'No rules yet. Click New to add one.',
 	'agentSettings.skillsTitle': 'Skills',
-	'agentSettings.skillsInfo': 'Use “Create in chat”; ./slug in the input also works',
+	'agentSettings.skillsInfo': 'Create in chat; or add SKILL.md on disk; ./slug in input',
 	'agentSettings.skillsDesc':
-		'Skills describe specialized tasks. Prefer “Create in chat” for a guided session, “Add manually” for the form, or start a message with ./slug (prefix is stripped). With third-party import on, disk skills load from `.claude/skills/<slug>/` and `.async/skills/<slug>/SKILL.md` (`.async` wins on slug clash).',
+		'Specialized capabilities. Use “+ New” to create in chat, or add `.cursor/skills/<name>/SKILL.md` (and the same under `.claude` / `.async`). You can also start a message with ./slug.',
 	'agentSettings.skillNameAria': 'Skill name',
 	'agentSettings.slugLabel': 'slug (without ./)',
 	'agentSettings.skillIntro': 'Summary',
 	'agentSettings.skillIntroPh': 'One-line purpose',
 	'agentSettings.skillBody': 'Skill body',
 	'agentSettings.skillBodyPh': 'Steps and output format…',
-	'agentSettings.skillsEmpty': 'No skills yet. Skills help the agent with specific tasks.',
+	'agentSettings.skillDiskImportedHint': 'This entry comes from a SKILL.md file in the workspace; edit that file on disk.',
+	'agentSettings.skillDiskImportedNote': 'Read-only: edit the file on disk to change.',
+	'agentSettings.skillDiskSectionTitle': 'Skills on disk (this project)',
+	'agentSettings.skillDiskDeleteConfirm':
+		'This will delete the entire skill folder (SKILL.md and any other files in that directory):\n{{path}}\n\nContinue?',
+	'agentSettings.skillDiskDeleteFailed': 'Could not delete. The folder may be in use or permissions may be denied.',
+	'agentSettings.skillDiskOpenAria': 'Open {{name}} in editor',
+	'agentSettings.skillDiskDeleteTitle': 'Delete this skill from disk',
+	'agentSettings.skillsEmpty': 'No skills yet. Use “+ New” in chat or add SKILL.md under the skills folders.',
 	'agentSettings.newSkill': 'New skill',
 	'agentSettings.subagentsTitle': 'Subagents',
 	'agentSettings.subagentsInfo': 'Role descriptions in system prompt',

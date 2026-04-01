@@ -25,6 +25,8 @@ export type AgentSkill = {
 	content: string;
 	enabled?: boolean;
 	origin?: AgentItemOrigin;
+	/** 工作区内 SKILL.md 相对路径（正斜杠）；由磁盘扫描填充，用于打开文件与删除目录 */
+	skillSourceRelPath?: string;
 };
 
 export type AgentSubagent = {
@@ -73,7 +75,7 @@ export type AgentCustomization = {
 };
 
 export const defaultAgentCustomization = (): AgentCustomization => ({
-	importThirdPartyConfigs: false,
+	importThirdPartyConfigs: true,
 	rules: [],
 	skills: [],
 	subagents: [],
@@ -81,3 +83,22 @@ export const defaultAgentCustomization = (): AgentCustomization => ({
 	maxConsecutiveMistakes: 5,
 	mistakeLimitEnabled: true,
 });
+
+/** 主进程从 `.claude` / `.cursor` / `.async` 的 skills 目录扫描出的项，id 形如 `ws-skill-*`；不应写入 settings 或 `.async/agent.json`。 */
+export function isWorkspaceDiskImportedSkill(s: { id: string }): boolean {
+	return s.id.startsWith('ws-skill-');
+}
+
+/** 与主进程 `agentMessagePrep` 一致：按 slug 合并，后出现的覆盖先前的。 */
+export function mergeSkillsBySlug(settingsSkills: AgentSkill[], workspaceSkills: AgentSkill[]): AgentSkill[] {
+	const map = new Map<string, AgentSkill>();
+	for (const s of settingsSkills) {
+		if (s.slug?.trim()) {
+			map.set(s.slug.trim().toLowerCase(), s);
+		}
+	}
+	for (const w of workspaceSkills) {
+		map.set(w.slug.trim().toLowerCase(), w);
+	}
+	return [...map.values()];
+}

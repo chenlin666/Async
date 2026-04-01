@@ -62,7 +62,7 @@ import {
 	type MistakeLimitDecision,
 } from '../agent/mistakeLimitGate.js';
 import { createToolApprovalBeforeExecute, resolveToolApproval } from '../agent/toolApprovalGate.js';
-import { prepareUserTurnForChat } from '../llm/agentMessagePrep.js';
+import { loadClaudeWorkspaceSkills, prepareUserTurnForChat } from '../llm/agentMessagePrep.js';
 import {
 	buildSkillCreatorSystemAppend,
 	formatSkillCreatorUserBubble,
@@ -535,6 +535,47 @@ export function registerIpc(): void {
 		}
 		writeWorkspaceAgentProjectSlice(root, slice);
 		return { ok: true as const };
+	});
+
+	ipcMain.handle('workspace:listDiskSkills', () => {
+		const root = getWorkspaceRoot();
+		if (!root) {
+			return { ok: true as const, skills: [] };
+		}
+		return { ok: true as const, skills: loadClaudeWorkspaceSkills(root) };
+	});
+
+	/** 删除工作区内技能目录（`.cursor|claude|async/skills/<slug>/` 整夹），参数为其中 `SKILL.md` 的相对路径 */
+	ipcMain.handle('workspace:deleteSkillFromDisk', (_e, skillMdRel: string) => {
+		if (!getWorkspaceRoot()) {
+			return { ok: false as const, error: 'no-workspace' as const };
+		}
+		const norm = String(skillMdRel ?? '').trim().replace(/\\/g, '/');
+		if (!norm.endsWith('/SKILL.md')) {
+			return { ok: false as const, error: 'not-skill-file' as const };
+		}
+		const dirRel = norm.slice(0, -'/SKILL.md'.length).replace(/\/$/, '');
+		const parts = dirRel.split('/').filter(Boolean);
+		const rootSeg = parts[0];
+		if (
+			parts.length !== 3 ||
+			parts[1] !== 'skills' ||
+			!rootSeg ||
+			!['.cursor', '.claude', '.async'].includes(rootSeg) ||
+			!parts[2] ||
+			parts[2].includes('..')
+		) {
+			return { ok: false as const, error: 'invalid-path' as const };
+		}
+		try {
+			const dirFull = resolveWorkspacePath(dirRel);
+			if (fs.existsSync(dirFull)) {
+				fs.rmSync(dirFull, { recursive: true, force: true });
+			}
+			return { ok: true as const };
+		} catch {
+			return { ok: false as const, error: 'io-failed' as const };
+		}
 	});
 
 	ipcMain.handle('workspace:indexing:stats', () => {

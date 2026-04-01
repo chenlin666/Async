@@ -3,9 +3,13 @@ dist/
 *.log
 .DS_Store
 Thumbs.db
-
 # IDE
 .idea/
+
+# Local agent / IDE config (per-machine, per-repo)
+.cursor/
+.claude/
+.async/
 
 # Electron main bundle (rebuild with npm run build:main)
 electron/main.bundle.cjs

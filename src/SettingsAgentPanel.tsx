@@ -9,7 +9,7 @@ import type {
 	AgentSkill,
 	AgentSubagent,
 } from './agentSettingsTypes';
-import { defaultAgentCustomization } from './agentSettingsTypes';
+import { defaultAgentCustomization, isWorkspaceDiskImportedSkill } from './agentSettingsTypes';
 
 function newId(): string {
 	return globalThis.crypto?.randomUUID?.() ?? `id-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -41,6 +41,15 @@ function IconChevDown({ className }: { className?: string }) {
 	return (
 		<svg className={className} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
 			<path d="M6 9l6 6 6-6" strokeLinecap="round" />
+		</svg>
+	);
+}
+
+function IconTrash({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+			<path d="M3 6h18M8 6V4h8v2M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" strokeLinecap="round" strokeLinejoin="round" />
+			<path d="M10 11v6M14 11v6" strokeLinecap="round" />
 		</svg>
 	);
 }
@@ -92,6 +101,10 @@ type Props = {
 	workspaceOpen: boolean;
 	/** 新建 Skill：打开对话并由模型引导编写 SKILL.md */
 	onOpenSkillCreator?: () => void | Promise<void>;
+	/** 点击磁盘技能卡片时在编辑器中打开 SKILL.md */
+	onOpenWorkspaceSkillFile?: (relPath: string) => void | Promise<void>;
+	/** 删除磁盘技能目录（整夹）；返回是否成功 */
+	onDeleteWorkspaceSkillDisk?: (skillMdRelPath: string) => Promise<boolean>;
 };
 
 function itemMatchesLibraryFilter(item: { origin?: AgentItemOrigin }, filter: AgentLibraryFilter): boolean {
@@ -101,7 +114,14 @@ function itemMatchesLibraryFilter(item: { origin?: AgentItemOrigin }, filter: Ag
 	return o === 'project';
 }
 
-export function SettingsAgentPanel({ value, onChange, workspaceOpen, onOpenSkillCreator }: Props) {
+export function SettingsAgentPanel({
+	value,
+	onChange,
+	workspaceOpen,
+	onOpenSkillCreator,
+	onOpenWorkspaceSkillFile,
+	onDeleteWorkspaceSkillDisk,
+}: Props) {
 	const { t } = useI18n();
 	const v = { ...defaultAgentCustomization(), ...value };
 	const rules = v.rules ?? [];
@@ -124,6 +144,7 @@ export function SettingsAgentPanel({ value, onChange, workspaceOpen, onOpenSkill
 	const [collapsedSkills, setCollapsedSkills] = useState<Set<string>>(new Set());
 	const [collapsedSubs, setCollapsedSubs] = useState<Set<string>>(new Set());
 	const [collapsedCmds, setCollapsedCmds] = useState<Set<string>>(new Set());
+	const [diskSkillDeletingId, setDiskSkillDeletingId] = useState<string | null>(null);
 
 	const toggleCollapse = (set: Set<string>, setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) => {
 		const next = new Set(set);
@@ -164,26 +185,37 @@ export function SettingsAgentPanel({ value, onChange, workspaceOpen, onOpenSkill
 	const rulesDrag = useDragReorder(rules, (next) => patch({ rules: next }));
 
 	// ─── Skills ───────────────────────────────────────────
-	const addSkillInline = () => {
-		if (!canAddProjectItem) return;
-		const s: AgentSkill = {
-			id: newId(),
-			name: '新 Skill',
-			slug: 'myskill',
-			description: '',
-			content: '',
-			enabled: true,
-			origin: originForNewItem(),
-		};
-		patch({ skills: [...skills, s] });
-	};
 	const updateSkill = (id: string, p: Partial<AgentSkill>) => {
+		const cur = skills.find((x) => x.id === id);
+		if (cur && isWorkspaceDiskImportedSkill(cur)) return;
 		patch({ skills: skills.map((x) => (x.id === id ? { ...x, ...p } : x)) });
 	};
 	const removeSkill = (id: string) => {
+		const cur = skills.find((x) => x.id === id);
+		if (cur && isWorkspaceDiskImportedSkill(cur)) return;
 		patch({ skills: skills.filter((x) => x.id !== id) });
 	};
-	const skillsDrag = useDragReorder(skills, (next) => patch({ skills: next }));
+
+	const diskSkillsInWorkspace = skills.filter((s) => isWorkspaceDiskImportedSkill(s) && s.skillSourceRelPath);
+	const editableSkills = skills.filter((s) => !isWorkspaceDiskImportedSkill(s));
+	const skillsDrag = useDragReorder(editableSkills, (nextEditable) => patch({ skills: [...diskSkillsInWorkspace, ...nextEditable] }));
+
+	const deleteDiskSkill = async (s: AgentSkill) => {
+		const rel = s.skillSourceRelPath;
+		if (!rel || !onDeleteWorkspaceSkillDisk) return;
+		if (!window.confirm(t('agentSettings.skillDiskDeleteConfirm', { path: rel }))) return;
+		setDiskSkillDeletingId(s.id);
+		try {
+			const ok = await onDeleteWorkspaceSkillDisk(rel);
+			if (!ok) window.alert(t('agentSettings.skillDiskDeleteFailed'));
+		} finally {
+			setDiskSkillDeletingId(null);
+		}
+	};
+
+	const onDiskCardOpenClick = (rel: string) => {
+		if (onOpenWorkspaceSkillFile) void onOpenWorkspaceSkillFile(rel);
+	};
 
 	// ─── Subagents ────────────────────────────────────────
 	const addSub = () => {
@@ -253,24 +285,6 @@ export function SettingsAgentPanel({ value, onChange, workspaceOpen, onOpenSkill
 						{key === 'project' ? t('agentSettings.scopeFilterProject') : null}
 					</button>
 				))}
-			</div>
-
-			<div className="ref-settings-agent-card">
-				<div className="ref-settings-agent-card-row">
-					<div>
-						<div className="ref-settings-agent-card-title">{t('agentSettings.importTitle')}</div>
-						<p className="ref-settings-agent-card-desc">{t('agentSettings.importDesc')}</p>
-					</div>
-					<button
-						type="button"
-						className={`ref-settings-toggle ${v.importThirdPartyConfigs ? 'is-on' : ''}`}
-						role="switch"
-						aria-checked={!!v.importThirdPartyConfigs}
-						onClick={() => patch({ importThirdPartyConfigs: !v.importThirdPartyConfigs })}
-					>
-						<span className="ref-settings-toggle-knob" />
-					</button>
-				</div>
 			</div>
 
 			<div className="ref-settings-agent-card">
@@ -494,154 +508,178 @@ export function SettingsAgentPanel({ value, onChange, workspaceOpen, onOpenSkill
 					</h2>
 					<div className="ref-settings-agent-head-actions">
 						{onOpenSkillCreator ? (
-							<button
-								type="button"
-								className="ref-settings-agent-new-btn ref-settings-agent-new-btn--emph"
-								onClick={() => void onOpenSkillCreator()}
-							>
-								{t('agentSettings.newSkillChat')}
+							<button type="button" className="ref-settings-agent-new-btn" onClick={() => void onOpenSkillCreator()}>
+								{t('agentSettings.skillsNew')}
 							</button>
 						) : null}
-						<button
-							type="button"
-							className="ref-settings-agent-new-btn"
-							onClick={addSkillInline}
-							disabled={!canAddProjectItem}
-							title={!canAddProjectItem ? t('agentSettings.needWorkspaceForProject') : undefined}
-						>
-							+ {t('agentSettings.newSkillManual')}
-						</button>
 					</div>
 				</div>
 				<p className="ref-settings-agent-section-desc">{t('agentSettings.skillsDesc')}</p>
-				<ul className="ref-settings-agent-list">
-					{skills.filter((s) => itemMatchesLibraryFilter(s, libraryFilter)).map((s) => {
-						const collapsed = collapsedSkills.has(s.id);
-						return (
-							<li
-								key={s.id}
-								className={`ref-settings-agent-item ${skillsDrag.dragId === s.id ? 'is-dragging' : ''}`}
-								draggable={reorderEnabled}
-								onDragStart={(e) => skillsDrag.onDragStart(e, s.id)}
-								onDragOver={skillsDrag.onDragOver}
-								onDrop={(e) => skillsDrag.onDrop(e, s.id)}
-								onDragEnd={skillsDrag.onDragEnd}
-							>
-								<div className="ref-settings-agent-item-head">
-									<span className="ref-settings-agent-drag-handle" aria-hidden>
-										<IconDrag />
-									</span>
-									<button
-										type="button"
-										className={`ref-settings-toggle ref-settings-toggle--sm ${s.enabled !== false ? 'is-on' : ''}`}
-										role="switch"
-										aria-checked={s.enabled !== false}
-										title={s.enabled !== false ? t('settings.enabled') : t('settings.disabled')}
-										onClick={() => updateSkill(s.id, { enabled: s.enabled === false ? true : false })}
-									>
-										<span className="ref-settings-toggle-knob" />
-									</button>
-									{renderOriginBadge(s.origin)}
-									<input
-										className="ref-settings-agent-item-name"
-										value={s.name}
-										onChange={(e) => updateSkill(s.id, { name: e.target.value })}
-										aria-label={t('agentSettings.skillNameAria')}
-									/>
-									<button
-										type="button"
-										className={`ref-settings-agent-collapse ${collapsed ? 'is-collapsed' : ''}`}
-										onClick={() => toggleCollapse(collapsedSkills, setCollapsedSkills, s.id)}
-										aria-label={collapsed ? 'Expand' : 'Collapse'}
-									>
-										<IconChevDown />
-									</button>
-									<button type="button" className="ref-settings-agent-remove" onClick={() => removeSkill(s.id)}>
-										{t('settings.removeModel')}
-									</button>
-								</div>
-								{!collapsed && (
-									<>
-										<label className="ref-settings-field ref-settings-field--compact">
-											<span>{t('agentSettings.itemScopeStorage')}</span>
-											<select
-												value={s.origin ?? 'user'}
-												onChange={(e) => updateSkill(s.id, { origin: e.target.value as AgentItemOrigin })}
+				{(() => {
+					const diskFiltered = diskSkillsInWorkspace.filter((s) => itemMatchesLibraryFilter(s, libraryFilter));
+					const editableFiltered = editableSkills.filter((s) => itemMatchesLibraryFilter(s, libraryFilter));
+					const visibleSkillCount = diskFiltered.length + editableFiltered.length;
+					return (
+						<>
+							{diskFiltered.length > 0 ? (
+								<>
+									<ul className="ref-settings-agent-skill-disk-list">
+										{diskFiltered.map((s) => {
+											const rel = s.skillSourceRelPath!;
+											const busy = diskSkillDeletingId === s.id;
+											const canOpen = !!onOpenWorkspaceSkillFile;
+											return (
+												<li key={s.id} className="ref-settings-agent-skill-disk-card">
+													<button
+														type="button"
+														className={`ref-settings-agent-skill-disk-main ${canOpen ? 'is-clickable' : ''}`}
+														disabled={!canOpen || busy}
+														onClick={() => onDiskCardOpenClick(rel)}
+														aria-label={t('agentSettings.skillDiskOpenAria', { name: s.name })}
+													>
+														<div className="ref-settings-agent-skill-disk-title">{s.name}</div>
+														<div className="ref-settings-agent-skill-disk-desc">{s.description}</div>
+														<div className="ref-settings-agent-skill-disk-path" title={rel}>
+															{rel}
+														</div>
+													</button>
+													<button
+														type="button"
+														className="ref-settings-agent-skill-disk-trash"
+														disabled={busy || !onDeleteWorkspaceSkillDisk}
+														title={t('agentSettings.skillDiskDeleteTitle')}
+														aria-label={t('agentSettings.skillDiskDeleteTitle')}
+														onClick={() => void deleteDiskSkill(s)}
+													>
+														<IconTrash />
+													</button>
+												</li>
+											);
+										})}
+									</ul>
+								</>
+							) : null}
+							{editableFiltered.length > 0 ? (
+								<ul className="ref-settings-agent-list">
+									{editableFiltered.map((s) => {
+										const collapsed = collapsedSkills.has(s.id);
+										const rowDraggable = reorderEnabled;
+										return (
+											<li
+												key={s.id}
+												className={`ref-settings-agent-item ${skillsDrag.dragId === s.id ? 'is-dragging' : ''}`}
+												draggable={rowDraggable}
+												onDragStart={(e) => rowDraggable && skillsDrag.onDragStart(e, s.id)}
+												onDragOver={skillsDrag.onDragOver}
+												onDrop={(e) => skillsDrag.onDrop(e, s.id)}
+												onDragEnd={skillsDrag.onDragEnd}
 											>
-												<option value="user">{t('agentSettings.originUser')}</option>
-												<option value="project" disabled={!workspaceOpen}>
-													{t('agentSettings.originProject')}
-												</option>
-											</select>
-										</label>
-										<label className="ref-settings-field ref-settings-field--compact">
-											<span>{t('agentSettings.slugLabel')}</span>
-											<input
-												value={s.slug}
-												onChange={(e) => updateSkill(s.id, { slug: e.target.value.replace(/^\.\//, '') })}
-												placeholder="review"
-											/>
-										</label>
-										<label className="ref-settings-field ref-settings-field--compact">
-											<span>{t('agentSettings.skillIntro')}</span>
-											<input
-												value={s.description}
-												onChange={(e) => updateSkill(s.id, { description: e.target.value })}
-												placeholder={t('agentSettings.skillIntroPh')}
-											/>
-										</label>
-										<label className="ref-settings-field ref-settings-field--compact">
-											<span>{t('agentSettings.skillBody')}</span>
-											<textarea
-												rows={5}
-												value={s.content}
-												onChange={(e) => updateSkill(s.id, { content: e.target.value })}
-												placeholder={t('agentSettings.skillBodyPh')}
-											/>
-										</label>
-									</>
-								)}
-							</li>
-						);
-					})}
-				</ul>
+												<div className="ref-settings-agent-item-head">
+													<span className="ref-settings-agent-drag-handle" aria-hidden>
+														<IconDrag />
+													</span>
+													<button
+														type="button"
+														className={`ref-settings-toggle ref-settings-toggle--sm ${s.enabled !== false ? 'is-on' : ''}`}
+														role="switch"
+														aria-checked={s.enabled !== false}
+														title={s.enabled !== false ? t('settings.enabled') : t('settings.disabled')}
+														onClick={() => updateSkill(s.id, { enabled: s.enabled === false ? true : false })}
+													>
+														<span className="ref-settings-toggle-knob" />
+													</button>
+													{renderOriginBadge(s.origin)}
+													<input
+														className="ref-settings-agent-item-name"
+														value={s.name}
+														onChange={(e) => updateSkill(s.id, { name: e.target.value })}
+														aria-label={t('agentSettings.skillNameAria')}
+													/>
+													<button
+														type="button"
+														className={`ref-settings-agent-collapse ${collapsed ? 'is-collapsed' : ''}`}
+														onClick={() => toggleCollapse(collapsedSkills, setCollapsedSkills, s.id)}
+														aria-label={collapsed ? 'Expand' : 'Collapse'}
+													>
+														<IconChevDown />
+													</button>
+													<button type="button" className="ref-settings-agent-remove" onClick={() => removeSkill(s.id)}>
+														{t('settings.removeModel')}
+													</button>
+												</div>
+												{!collapsed && (
+													<>
+														<label className="ref-settings-field ref-settings-field--compact">
+															<span>{t('agentSettings.itemScopeStorage')}</span>
+															<select
+																value={s.origin ?? 'user'}
+																onChange={(e) => updateSkill(s.id, { origin: e.target.value as AgentItemOrigin })}
+															>
+																<option value="user">{t('agentSettings.originUser')}</option>
+																<option value="project" disabled={!workspaceOpen}>
+																	{t('agentSettings.originProject')}
+																</option>
+															</select>
+														</label>
+														<label className="ref-settings-field ref-settings-field--compact">
+															<span>{t('agentSettings.slugLabel')}</span>
+															<input
+																value={s.slug}
+																onChange={(e) => updateSkill(s.id, { slug: e.target.value.replace(/^\.\//, '') })}
+																placeholder="review"
+															/>
+														</label>
+														<label className="ref-settings-field ref-settings-field--compact">
+															<span>{t('agentSettings.skillIntro')}</span>
+															<input
+																value={s.description}
+																onChange={(e) => updateSkill(s.id, { description: e.target.value })}
+																placeholder={t('agentSettings.skillIntroPh')}
+															/>
+														</label>
+														<label className="ref-settings-field ref-settings-field--compact">
+															<span>{t('agentSettings.skillBody')}</span>
+															<textarea
+																rows={5}
+																value={s.content}
+																onChange={(e) => updateSkill(s.id, { content: e.target.value })}
+																placeholder={t('agentSettings.skillBodyPh')}
+															/>
+														</label>
+													</>
+												)}
+											</li>
+										);
+									})}
+								</ul>
+							) : null}
+							{visibleSkillCount === 0 && skills.length === 0 ? null : visibleSkillCount === 0 ? (
+								<p className="ref-settings-agent-empty">{t('agentSettings.skillsEmptyFiltered')}</p>
+							) : null}
+						</>
+					);
+				})()}
 				{skills.length === 0 ? (
 					<div className="ref-settings-agent-empty-block">
 						<p>{t('agentSettings.skillsEmpty')}</p>
-						<div className="ref-settings-agent-empty-actions">
-							{onOpenSkillCreator ? (
+						{onOpenSkillCreator ? (
+							<div className="ref-settings-agent-empty-actions">
 								<button type="button" className="ref-settings-agent-empty-cta" onClick={() => void onOpenSkillCreator()}>
-									{t('agentSettings.newSkillChat')}
+									{t('agentSettings.skillsNew')}
 								</button>
-							) : null}
-							<button
-								type="button"
-								className="ref-settings-agent-empty-cta ref-settings-agent-empty-cta--secondary"
-								onClick={addSkillInline}
-								disabled={!canAddProjectItem}
-							>
-								{t('agentSettings.newSkillManual')}
-							</button>
-						</div>
+							</div>
+						) : null}
 					</div>
 				) : skills.filter((s) => itemMatchesLibraryFilter(s, libraryFilter)).length === 0 ? (
 					<div className="ref-settings-agent-empty-block">
 						<p>{t('agentSettings.skillsEmptyFiltered')}</p>
-						<div className="ref-settings-agent-empty-actions">
-							{onOpenSkillCreator ? (
+						{onOpenSkillCreator ? (
+							<div className="ref-settings-agent-empty-actions">
 								<button type="button" className="ref-settings-agent-empty-cta" onClick={() => void onOpenSkillCreator()}>
-									{t('agentSettings.newSkillChat')}
+									{t('agentSettings.skillsNew')}
 								</button>
-							) : null}
-							<button
-								type="button"
-								className="ref-settings-agent-empty-cta ref-settings-agent-empty-cta--secondary"
-								onClick={addSkillInline}
-								disabled={!canAddProjectItem}
-							>
-								{t('agentSettings.newSkillManual')}
-							</button>
-						</div>
+							</div>
+						) : null}
 					</div>
 				) : null}
 			</section>

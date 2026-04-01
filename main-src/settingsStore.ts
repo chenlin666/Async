@@ -230,8 +230,7 @@ export function patchSettings(partial: Partial<ShellSettings>): ShellSettings {
 	const nextAgent =
 		partial.agent !== undefined
 			? {
-					importThirdPartyConfigs:
-						partial.agent.importThirdPartyConfigs ?? cached.agent?.importThirdPartyConfigs ?? false,
+					importThirdPartyConfigs: partial.agent.importThirdPartyConfigs ?? cached.agent?.importThirdPartyConfigs ?? true,
 					rules: partial.agent.rules ?? cached.agent?.rules ?? [],
 					skills: partial.agent.skills ?? cached.agent?.skills ?? [],
 					subagents: partial.agent.subagents ?? cached.agent?.subagents ?? [],

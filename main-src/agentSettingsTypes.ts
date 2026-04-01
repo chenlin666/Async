@@ -23,6 +23,8 @@ export type AgentSkill = {
 	content: string;
 	enabled?: boolean;
 	origin?: AgentItemOrigin;
+	/** 工作区内 SKILL.md 相对路径（正斜杠）；磁盘扫描时写入 */
+	skillSourceRelPath?: string;
 };
 
 export type AgentSubagent = {

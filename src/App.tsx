@@ -81,6 +81,8 @@ import { UserMessageRich } from './UserMessageRich';
 import { BrandLogo } from './BrandLogo';
 import {
 	defaultAgentCustomization,
+	isWorkspaceDiskImportedSkill,
+	mergeSkillsBySlug,
 	type AgentCustomization,
 	type AgentRule,
 	type AgentSkill,
@@ -719,22 +721,30 @@ export default function App() {
 	const [agentCustomization, setAgentCustomization] = useState<AgentCustomization>(() => defaultAgentCustomization());
 	/** 当前仓库 `.async/agent.json`（与全局 settings 分离） */
 	const [projectAgentSlice, setProjectAgentSlice] = useState<ProjectAgentSliceState>(EMPTY_PROJECT_AGENT);
+	/** 开启「导入第三方配置」时由主进程扫描磁盘 skills 目录（与对话侧合并逻辑一致） */
+	const [workspaceDiskSkills, setWorkspaceDiskSkills] = useState<AgentSkill[]>([]);
+	/** 删除磁盘技能后递增，触发重新扫描列表 */
+	const [diskSkillsRefreshTicker, setDiskSkillsRefreshTicker] = useState(0);
 
 	const mergedAgentCustomization = useMemo((): AgentCustomization => {
+		const baseSkills = [...(agentCustomization.skills ?? []), ...projectAgentSlice.skills];
+		const skills =
+			workspaceDiskSkills.length > 0 ? mergeSkillsBySlug(baseSkills, workspaceDiskSkills) : baseSkills;
 		return {
 			...agentCustomization,
 			rules: [...(agentCustomization.rules ?? []), ...projectAgentSlice.rules],
-			skills: [...(agentCustomization.skills ?? []), ...projectAgentSlice.skills],
+			skills,
 			subagents: [...(agentCustomization.subagents ?? []), ...projectAgentSlice.subagents],
 		};
-	}, [agentCustomization, projectAgentSlice]);
+	}, [agentCustomization, projectAgentSlice, workspaceDiskSkills]);
 
 	const onChangeMergedAgentCustomization = useCallback(
 		(next: AgentCustomization) => {
 			const ur = next.rules?.filter((r) => (r.origin ?? 'user') !== 'project') ?? [];
 			const pr = next.rules?.filter((r) => r.origin === 'project') ?? [];
-			const us = next.skills?.filter((s) => (s.origin ?? 'user') !== 'project') ?? [];
-			const ps = next.skills?.filter((s) => s.origin === 'project') ?? [];
+			const skillsPersist = (next.skills ?? []).filter((s) => !isWorkspaceDiskImportedSkill(s));
+			const us = skillsPersist.filter((s) => (s.origin ?? 'user') !== 'project') ?? [];
+			const ps = skillsPersist.filter((s) => s.origin === 'project') ?? [];
 			const ua = next.subagents?.filter((s) => (s.origin ?? 'user') !== 'project') ?? [];
 			const pa = next.subagents?.filter((s) => s.origin === 'project') ?? [];
 			setAgentCustomization({
@@ -784,6 +794,26 @@ export default function App() {
 			cancelled = true;
 		};
 	}, [shell, workspace]);
+
+	useEffect(() => {
+		if (!shell || !workspace) {
+			setWorkspaceDiskSkills([]);
+			return;
+		}
+		let cancelled = false;
+		void (async () => {
+			try {
+				const r = (await shell.invoke('workspace:listDiskSkills')) as { ok?: boolean; skills?: AgentSkill[] };
+				if (cancelled) return;
+				setWorkspaceDiskSkills(Array.isArray(r?.skills) ? r.skills : []);
+			} catch {
+				if (!cancelled) setWorkspaceDiskSkills([]);
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [shell, workspace, diskSkillsRefreshTicker]);
 
 	const [editorSettings, setEditorSettings] = useState<EditorSettings>(() => defaultEditorSettings());
 	const [indexingSettings, setIndexingSettings] = useState<IndexingSettingsState>(() => normalizeIndexingSettings());
@@ -1267,7 +1297,7 @@ export default function App() {
 				setAgentCustomization({
 					...defs,
 					...(ag ?? {}),
-					importThirdPartyConfigs: ag?.importThirdPartyConfigs ?? false,
+					importThirdPartyConfigs: true,
 					rules: Array.isArray(ag?.rules) ? ag.rules : [],
 					skills: Array.isArray(ag?.skills) ? ag.skills : [],
 					subagents: Array.isArray(ag?.subagents) ? ag.subagents : [],
@@ -1969,7 +1999,7 @@ export default function App() {
 			defaultModel,
 			models: { entries: modelEntries, enabledIds: enabledModelIds, thinkingByModelId },
 			agent: {
-				importThirdPartyConfigs: agentCustomization.importThirdPartyConfigs ?? false,
+				importThirdPartyConfigs: true,
 				rules: agentCustomization.rules ?? [],
 				skills: agentCustomization.skills ?? [],
 				subagents: agentCustomization.subagents ?? [],
@@ -2210,6 +2240,25 @@ export default function App() {
 			setEditorValue(t('app.readFileFailed', { detail: String(err) }));
 		}
 	}, [shell, openTabs, t]);
+
+	const handleOpenWorkspaceSkillFile = useCallback(
+		(rel: string) => {
+			setLayoutMode('editor');
+			void openFileInTab(rel);
+		},
+		[openFileInTab]
+	);
+
+	const handleDeleteWorkspaceSkillDisk = useCallback(async (skillMdRel: string): Promise<boolean> => {
+		if (!shell) return false;
+		try {
+			const r = (await shell.invoke('workspace:deleteSkillFromDisk', skillMdRel)) as { ok?: boolean };
+			if (r?.ok) setDiskSkillsRefreshTicker((k) => k + 1);
+			return !!r?.ok;
+		} catch {
+			return false;
+		}
+	}, [shell]);
 
 	const onCloseTab = useCallback(
 		(tabId: string) => {
@@ -5137,6 +5186,8 @@ export default function App() {
 							shell={shell ?? null}
 							workspaceOpen={!!workspace}
 							onOpenSkillCreator={startSkillCreatorFlow}
+							onOpenWorkspaceSkillFile={handleOpenWorkspaceSkillFile}
+							onDeleteWorkspaceSkillDisk={handleDeleteWorkspaceSkillDisk}
 						/>
 					</div>
 				</div>
