@@ -160,6 +160,8 @@ export type AgentLoopOptions = {
 	/** 与 UnifiedChatOptions 一致：已由 modelResolve 解析 */
 	requestApiKey: string;
 	requestBaseURL?: string;
+	/** OpenAI 兼容：提供商级代理 */
+	requestProxyUrl?: string;
 	maxOutputTokens: number;
 	signal: AbortSignal;
 	/** 与主界面 Composer 模式一致；Plan 仅注册只读工具 */
@@ -405,7 +407,7 @@ async function runOpenAILoop(
 	const model = options.requestModelId.trim();
 	if (!model) { handlers.onError('模型请求名称为空。请在 Models 中编辑该模型的「请求名称」。'); return; }
 
-	const proxyRaw = settings.openAI?.proxyUrl?.trim();
+	const proxyRaw = (options.requestProxyUrl?.trim() || settings.openAI?.proxyUrl?.trim()) ?? '';
 	let httpAgent: InstanceType<typeof HttpsProxyAgent> | undefined;
 	if (proxyRaw) {
 		try { httpAgent = new HttpsProxyAgent(proxyRaw); } catch {

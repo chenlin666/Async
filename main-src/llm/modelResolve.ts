@@ -1,4 +1,4 @@
-import type { ModelRequestParadigm, ShellSettings, UserModelEntry } from '../settingsStore.js';
+import type { ModelRequestParadigm, ShellSettings, UserLlmProvider, UserModelEntry } from '../settingsStore.js';
 import { normalizeThinkingLevel, type ThinkingLevel } from './thinkingLevel.js';
 
 export type ResolvedChatModel = {
@@ -20,11 +20,17 @@ export type ResolvedModelRequest =
 			maxOutputTokens: number;
 			apiKey: string;
 			baseURL?: string;
+			/** 仅 OpenAI 兼容：来自提供商的 HTTP 代理 */
+			proxyUrl?: string;
 	  }
 	| { ok: false; message: string };
 
 function entryById(entries: UserModelEntry[], id: string): UserModelEntry | undefined {
 	return entries.find((e) => e.id === id);
+}
+
+function providerById(providers: UserLlmProvider[], id: string): UserLlmProvider | undefined {
+	return providers.find((p) => p.id === id);
 }
 
 function isUsable(e: UserModelEntry): boolean {
@@ -40,104 +46,84 @@ export function clampMaxOutputTokens(n: number | undefined): number {
 	return Math.min(MAX_MAX_OUT, Math.max(MIN_MAX_OUT, floored));
 }
 
-function resolveCredentials(
-	settings: ShellSettings,
-	entry: UserModelEntry
-): { ok: true; apiKey: string; baseURL?: string } | { ok: false; message: string } {
-	const useC = entry.useCustomConnection === true;
-
-	if (entry.paradigm === 'openai-compatible') {
-		const key = useC
-			? (entry.customApiKey?.trim() ?? '')
-			: (settings.openAI?.apiKey?.trim() ?? '');
+function resolveProviderCredentials(
+	provider: UserLlmProvider
+): { ok: true; apiKey: string; baseURL?: string; proxyUrl?: string } | { ok: false; message: string } {
+	if (provider.paradigm === 'openai-compatible') {
+		const key = provider.apiKey?.trim() ?? '';
 		if (!key) {
 			return {
 				ok: false,
-				message: useC
-					? '该模型已开启独立端点，但未填写 OpenAI 兼容 API 密钥。请在设置 → 模型 → 该模型的高级选项中填写，或关闭独立端点后使用全局密钥。'
-					: '未配置 OpenAI 兼容 API Key。请在设置 → 模型 → 全局默认连接中填写。',
+				message:
+					'未配置 OpenAI 兼容 API Key。请在设置 → 模型 → 对应提供商中填写 Base URL 与密钥。',
 			};
 		}
-		const base = useC
-			? (entry.customBaseURL?.trim() || undefined)
-			: (settings.openAI?.baseURL?.trim() || undefined);
-		return { ok: true, apiKey: key, baseURL: base };
+		const base = provider.baseURL?.trim() || undefined;
+		const proxyUrl = provider.proxyUrl?.trim() || undefined;
+		return { ok: true, apiKey: key, baseURL: base, proxyUrl };
 	}
 
-	if (entry.paradigm === 'anthropic') {
-		const key = useC
-			? (entry.customApiKey?.trim() ?? '')
-			: (settings.anthropic?.apiKey?.trim() ?? '');
+	if (provider.paradigm === 'anthropic') {
+		const key = provider.apiKey?.trim() ?? '';
 		if (!key) {
 			return {
 				ok: false,
-				message: useC
-					? '该模型已开启独立端点，但未填写 Anthropic API 密钥。请在高级选项中填写，或关闭独立端点后使用全局密钥。'
-					: '未配置 Anthropic API Key。请在设置 → 模型 → 全局默认连接中填写。',
+				message: '未配置 Anthropic API Key。请在设置 → 模型 → 对应提供商中填写。',
 			};
 		}
-		const base = useC
-			? (entry.customBaseURL?.trim() || undefined)
-			: (settings.anthropic?.baseURL?.trim() || undefined);
+		const base = provider.baseURL?.trim() || undefined;
 		return { ok: true, apiKey: key, baseURL: base };
 	}
 
-	// gemini
-	const key = useC ? (entry.customApiKey?.trim() ?? '') : (settings.gemini?.apiKey?.trim() ?? '');
+	const key = provider.apiKey?.trim() ?? '';
 	if (!key) {
 		return {
 			ok: false,
-			message: useC
-				? '该模型已开启独立端点，但未填写 Gemini API 密钥。请在高级选项中填写，或关闭独立端点后使用全局密钥。'
-				: '未配置 Google Gemini API Key。请在设置 → 模型 → 全局默认连接中填写。',
+			message: '未配置 Google Gemini API Key。请在设置 → 模型 → 对应提供商中填写。',
 		};
 	}
 	return { ok: true, apiKey: key, baseURL: undefined };
 }
 
 /**
- * 解析当前选择对应的模型 id、范式、输出上限与有效密钥（含按模型独立端点）。
- * @param selectionId `auto` 或用户模型条目的 id
+ * 解析当前选择对应的模型 id、范式、输出上限与有效密钥（含按提供商的连接信息）。
+ * @param selectionId 用户模型条目的 id（须非空）
  */
 export function resolveModelRequest(settings: ShellSettings, selectionId: string): ResolvedModelRequest {
 	const entries = settings.models?.entries ?? [];
+	const providers = settings.models?.providers ?? [];
 	const enabledIds = settings.models?.enabledIds ?? [];
 	const enabledSet = new Set(enabledIds);
 
-	const pickFirstEntry = (): UserModelEntry | null => {
-		for (const id of enabledIds) {
-			const e = entryById(entries, id);
-			if (e && enabledSet.has(e.id) && isUsable(e)) {
-				return e;
-			}
-		}
-		return null;
-	};
-
 	const sid = selectionId.trim().toLowerCase();
-	let entry: UserModelEntry | null = null;
-	if (sid === 'auto' || sid === '') {
-		entry = pickFirstEntry();
-		if (!entry) {
-			return {
-				ok: false,
-				message:
-					'无法解析当前模型：请在模型目录中至少添加并启用一条模型，填写「请求名称」；若选 Auto，请确保启用列表中有可用项。',
-			};
-		}
-	} else {
-		const e = entryById(entries, selectionId);
-		if (!e || !enabledSet.has(e.id) || !isUsable(e)) {
-			return {
-				ok: false,
-				message:
-					'无法解析当前模型：该模型未启用、不存在或「请求名称」为空。请在模型目录中检查。',
-			};
-		}
-		entry = e;
+	if (!sid || sid === 'auto') {
+		return {
+			ok: false,
+			message:
+				'未选择模型。请在输入区选择模型，或在设置 → 模型中添加提供商与模型并选择默认模型。',
+		};
 	}
 
-	const creds = resolveCredentials(settings, entry);
+	const e = entryById(entries, selectionId);
+	if (!e || !enabledSet.has(e.id) || !isUsable(e)) {
+		return {
+			ok: false,
+			message:
+				'无法解析当前模型：该模型不存在、未在启用列表中或「请求名称」为空。请在设置 → 模型中检查。',
+		};
+	}
+	const entry = e;
+
+	const prov = providerById(providers, entry.providerId);
+	if (!prov) {
+		return {
+			ok: false,
+			message:
+				'无法解析当前模型：该模型未关联到有效提供商。请在设置 → 模型中为模型指定提供商，或重新添加提供商。',
+		};
+	}
+
+	const creds = resolveProviderCredentials(prov);
 	if (!creds.ok) {
 		return creds;
 	}
@@ -146,15 +132,16 @@ export function resolveModelRequest(settings: ShellSettings, selectionId: string
 		ok: true,
 		entryId: entry.id,
 		requestModelId: entry.requestName.trim(),
-		paradigm: entry.paradigm,
+		paradigm: prov.paradigm,
 		maxOutputTokens: clampMaxOutputTokens(entry.maxOutputTokens),
 		apiKey: creds.apiKey,
 		baseURL: creds.baseURL,
+		proxyUrl: creds.proxyUrl,
 	};
 }
 
 /**
- * @param selectionId `auto` 或用户模型条目的 id
+ * @param selectionId 用户模型条目的 id（须非空）
  */
 export function resolveChatModel(settings: ShellSettings, selectionId: string): ResolvedChatModel | null {
 	const r = resolveModelRequest(settings, selectionId);
@@ -164,10 +151,12 @@ export function resolveChatModel(settings: ShellSettings, selectionId: string): 
 	return { requestModelId: r.requestModelId, paradigm: r.paradigm };
 }
 
-/** 按模型选择器当前项（`auto` 或某条目 id）解析思考强度；无记录时默认为 medium。 */
+/** 按模型选择器当前条目 id 解析思考强度；未选择或旧版 auto 时默认为 medium。 */
 export function resolveThinkingLevelForSelection(settings: ShellSettings, selectionId: string): ThinkingLevel {
 	const trimmed = String(selectionId ?? '').trim();
-	const key = trimmed === '' || trimmed.toLowerCase() === 'auto' ? 'auto' : trimmed;
-	const raw = settings.models?.thinkingByModelId?.[key];
+	if (!trimmed || trimmed.toLowerCase() === 'auto') {
+		return 'medium';
+	}
+	const raw = settings.models?.thinkingByModelId?.[trimmed];
 	return normalizeThinkingLevel(raw != null ? String(raw) : 'medium');
 }

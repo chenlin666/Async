@@ -28,6 +28,8 @@ export type UnifiedChatOptions = {
 	requestApiKey: string;
 	/** OpenAI 兼容 / Anthropic 可选；Gemini 忽略 */
 	requestBaseURL?: string;
+	/** OpenAI 兼容：提供商级 HTTP(S) 代理（无则回退读 settings.openAI.proxyUrl 以兼容旧配置） */
+	requestProxyUrl?: string;
 	/** 单次补全输出 token 上限（已钳制） */
 	maxOutputTokens: number;
 	/** 本回合注入系统提示（Rules / Skills / Subagents / 导入规则） */

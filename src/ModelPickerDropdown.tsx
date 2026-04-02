@@ -10,6 +10,8 @@ export type ModelPickerItem = {
 	label: string;
 	description: string;
 	subtitle?: string;
+	/** 弱化展示：模型所属提供商名称 */
+	providerLabel?: string;
 };
 
 const OPTIONS_PANEL_W = 276;
@@ -209,6 +211,11 @@ export function ModelPickerDropdown({
 						role="listbox"
 						aria-label={t('modelPicker.selectAria')}
 					>
+						{items.length === 0 ? (
+							<div className="ref-model-dd-empty">
+								<p className="ref-model-dd-empty-text">{t('modelPicker.emptyHint')}</p>
+							</div>
+						) : null}
 						{items.map((m) => {
 							const isSel = selectedId === m.id;
 							const rowThink = getThinkingLevel(m.id);
@@ -237,7 +244,7 @@ export function ModelPickerDropdown({
 									</span>
 									<span className="ref-model-dd-main">
 										<span className="ref-model-dd-title-row">
-											<span className="ref-model-dd-label">{m.label}</span>
+											<span className="ref-model-dd-label" title={m.label}>{m.label}</span>
 											<span
 												className={`ref-model-dd-tag ref-model-dd-tag--think ref-model-dd-tag--think-${rowThink}`}
 												title={t('thinking.badgeTitle')}
@@ -245,15 +252,13 @@ export function ModelPickerDropdown({
 												{t(`thinking.badge.${rowThink}`)}
 											</span>
 										</span>
+										{m.providerLabel ? (
+											<span className="ref-model-dd-provider-meta" title={m.providerLabel}>
+												{m.providerLabel}
+											</span>
+										) : null}
 										{m.subtitle ? <span className="ref-model-dd-sub">{m.subtitle}</span> : null}
 									</span>
-									{isSel ? (
-										<span className="ref-model-dd-check" aria-hidden>
-											<IconCheck />
-										</span>
-									) : (
-										<span className="ref-model-dd-check-placeholder" aria-hidden />
-									)}
 									<button
 										type="button"
 										className="ref-model-dd-edit"
@@ -266,6 +271,13 @@ export function ModelPickerDropdown({
 									>
 										{t('modelPicker.edit')}
 									</button>
+									{isSel ? (
+										<span className="ref-model-dd-check" aria-hidden>
+											<IconCheck />
+										</span>
+									) : (
+										<span className="ref-model-dd-check-placeholder" aria-hidden />
+									)}
 								</div>
 							);
 						})}

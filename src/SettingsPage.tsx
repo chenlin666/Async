@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-	AUTO_MODEL_ID,
+	createEmptyUserLlmProvider,
 	createEmptyUserModel,
 	DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
+	type UserLlmProvider,
 	type UserModelEntry,
 } from './modelCatalog';
 import { LLM_PROVIDER_OPTIONS, type ModelRequestParadigm } from './llmProvider';
@@ -148,23 +149,11 @@ function navIcon(id: SettingsNavId) {
 type Props = {
 	onClose: () => void;
 	initialNav: SettingsNavId;
-	apiKey: string;
-	baseURL: string;
 	defaultModel: string;
-	proxyUrl: string;
-	anthropicApiKey: string;
-	anthropicBaseURL: string;
-	geminiApiKey: string;
+	modelProviders: UserLlmProvider[];
 	modelEntries: UserModelEntry[];
-	enabledIds: string[];
-	onChangeApiKey: (v: string) => void;
-	onChangeBaseURL: (v: string) => void;
-	onChangeProxyUrl: (v: string) => void;
-	onChangeAnthropicApiKey: (v: string) => void;
-	onChangeAnthropicBaseURL: (v: string) => void;
-	onChangeGeminiApiKey: (v: string) => void;
+	onChangeModelProviders: (providers: UserLlmProvider[]) => void;
 	onChangeModelEntries: (entries: UserModelEntry[]) => void;
-	onToggleEnabled: (id: string, enabled: boolean) => void;
 	onPickDefaultModel: (id: string) => void;
 	agentCustomization: AgentCustomization;
 	onChangeAgentCustomization: (v: AgentCustomization) => void;
@@ -198,23 +187,11 @@ type Props = {
 export function SettingsPage({
 	onClose,
 	initialNav,
-	apiKey,
-	baseURL,
 	defaultModel,
-	proxyUrl,
-	anthropicApiKey,
-	anthropicBaseURL,
-	geminiApiKey,
+	modelProviders,
 	modelEntries,
-	enabledIds,
-	onChangeApiKey,
-	onChangeBaseURL,
-	onChangeProxyUrl,
-	onChangeAnthropicApiKey,
-	onChangeAnthropicBaseURL,
-	onChangeGeminiApiKey,
+	onChangeModelProviders,
 	onChangeModelEntries,
-	onToggleEnabled,
 	onPickDefaultModel,
 	agentCustomization,
 	onChangeAgentCustomization,
@@ -300,20 +277,85 @@ export function SettingsPage({
 		return () => window.removeEventListener('resize', onResize);
 	}, []);
 
-	const enabledSet = useMemo(() => new Set(enabledIds), [enabledIds]);
-
-	const filteredEntries = useMemo(() => {
+	const filteredProviders = useMemo(() => {
 		const q = search.trim().toLowerCase();
 		if (!q) {
-			return modelEntries;
+			return modelProviders;
 		}
-		return modelEntries.filter((m) => {
-			const dn = m.displayName.toLowerCase();
-			const rn = m.requestName.toLowerCase();
-			const pl = t(`settings.paradigm.${m.paradigm}`).toLowerCase();
-			return dn.includes(q) || rn.includes(q) || pl.includes(q);
+		return modelProviders.filter((p) => {
+			const pn = p.displayName.toLowerCase();
+			const pl = t(`settings.paradigm.${p.paradigm}`).toLowerCase();
+			if (pn.includes(q) || pl.includes(q)) {
+				return true;
+			}
+			const sub = modelEntries.filter((m) => m.providerId === p.id);
+			return sub.some((m) => {
+				const dn = m.displayName.toLowerCase();
+				const rn = m.requestName.toLowerCase();
+				return dn.includes(q) || rn.includes(q);
+			});
 		});
-	}, [modelEntries, search, t]);
+	}, [modelProviders, modelEntries, search, t]);
+
+	const modelsVisibleUnderProvider = useCallback(
+		(provider: UserLlmProvider) => {
+			const all = modelEntries.filter((m) => m.providerId === provider.id);
+			const q = search.trim().toLowerCase();
+			if (!q) {
+				return all;
+			}
+			const headerHit =
+				provider.displayName.toLowerCase().includes(q) ||
+				t(`settings.paradigm.${provider.paradigm}`).toLowerCase().includes(q);
+			if (headerHit) {
+				return all;
+			}
+			return all.filter((m) => {
+				const dn = m.displayName.toLowerCase();
+				const rn = m.requestName.toLowerCase();
+				return dn.includes(q) || rn.includes(q);
+			});
+		},
+		[modelEntries, search, t]
+	);
+
+	const patchProvider = useCallback(
+		(id: string, patch: Partial<UserLlmProvider>) => {
+			onChangeModelProviders(modelProviders.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+		},
+		[modelProviders, onChangeModelProviders]
+	);
+
+	const removeProvider = useCallback(
+		(pid: string) => {
+			const removedIds = new Set(modelEntries.filter((m) => m.providerId === pid).map((m) => m.id));
+			onChangeModelProviders(modelProviders.filter((p) => p.id !== pid));
+			onChangeModelEntries(modelEntries.filter((m) => m.providerId !== pid));
+			if (removedIds.has(defaultModel)) {
+				onPickDefaultModel('');
+			}
+		},
+		[
+			modelProviders,
+			modelEntries,
+			onChangeModelProviders,
+			onChangeModelEntries,
+			defaultModel,
+			onPickDefaultModel,
+		]
+	);
+
+	const addProvider = useCallback(() => {
+		const p = createEmptyUserLlmProvider();
+		onChangeModelProviders([...modelProviders, p]);
+	}, [modelProviders, onChangeModelProviders]);
+
+	const addModelToProvider = useCallback(
+		(providerId: string) => {
+			onChangeModelEntries([...modelEntries, createEmptyUserModel(providerId)]);
+		},
+		[modelEntries, onChangeModelEntries]
+	);
 
 	const patchEntry = useCallback(
 		(id: string, patch: Partial<UserModelEntry>) => {
@@ -326,15 +368,11 @@ export function SettingsPage({
 		(id: string) => {
 			onChangeModelEntries(modelEntries.filter((e) => e.id !== id));
 			if (defaultModel === id) {
-				onPickDefaultModel(AUTO_MODEL_ID);
+				onPickDefaultModel('');
 			}
 		},
 		[modelEntries, onChangeModelEntries, defaultModel, onPickDefaultModel]
 	);
-
-	const addModel = useCallback(() => {
-		onChangeModelEntries([...modelEntries, createEmptyUserModel()]);
-	}, [modelEntries, onChangeModelEntries]);
 
 	return (
 		<div className="ref-settings-root" role="dialog" aria-modal="true" aria-label={t('settings.dialogAria')}>
@@ -449,86 +487,8 @@ export function SettingsPage({
 						{nav === 'models' ? (
 							<div className="ref-settings-panel ref-settings-panel--models">
 								<p className="ref-settings-models-hint">{t('settings.modelsHint')}</p>
+								<p className="ref-settings-models-provider-lead">{t('settings.modelsProviderLead')}</p>
 
-								<section className="ref-settings-global-creds" aria-labelledby="ref-settings-global-creds-title">
-									<div className="ref-settings-global-creds-head">
-										<h2 id="ref-settings-global-creds-title" className="ref-settings-global-creds-title">
-											{t('settings.modelsGlobalCredsTitle')}
-										</h2>
-										<p className="ref-settings-global-creds-lead">{t('settings.modelsGlobalCredsLead')}</p>
-									</div>
-									<div className="ref-settings-global-creds-body">
-										<div className="ref-settings-global-creds-block">
-											<p className="ref-settings-global-creds-block-hint">{t('settings.openaiKeyHint')}</p>
-											<label className="ref-settings-field ref-settings-field--compact">
-												<span>{t('settings.openaiKey')}</span>
-												<input
-													value={apiKey}
-													onChange={(e) => onChangeApiKey(e.target.value)}
-													type="password"
-													autoComplete="off"
-													placeholder="sk-…"
-												/>
-											</label>
-											<label className="ref-settings-field ref-settings-field--compact">
-												<span>{t('settings.openaiBase')}</span>
-												<input
-													value={baseURL}
-													onChange={(e) => onChangeBaseURL(e.target.value)}
-													placeholder={t('settings.placeholder.openaiBase')}
-												/>
-											</label>
-										</div>
-										<div className="ref-settings-global-creds-block">
-											<p className="ref-settings-global-creds-block-hint">{t('settings.anthropicKeyHint')}</p>
-											<label className="ref-settings-field ref-settings-field--compact">
-												<span>{t('settings.anthropicKey')}</span>
-												<input
-													value={anthropicApiKey}
-													onChange={(e) => onChangeAnthropicApiKey(e.target.value)}
-													type="password"
-													autoComplete="off"
-													placeholder="sk-ant-…"
-												/>
-											</label>
-											<label className="ref-settings-field ref-settings-field--compact">
-												<span>{t('settings.anthropicBase')}</span>
-												<input
-													value={anthropicBaseURL}
-													onChange={(e) => onChangeAnthropicBaseURL(e.target.value)}
-													placeholder={t('settings.placeholder.anthropicBase')}
-												/>
-											</label>
-										</div>
-										<div className="ref-settings-global-creds-block">
-											<p className="ref-settings-global-creds-block-hint">{t('settings.geminiKeyHint')}</p>
-											<label className="ref-settings-field ref-settings-field--compact">
-												<span>{t('settings.geminiKey')}</span>
-												<input
-													value={geminiApiKey}
-													onChange={(e) => onChangeGeminiApiKey(e.target.value)}
-													type="password"
-													autoComplete="off"
-													placeholder="AIza…"
-												/>
-											</label>
-										</div>
-										<div className="ref-settings-global-creds-block ref-settings-global-creds-block--proxy">
-											<p className="ref-settings-global-creds-block-hint">{t('settings.proxyHint')}</p>
-											<label className="ref-settings-field ref-settings-field--compact">
-												<span>{t('settings.proxy')}</span>
-												<input
-													value={proxyUrl}
-													onChange={(e) => onChangeProxyUrl(e.target.value)}
-													autoComplete="off"
-													placeholder="http://127.0.0.1:7890"
-												/>
-											</label>
-										</div>
-									</div>
-								</section>
-
-								<h2 className="ref-settings-subhead ref-settings-subhead--models-catalog">{t('settings.modelCatalog')}</h2>
 								<div className="ref-settings-models-toolbar">
 									<div className="ref-settings-models-search-wrap ref-settings-models-search-wrap--grow">
 										<IconSearch className="ref-settings-models-search-ico" />
@@ -539,159 +499,171 @@ export function SettingsPage({
 											onChange={(e) => setSearch(e.target.value)}
 										/>
 									</div>
-									<button type="button" className="ref-settings-add-model" onClick={addModel}>
-										{t('settings.addModel')}
+									<button type="button" className="ref-settings-add-model" onClick={addProvider}>
+										{t('settings.addProvider')}
 									</button>
 								</div>
 
-								<ul className="ref-settings-user-model-list" aria-label={t('settings.modelCatalog')}>
-									<li className="ref-settings-model-row ref-settings-model-row--auto">
-										<div className="ref-settings-model-row-main">
-											<div className="ref-settings-model-text">
-												<span className="ref-settings-model-name">{t('modelPicker.auto')}</span>
-												<span className="ref-settings-model-id">{t('settings.autoRowDesc')}</span>
-											</div>
-											{defaultModel === AUTO_MODEL_ID ? (
-												<span className="ref-settings-default-pill">{t('settings.defaultChat')}</span>
-											) : (
-												<button type="button" className="ref-settings-set-default" onClick={() => onPickDefaultModel(AUTO_MODEL_ID)}>
-													{t('settings.setDefault')}
-												</button>
-											)}
-										</div>
-									</li>
-									{filteredEntries.map((m) => {
-										const on = enabledSet.has(m.id);
-										const maxOut = m.maxOutputTokens ?? DEFAULT_MODEL_MAX_OUTPUT_TOKENS;
-										const customOn = m.useCustomConnection === true;
+								<ul className="ref-settings-provider-root-list" aria-label={t('settings.modelCatalog')}>
+									{filteredProviders.map((prov) => {
+										const subModels = modelsVisibleUnderProvider(prov);
 										return (
-											<li key={m.id} className="ref-settings-user-model-card ref-settings-user-model-card--v2">
-												<div className="ref-settings-model-v2-head">
-													<label className="ref-settings-field ref-settings-field--compact ref-settings-model-v2-name">
-														<span>{t('settings.displayName')}</span>
-														<input
-															value={m.displayName}
-															onChange={(e) => patchEntry(m.id, { displayName: e.target.value })}
-															placeholder={t('settings.displayNamePh')}
-														/>
-													</label>
-													<div className="ref-settings-model-v2-actions">
-														<span className="ref-settings-model-v2-enable-label">{t('settings.inPicker')}</span>
-														<button
-															type="button"
-															className={`ref-settings-toggle ${on ? 'is-on' : ''}`}
-															role="switch"
-															aria-checked={on}
-															onClick={() => onToggleEnabled(m.id, !on)}
-															title={on ? t('settings.enabled') : t('settings.disabled')}
-														>
-															<span className="ref-settings-toggle-knob" />
-														</button>
-														{on ? (
-															defaultModel === m.id ? (
-																<span className="ref-settings-default-pill">{t('settings.defaultChat')}</span>
-															) : (
-																<button type="button" className="ref-settings-set-default" onClick={() => onPickDefaultModel(m.id)}>
-																	{t('settings.setDefault')}
-																</button>
-															)
-														) : null}
-														<button
-															type="button"
-															className="ref-settings-remove-model"
-															onClick={() => removeEntry(m.id)}
-															title={t('settings.removeModel')}
-														>
-															{t('settings.removeModel')}
-														</button>
-													</div>
-												</div>
-												<div className="ref-settings-model-v2-grid">
-													<label className="ref-settings-field ref-settings-field--compact">
-														<span>{t('settings.requestName')}</span>
-														<input
-															value={m.requestName}
-															onChange={(e) => patchEntry(m.id, { requestName: e.target.value })}
-															placeholder={t('settings.requestNamePh')}
-														/>
-													</label>
-													<label className="ref-settings-field ref-settings-field--compact">
-														<span>{t('settings.requestParadigm')}</span>
-														<VoidSelect
-															ariaLabel={t('settings.paradigmAria')}
-															value={m.paradigm}
-															onChange={(v) => patchEntry(m.id, { paradigm: v as ModelRequestParadigm })}
-															options={LLM_PROVIDER_OPTIONS.map((o) => ({
-																value: o.id,
-																label: t(`settings.paradigm.${o.id}`),
-															}))}
-														/>
-													</label>
-												</div>
-												<details className="ref-settings-model-advanced">
-													<summary className="ref-settings-model-advanced-summary">{t('settings.modelAdvanced')}</summary>
-													<div className="ref-settings-model-advanced-body">
-														<label className="ref-settings-field ref-settings-field--compact">
-															<span>{t('settings.maxOutputTokens')}</span>
-															<input
-																type="number"
-																min={1}
-																max={128000}
-																value={maxOut}
-																onChange={(e) => {
-																	const v = Number.parseInt(e.target.value, 10);
-																	patchEntry(m.id, {
-																		maxOutputTokens: Number.isNaN(v) ? undefined : v,
-																	});
-																}}
-															/>
-															<p className="ref-settings-proxy-hint ref-settings-field-footnote">{t('settings.maxOutputTokensHint')}</p>
-														</label>
-														<div className="ref-settings-custom-endpoint-row">
-															<div className="ref-settings-custom-endpoint-label">
-																<span className="ref-settings-custom-endpoint-title">{t('settings.useCustomConnection')}</span>
-																<p className="ref-settings-proxy-hint ref-settings-custom-endpoint-desc">{t('settings.useCustomConnectionHint')}</p>
-															</div>
-															<button
-																type="button"
-																className={`ref-settings-toggle ${customOn ? 'is-on' : ''}`}
-																role="switch"
-																aria-checked={customOn}
-																onClick={() => patchEntry(m.id, { useCustomConnection: !customOn })}
-																title={customOn ? t('settings.customOn') : t('settings.customOff')}
-															>
-																<span className="ref-settings-toggle-knob" />
-															</button>
-														</div>
-														{customOn ? (
-															<div className="ref-settings-custom-endpoint-fields">
-																{m.paradigm !== 'gemini' ? (
-																	<label className="ref-settings-field ref-settings-field--compact">
-																		<span>{t('settings.customBaseUrl')}</span>
-																		<input
-																			value={m.customBaseURL ?? ''}
-																			onChange={(e) => patchEntry(m.id, { customBaseURL: e.target.value })}
-																			placeholder={
-																				m.paradigm === 'anthropic'
-																					? t('settings.placeholder.anthropicBase')
-																					: t('settings.placeholder.openaiBase')
-																			}
-																			autoComplete="off"
-																		/>
-																	</label>
-																) : null}
+											<li key={prov.id} className="ref-settings-provider-shell">
+												<details className="ref-settings-provider-details" open>
+													<summary className="ref-settings-provider-summary">
+														<span className="ref-settings-provider-summary-chev" aria-hidden />
+														<span className="ref-settings-provider-summary-text">
+															{prov.displayName.trim() || t('settings.providerUntitled')}
+														</span>
+														<span className="ref-settings-provider-summary-tag">{t(`settings.paradigm.${prov.paradigm}`)}</span>
+													</summary>
+
+													<div className="ref-settings-provider-body">
+														<div className="ref-settings-provider-creds">
+															<label className="ref-settings-field ref-settings-field--compact">
+																<span>{t('settings.providerName')}</span>
+																<input
+																	value={prov.displayName}
+																	onChange={(e) => patchProvider(prov.id, { displayName: e.target.value })}
+																	placeholder={t('settings.providerNamePh')}
+																	autoComplete="off"
+																/>
+															</label>
+															<label className="ref-settings-field ref-settings-field--compact">
+																<span>{t('settings.requestParadigm')}</span>
+																<VoidSelect
+																	ariaLabel={t('settings.paradigmAria')}
+																	value={prov.paradigm}
+																	onChange={(v) => patchProvider(prov.id, { paradigm: v as ModelRequestParadigm })}
+																	options={LLM_PROVIDER_OPTIONS.map((o) => ({
+																		value: o.id,
+																		label: t(`settings.paradigm.${o.id}`),
+																	}))}
+																/>
+															</label>
+															<label className="ref-settings-field ref-settings-field--compact">
+																<span>{t('settings.providerApiKey')}</span>
+																<input
+																	value={prov.apiKey ?? ''}
+																	onChange={(e) => patchProvider(prov.id, { apiKey: e.target.value })}
+																	type="password"
+																	autoComplete="off"
+																	placeholder={t('settings.providerApiKeyPh')}
+																/>
+															</label>
+															{prov.paradigm !== 'gemini' ? (
 																<label className="ref-settings-field ref-settings-field--compact">
-																	<span>{t('settings.customApiKey')}</span>
+																	<span>{t('settings.providerBaseUrl')}</span>
 																	<input
-																		value={m.customApiKey ?? ''}
-																		onChange={(e) => patchEntry(m.id, { customApiKey: e.target.value })}
-																		type="password"
+																		value={prov.baseURL ?? ''}
+																		onChange={(e) => patchProvider(prov.id, { baseURL: e.target.value })}
+																		placeholder={
+																			prov.paradigm === 'anthropic'
+																				? t('settings.placeholder.anthropicBase')
+																				: t('settings.placeholder.openaiBase')
+																		}
 																		autoComplete="off"
-																		placeholder={t('settings.customApiKeyPh')}
 																	/>
 																</label>
+															) : null}
+															{prov.paradigm === 'openai-compatible' ? (
+																<label className="ref-settings-field ref-settings-field--compact">
+																	<span>{t('settings.proxy')}</span>
+																	<p className="ref-settings-proxy-hint ref-settings-field-footnote">{t('settings.proxyHint')}</p>
+																	<input
+																		value={prov.proxyUrl ?? ''}
+																		onChange={(e) => patchProvider(prov.id, { proxyUrl: e.target.value })}
+																		autoComplete="off"
+																		placeholder="http://127.0.0.1:7890"
+																	/>
+																</label>
+															) : null}
+														</div>
+
+														<div className="ref-settings-provider-models-head">
+															<h3 className="ref-settings-provider-models-title">{t('settings.modelsInProvider')}</h3>
+															<div className="ref-settings-provider-models-actions">
+																<button type="button" className="ref-settings-add-model ref-settings-add-model--small" onClick={() => addModelToProvider(prov.id)}>
+																	{t('settings.addModelToProvider')}
+																</button>
+																<button
+																	type="button"
+																	className="ref-settings-remove-model"
+																	onClick={() => removeProvider(prov.id)}
+																	title={t('settings.removeProvider')}
+																>
+																	{t('settings.removeProvider')}
+																</button>
 															</div>
-														) : null}
+														</div>
+
+														<ul className="ref-settings-provider-model-list">
+															{subModels.map((m) => {
+																const maxOut = m.maxOutputTokens ?? DEFAULT_MODEL_MAX_OUTPUT_TOKENS;
+																return (
+																	<li key={m.id} className="ref-settings-user-model-card ref-settings-user-model-card--v2 ref-settings-user-model-card--nested">
+																		<div className="ref-settings-model-v2-head">
+																			<label className="ref-settings-field ref-settings-field--compact ref-settings-model-v2-name">
+																				<span>{t('settings.displayName')}</span>
+																				<input
+																					value={m.displayName}
+																					onChange={(e) => patchEntry(m.id, { displayName: e.target.value })}
+																					placeholder={t('settings.displayNamePh')}
+																				/>
+																			</label>
+																			<div className="ref-settings-model-v2-actions">
+																				{defaultModel === m.id ? (
+																					<span className="ref-settings-default-pill">{t('settings.defaultChat')}</span>
+																				) : (
+																					<button type="button" className="ref-settings-set-default" onClick={() => onPickDefaultModel(m.id)}>
+																						{t('settings.setDefault')}
+																					</button>
+																				)}
+																				<button
+																					type="button"
+																					className="ref-settings-remove-model"
+																					onClick={() => removeEntry(m.id)}
+																					title={t('settings.removeModel')}
+																				>
+																					{t('settings.removeModel')}
+																				</button>
+																			</div>
+																		</div>
+																		<div className="ref-settings-model-v2-grid ref-settings-model-v2-grid--single">
+																			<label className="ref-settings-field ref-settings-field--compact">
+																				<span>{t('settings.requestName')}</span>
+																				<input
+																					value={m.requestName}
+																					onChange={(e) => patchEntry(m.id, { requestName: e.target.value })}
+																					placeholder={t('settings.requestNamePh')}
+																				/>
+																			</label>
+																		</div>
+																		<details className="ref-settings-model-advanced">
+																			<summary className="ref-settings-model-advanced-summary">{t('settings.modelAdvanced')}</summary>
+																			<div className="ref-settings-model-advanced-body">
+																				<label className="ref-settings-field ref-settings-field--compact">
+																					<span>{t('settings.maxOutputTokens')}</span>
+																					<input
+																						type="number"
+																						min={1}
+																						max={128000}
+																						value={maxOut}
+																						onChange={(e) => {
+																							const v = Number.parseInt(e.target.value, 10);
+																							patchEntry(m.id, {
+																								maxOutputTokens: Number.isNaN(v) ? undefined : v,
+																							});
+																						}}
+																					/>
+																					<p className="ref-settings-proxy-hint ref-settings-field-footnote">{t('settings.maxOutputTokensHint')}</p>
+																				</label>
+																			</div>
+																		</details>
+																	</li>
+																);
+															})}
+														</ul>
 													</div>
 												</details>
 											</li>

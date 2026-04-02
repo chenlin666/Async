@@ -26,13 +26,13 @@ export async function streamOpenAICompatible(
 		return;
 	}
 
-	const proxyRaw = settings.openAI?.proxyUrl?.trim();
+	const proxyRaw = (options.requestProxyUrl?.trim() || settings.openAI?.proxyUrl?.trim()) ?? '';
 	let httpAgent: InstanceType<typeof HttpsProxyAgent> | undefined;
 	if (proxyRaw) {
 		try {
 			httpAgent = new HttpsProxyAgent(proxyRaw);
 		} catch {
-			handlers.onError('代理地址无效，请在 Models 中检查 HTTP 代理格式（如 http://127.0.0.1:7890）。');
+			handlers.onError('代理地址无效，请在设置 → 模型 → 提供商中检查 HTTP 代理格式（如 http://127.0.0.1:7890）。');
 			return;
 		}
 	}

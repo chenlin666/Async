@@ -88,9 +88,12 @@ export function PlanReviewPanel({
 						variant="compact"
 						ariaLabel={t('plan.review.model')}
 						value={buildModelId}
-						disabled={planBuilt}
+						disabled={planBuilt || modelItems.length === 0}
 						onChange={setBuildModelId}
-						options={modelItems.map((m) => ({ value: m.id, label: m.label }))}
+						options={[
+							{ value: '', label: t('plan.review.pickModel'), disabled: true },
+							...modelItems.map((m) => ({ value: m.id, label: m.label })),
+						]}
 					/>
 				</div>
 			</div>
@@ -175,6 +178,7 @@ export function PlanReviewPanel({
 					<button
 						type="button"
 						className="ref-plan-review-build"
+						disabled={!buildModelId.trim() || modelItems.length === 0}
 						onClick={() => onBuild(buildModelId)}
 					>
 						{t('plan.review.build')}

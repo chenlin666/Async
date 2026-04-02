@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { AgentCustomization } from './agentSettingsTypes.js';
 import type { McpServerConfig } from './mcp/mcpTypes.js';
 import { resolveAsyncDataDir } from './dataDir.js';
@@ -11,23 +12,34 @@ export type { McpServerConfig } from './mcp/mcpTypes.js';
 /** 单条用户模型实际请求时使用的协议（与适配器一致） */
 export type ModelRequestParadigm = 'openai-compatible' | 'anthropic' | 'gemini';
 
+/** 用户配置的 LLM 提供商（连接信息在提供商级统一维护） */
+export type UserLlmProvider = {
+	/** 稳定 id */
+	id: string;
+	/** 界面显示名称 */
+	displayName: string;
+	paradigm: ModelRequestParadigm;
+	apiKey?: string;
+	/** OpenAI 兼容 / Anthropic 可选 */
+	baseURL?: string;
+	/** 仅 OpenAI 兼容请求使用的 HTTP(S) 代理 */
+	proxyUrl?: string;
+};
+
 export type UserModelEntry = {
 	/** 稳定 id，用于设置与选择器 */
 	id: string;
+	/** 所属提供商 id */
+	providerId: string;
 	/** 界面显示名称 */
 	displayName: string;
 	/** 发给 API 的模型名 */
 	requestName: string;
-	paradigm: ModelRequestParadigm;
 	/**
 	 * 单次补全最大输出 token 上限（各范式各自映射到 API 参数）。
 	 * 未设置时在解析层使用默认（当前为 16384）；若网关上限更低请在模型高级选项中调小。
 	 */
 	maxOutputTokens?: number;
-	/** 为 true 时本条使用 customBaseURL / customApiKey，否则用全局对应范式的密钥与地址 */
-	useCustomConnection?: boolean;
-	customBaseURL?: string;
-	customApiKey?: string;
 };
 
 export type LLMProviderId = ModelRequestParadigm;
@@ -89,13 +101,15 @@ export type ShellSettings = {
 	gemini?: {
 		apiKey?: string;
 	};
-	/** 当前选择：`auto` 或某条用户模型的 id */
+	/** 当前选择的用户模型 id；未选择时为空或省略 */
 	defaultModel?: string;
 	/**
 	 * @deprecated 已由 `models.thinkingByModelId` 按模型区分；读入时仅用于一次性迁移到各 id。
 	 */
 	thinkingLevel?: ThinkingLevel;
 	models?: {
+		/** 用户配置的提供商（含 Base URL / Key / 代理等） */
+		providers?: UserLlmProvider[];
 		/** 用户自添加的模型条目 */
 		entries?: UserModelEntry[];
 		/** 在选择器中启用的条目 id，顺序决定 Auto 的优先级 */
@@ -122,7 +136,6 @@ export type ShellSettings = {
 
 const defaultSettings: ShellSettings = {
 	language: 'zh-CN',
-	defaultModel: 'auto',
 	thinkingLevel: 'medium',
 	recentWorkspaces: [],
 	lastOpenedWorkspace: null,
@@ -137,7 +150,7 @@ let settingsPath = '';
 function migrateThinkingByModel(settings: ShellSettings): { next: ShellSettings; didMutate: boolean } {
 	const entries = settings.models?.entries ?? [];
 	const enabledIds = settings.models?.enabledIds ?? [];
-	const ids = new Set<string>(['auto']);
+	const ids = new Set<string>();
 	for (const id of enabledIds) {
 		ids.add(String(id));
 	}
@@ -185,6 +198,190 @@ function migrateThinkingByModel(settings: ShellSettings): { next: ShellSettings;
 	};
 }
 
+type LegacyModelJson = {
+	id?: string;
+	displayName?: string;
+	requestName?: string;
+	maxOutputTokens?: number;
+	providerId?: string;
+	paradigm?: ModelRequestParadigm;
+	useCustomConnection?: boolean;
+	customBaseURL?: string;
+	customApiKey?: string;
+};
+
+function providerMigrationNeeded(settings: ShellSettings): boolean {
+	const provList = settings.models?.providers;
+	const providers = Array.isArray(provList) ? provList : [];
+	const provIds = new Set(providers.map((p) => p.id));
+	const rawEntries = settings.models?.entries ?? [];
+
+	for (const raw of rawEntries) {
+		if (!raw || typeof raw !== 'object') {
+			continue;
+		}
+		const e = raw as LegacyModelJson;
+		if (e.useCustomConnection === true || e.customApiKey != null || e.customBaseURL != null) {
+			return true;
+		}
+		if (e.paradigm != null && (typeof e.providerId !== 'string' || !e.providerId)) {
+			return true;
+		}
+		if (typeof e.providerId !== 'string' || !provIds.has(e.providerId)) {
+			return true;
+		}
+	}
+
+	if (rawEntries.length === 0) {
+		const hasGlobal =
+			!!(settings.openAI?.apiKey?.trim()) ||
+			!!(settings.openAI?.baseURL?.trim()) ||
+			!!(settings.anthropic?.apiKey?.trim()) ||
+			!!(settings.gemini?.apiKey?.trim());
+		if (hasGlobal && providers.length === 0) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/**
+ * 将旧版「每模型独立连接 / 全局密钥」结构迁移为「提供商 + 模型」。
+ */
+function migrateProviderModelLayout(settings: ShellSettings): { next: ShellSettings; didMutate: boolean } {
+	if (!providerMigrationNeeded(settings)) {
+		return { next: settings, didMutate: false };
+	}
+
+	const rawEntries = (settings.models?.entries ?? []) as LegacyModelJson[];
+	const nextProviders: UserLlmProvider[] = [];
+	const defaults: Partial<Record<ModelRequestParadigm, string>> = {};
+	const customKeyToId = new Map<string, string>();
+
+	function ensureDefaultParadigm(p: ModelRequestParadigm): string {
+		const hit = defaults[p];
+		if (hit) {
+			return hit;
+		}
+		const id = randomUUID();
+		defaults[p] = id;
+		if (p === 'openai-compatible') {
+			nextProviders.push({
+				id,
+				displayName: 'OpenAI compatible',
+				paradigm: p,
+				apiKey: settings.openAI?.apiKey,
+				baseURL: settings.openAI?.baseURL,
+				proxyUrl: settings.openAI?.proxyUrl,
+			});
+		} else if (p === 'anthropic') {
+			nextProviders.push({
+				id,
+				displayName: 'Anthropic',
+				paradigm: p,
+				apiKey: settings.anthropic?.apiKey,
+				baseURL: settings.anthropic?.baseURL,
+			});
+		} else {
+			nextProviders.push({
+				id,
+				displayName: 'Google Gemini',
+				paradigm: p,
+				apiKey: settings.gemini?.apiKey,
+			});
+		}
+		return id;
+	}
+
+	const nextEntries: UserModelEntry[] = [];
+
+	for (const raw of rawEntries) {
+		const id = typeof raw.id === 'string' && raw.id ? raw.id : randomUUID();
+		const paradigm: ModelRequestParadigm = raw.paradigm ?? 'openai-compatible';
+		let providerId: string;
+
+		if (raw.useCustomConnection === true) {
+			const b = String(raw.customBaseURL ?? '').trim();
+			const k = String(raw.customApiKey ?? '').trim();
+			const mapKey = `${paradigm}\n${b}\n${k}`;
+			const existing = customKeyToId.get(mapKey);
+			if (existing) {
+				providerId = existing;
+			} else {
+				providerId = randomUUID();
+				customKeyToId.set(mapKey, providerId);
+				const labelHint =
+					String(raw.displayName ?? '').trim() ||
+					String(raw.requestName ?? '').trim() ||
+					(paradigm === 'openai-compatible'
+						? 'OpenAI endpoint'
+						: paradigm === 'anthropic'
+							? 'Anthropic endpoint'
+							: 'Gemini endpoint');
+				nextProviders.push({
+					id: providerId,
+					displayName: labelHint,
+					paradigm,
+					apiKey: k || undefined,
+					baseURL: paradigm === 'gemini' ? undefined : b || undefined,
+				});
+			}
+		} else {
+			providerId = ensureDefaultParadigm(paradigm);
+		}
+
+		nextEntries.push({
+			id,
+			providerId,
+			displayName: String(raw.displayName ?? ''),
+			requestName: String(raw.requestName ?? ''),
+			maxOutputTokens: raw.maxOutputTokens,
+		});
+	}
+
+	if (rawEntries.length === 0) {
+		if (settings.openAI?.apiKey?.trim() || settings.openAI?.baseURL?.trim()) {
+			ensureDefaultParadigm('openai-compatible');
+		}
+		if (settings.anthropic?.apiKey?.trim() || settings.anthropic?.baseURL?.trim()) {
+			ensureDefaultParadigm('anthropic');
+		}
+		if (settings.gemini?.apiKey?.trim()) {
+			ensureDefaultParadigm('gemini');
+		}
+	}
+
+	const enabledIds = settings.models?.enabledIds ?? [];
+	const validEntryIds = new Set(nextEntries.map((e) => e.id));
+	const saneEnabled = enabledIds.filter((x) => validEntryIds.has(String(x)));
+
+	return {
+		next: {
+			...settings,
+			models: {
+				...(settings.models ?? {}),
+				providers: nextProviders,
+				entries: nextEntries,
+				enabledIds: saneEnabled,
+				thinkingByModelId: settings.models?.thinkingByModelId ?? {},
+			},
+		},
+		didMutate: true,
+	};
+}
+
+function migrateDefaultModelRemoveAuto(settings: ShellSettings): { next: ShellSettings; didMutate: boolean } {
+	const dm = settings.defaultModel;
+	if (typeof dm !== 'string') {
+		return { next: settings, didMutate: false };
+	}
+	if (dm.trim().toLowerCase() === 'auto') {
+		return { next: { ...settings, defaultModel: undefined }, didMutate: true };
+	}
+	return { next: settings, didMutate: false };
+}
+
 export function initSettingsStore(userData: string): void {
 	const dir = resolveAsyncDataDir(userData);
 	fs.mkdirSync(dir, { recursive: true });
@@ -199,9 +396,13 @@ export function initSettingsStore(userData: string): void {
 	} else {
 		cached = { ...defaultSettings };
 	}
+	const migratedDm = migrateDefaultModelRemoveAuto(cached);
+	cached = migratedDm.next;
+	const migratedPm = migrateProviderModelLayout(cached);
+	cached = migratedPm.next;
 	const migrated = migrateThinkingByModel(cached);
 	cached = migrated.next;
-	if (migrated.didMutate) {
+	if (migratedDm.didMutate || migratedPm.didMutate || migrated.didMutate) {
 		save();
 	} else if (!fs.existsSync(settingsPath)) {
 		save();
@@ -223,6 +424,10 @@ export function patchSettings(partial: Partial<ShellSettings>): ShellSettings {
 	const nextModels =
 		partial.models !== undefined
 			? {
+					providers:
+						partial.models.providers !== undefined
+							? partial.models.providers
+							: (cached.models?.providers ?? []),
 					entries:
 						partial.models.entries !== undefined
 							? partial.models.entries
@@ -283,6 +488,8 @@ export function patchSettings(partial: Partial<ShellSettings>): ShellSettings {
 		indexing: partialIndexing !== undefined ? mergedIndexing : cached.indexing,
 		mcpServers: mergedMcp,
 	};
+	cached = migrateDefaultModelRemoveAuto(cached).next;
+	cached = migrateProviderModelLayout(cached).next;
 	cached = migrateThinkingByModel(cached).next;
 	save();
 	return getSettings();

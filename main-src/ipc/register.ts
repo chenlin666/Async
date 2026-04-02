@@ -176,6 +176,7 @@ function runChatStream(
 				paradigm: resolved.paradigm,
 				requestApiKey: resolved.apiKey,
 				requestBaseURL: resolved.baseURL,
+				requestProxyUrl: resolved.proxyUrl,
 				maxOutputTokens: resolved.maxOutputTokens,
 				thinkingLevel,
 			};
@@ -211,6 +212,7 @@ function runChatStream(
 					paradigm: resolved.paradigm,
 					requestApiKey: resolved.apiKey,
 					requestBaseURL: resolved.baseURL,
+					requestProxyUrl: resolved.proxyUrl,
 					maxOutputTokens: resolved.maxOutputTokens,
 					signal: ac.signal,
 					composerMode: mode,
@@ -256,6 +258,7 @@ function runChatStream(
 						paradigm: resolved.paradigm,
 						requestApiKey: resolved.apiKey,
 						requestBaseURL: resolved.baseURL,
+						requestProxyUrl: resolved.proxyUrl,
 						maxOutputTokens: resolved.maxOutputTokens,
 						signal: ac.signal,
 						composerMode: mode,
@@ -320,6 +323,7 @@ function runChatStream(
 				paradigm: resolved.paradigm,
 				requestApiKey: resolved.apiKey,
 				requestBaseURL: resolved.baseURL,
+				requestProxyUrl: resolved.proxyUrl,
 				maxOutputTokens: resolved.maxOutputTokens,
 				thinkingLevel,
 				...(agentSystemAppend?.trim() ? { agentSystemAppend: agentSystemAppend.trim() } : {}),
@@ -926,10 +930,14 @@ export function registerIpc(): void {
 		) => {
 			const { threadId, text } = payload;
 			const mode = parseComposerMode(payload.mode);
-			const modelSelection = typeof payload.modelId === 'string' ? payload.modelId : 'auto';
+			const rawMid = payload.modelId;
+			const modelSelection = typeof rawMid === 'string' ? rawMid.trim() : '';
 			const win = BrowserWindow.fromWebContents(event.sender);
 			if (!win) {
 				return { ok: false as const };
+			}
+			if (!modelSelection || modelSelection.toLowerCase() === 'auto') {
+				return { ok: false as const, error: 'no-model' as const };
 			}
 
 			const settings = getSettings();
@@ -1156,10 +1164,14 @@ export function registerIpc(): void {
 		) => {
 			const { threadId, visibleIndex, text } = payload;
 			const mode = parseComposerMode(payload.mode);
-			const modelSelection = typeof payload.modelId === 'string' ? payload.modelId : 'auto';
+			const rawMid = payload.modelId;
+			const modelSelection = typeof rawMid === 'string' ? rawMid.trim() : '';
 			const win = BrowserWindow.fromWebContents(event.sender);
 			if (!win) {
 				return { ok: false as const, error: 'no-window' as const };
+			}
+			if (!modelSelection || modelSelection.toLowerCase() === 'auto') {
+				return { ok: false as const, error: 'no-model' as const };
 			}
 			const trimmed = typeof text === 'string' ? text.trim() : '';
 			if (!trimmed) {

@@ -6120,6 +6120,17 @@ body {
 	flex-shrink: 0;
 }
 
+.ref-model-dd-empty {
+	padding: 16px 14px 8px;
+}
+
+.ref-model-dd-empty-text {
+	margin: 0;
+	font-size: 12px;
+	line-height: 1.45;
+	color: var(--void-fg-3);
+}
+
 .ref-model-dd-main {
 	display: flex;
 	flex-direction: column;
@@ -6129,19 +6140,34 @@ body {
 
 .ref-model-dd-title-row {
 	display: flex;
-	flex-wrap: wrap;
+	flex-wrap: nowrap;
 	align-items: center;
-	gap: 4px;
+	gap: 3px;
 	min-width: 0;
 }
 
+.ref-model-dd-provider-meta {
+	font-size: 10px;
+	line-height: 1.2;
+	color: var(--void-fg-3);
+	display: block;
+	max-width: 100%;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 .ref-model-dd-label {
-	font-size: 13px;
+	font-size: 12px;
 	font-weight: 500;
-	white-space: normal;
-	overflow-wrap: anywhere;
-	word-break: break-word;
-	line-height: 1.35;
+	line-height: 1.3;
+	flex: 0 1 auto;
+	min-width: 0;
+	max-width: min(72%, 220px);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .ref-model-dd-sub {
@@ -6154,12 +6180,16 @@ body {
 }
 
 .ref-model-dd-tag {
-	font-size: 10px;
+	font-size: 9px;
 	font-weight: 600;
-	padding: 2px 8px;
+	padding: 1px 6px;
 	border-radius: 999px;
 	text-transform: capitalize;
 	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	height: 16px;
+	line-height: 1;
 }
 
 .ref-model-dd-tag--fast {
@@ -6179,6 +6209,7 @@ body {
 
 .ref-model-dd-tag--think {
 	text-transform: none;
+	align-self: center;
 }
 
 .ref-model-dd-tag--think-off {
@@ -6606,6 +6637,152 @@ body {
 
 .ref-settings-panel--models {
 	max-width: 720px;
+}
+
+.ref-settings-models-provider-lead {
+	margin: -6px 0 18px;
+	font-size: 13px;
+	color: var(--void-fg-2);
+	line-height: 1.55;
+}
+
+.ref-settings-provider-root-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.ref-settings-provider-shell {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.ref-settings-provider-details {
+	border: 1px solid var(--void-border);
+	border-radius: 12px;
+	background: var(--void-bg-1);
+	overflow: hidden;
+}
+
+.ref-settings-provider-summary {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 12px 14px;
+	cursor: pointer;
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--void-fg-0);
+	list-style: none;
+}
+
+.ref-settings-provider-summary::-webkit-details-marker {
+	display: none;
+}
+
+.ref-settings-provider-summary-chev {
+	width: 8px;
+	height: 8px;
+	border-right: 2px solid var(--void-fg-3);
+	border-bottom: 2px solid var(--void-fg-3);
+	transform: rotate(45deg);
+	flex-shrink: 0;
+	margin-top: -2px;
+	transition: transform 0.15s ease;
+}
+
+.ref-settings-provider-details[open] .ref-settings-provider-summary-chev {
+	transform: rotate(225deg);
+	margin-top: 2px;
+}
+
+.ref-settings-provider-summary-text {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.ref-settings-provider-summary-tag {
+	font-size: 10px;
+	font-weight: 600;
+	padding: 2px 8px;
+	border-radius: 999px;
+	background: rgba(148, 163, 184, 0.12);
+	color: var(--void-fg-3);
+	flex-shrink: 0;
+}
+
+.ref-settings-provider-body {
+	padding: 0 14px 14px;
+	border-top: 1px solid var(--void-border);
+}
+
+.ref-settings-provider-creds {
+	padding-top: 14px;
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 0 16px;
+}
+
+@media (max-width: 640px) {
+	.ref-settings-provider-creds {
+		grid-template-columns: 1fr;
+	}
+}
+
+.ref-settings-provider-models-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-top: 20px;
+	margin-bottom: 10px;
+	flex-wrap: wrap;
+}
+
+.ref-settings-provider-models-title {
+	margin: 0;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--void-fg-1);
+}
+
+.ref-settings-provider-models-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.ref-settings-add-model--small {
+	padding: 6px 12px;
+	font-size: 12px;
+}
+
+.ref-settings-provider-model-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.ref-settings-user-model-card--nested {
+	border: 1px solid var(--void-border);
+	border-radius: 10px;
+	padding: 2px 10px 10px;
+	background: rgba(0, 0, 0, 0.12);
+}
+
+.ref-settings-model-v2-grid--single {
+	grid-template-columns: 1fr;
 }
 
 .ref-settings-panel--indexing {

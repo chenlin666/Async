@@ -47,9 +47,10 @@ import { ModelPickerDropdown, type ModelPickerItem } from './ModelPickerDropdown
 import { VoidSelect } from './VoidSelect';
 import { SettingsPage, type SettingsNavId } from './SettingsPage';
 import {
-	AUTO_MODEL_ID,
 	coerceDefaultModel,
-	sanitizeEnabledIds,
+	mergeEnabledIdsWithAllModels,
+	paradigmForModelEntry,
+	type UserLlmProvider,
 	type UserModelEntry,
 } from './modelCatalog';
 import { ComposerPlusMenu, ComposerModeIcon, composerModeLabel, type ComposerMode } from './ComposerPlusMenu';
@@ -771,14 +772,9 @@ export default function App() {
 	const [modelPickerOpen, setModelPickerOpen] = useState(false);
 	const [plusMenuOpen, setPlusMenuOpen] = useState(false);
 	const [composerMode, setComposerMode] = useState<ComposerMode>(() => readComposerMode());
-	const [apiKey, setApiKey] = useState('');
-	const [baseURL, setBaseURL] = useState('');
-	const [proxyUrl, setProxyUrl] = useState('');
-	const [anthropicApiKey, setAnthropicApiKey] = useState('');
-	const [anthropicBaseURL, setAnthropicBaseURL] = useState('');
-	const [geminiApiKey, setGeminiApiKey] = useState('');
-	const [defaultModel, setDefaultModel] = useState(AUTO_MODEL_ID);
-	const [editorPlanBuildModelId, setEditorPlanBuildModelId] = useState(AUTO_MODEL_ID);
+	const [modelProviders, setModelProviders] = useState<UserLlmProvider[]>([]);
+	const [defaultModel, setDefaultModel] = useState('');
+	const [editorPlanBuildModelId, setEditorPlanBuildModelId] = useState('');
 	const [thinkingByModelId, setThinkingByModelId] = useState<Record<string, ThinkingLevel>>({});
 	const [streamingThinking, setStreamingThinking] = useState('');
 	const [streamingToolPreview, setStreamingToolPreview] = useState<{
@@ -1137,10 +1133,15 @@ export default function App() {
 	const changeCount = gitChangedPaths.length;
 	const gitPathsKey = useMemo(() => gitChangedPaths.join('\n'), [gitChangedPaths]);
 
-	const canSendComposer = useMemo(() => !segmentsTrimmedEmpty(composerSegments), [composerSegments]);
+	const hasSelectedModel = useMemo(() => defaultModel.trim().length > 0, [defaultModel]);
+
+	const canSendComposer = useMemo(
+		() => hasSelectedModel && !segmentsTrimmedEmpty(composerSegments),
+		[hasSelectedModel, composerSegments]
+	);
 	const canSendInlineResend = useMemo(
-		() => !segmentsTrimmedEmpty(inlineResendSegments),
-		[inlineResendSegments]
+		() => hasSelectedModel && !segmentsTrimmedEmpty(inlineResendSegments),
+		[hasSelectedModel, inlineResendSegments]
 	);
 
 	const currentThreadTitle = useMemo(() => {
@@ -1229,9 +1230,24 @@ export default function App() {
 		});
 	}, []);
 
+	const flashComposerAttachErr = useCallback((msg: string) => {
+		if (composerAttachErrTimerRef.current !== null) {
+			window.clearTimeout(composerAttachErrTimerRef.current);
+		}
+		setComposerAttachErr(msg);
+		composerAttachErrTimerRef.current = window.setTimeout(() => {
+			setComposerAttachErr(null);
+			composerAttachErrTimerRef.current = null;
+		}, 4200);
+	}, []);
+
 	const executeSkillCreatorSend = useCallback(
 		async (scope: 'user' | 'project', pending: { tailSegments: ComposerSegment[]; targetThreadId: string }) => {
 			if (!shell) {
+				return;
+			}
+			if (!defaultModel.trim()) {
+				flashComposerAttachErr(t('app.noModelSelected'));
 				return;
 			}
 			const { tailSegments, targetThreadId } = pending;
@@ -1271,6 +1287,8 @@ export default function App() {
 				void loadMessages(targetThreadId);
 				if (r?.error === 'no-workspace') {
 					window.alert(t('skillCreator.sendErrorNoWs'));
+				} else if (r?.error === 'no-model') {
+					flashComposerAttachErr(t('app.noModelSelected'));
 				}
 				return;
 			}
@@ -1287,6 +1305,7 @@ export default function App() {
 			clearStreamingToolPreviewNow,
 			resetLiveAgentBlocks,
 			refreshThreads,
+			flashComposerAttachErr,
 		]
 	);
 
@@ -1297,6 +1316,10 @@ export default function App() {
 			pending: { tailSegments: ComposerSegment[]; targetThreadId: string }
 		) => {
 			if (!shell) {
+				return;
+			}
+			if (!defaultModel.trim()) {
+				flashComposerAttachErr(t('app.noModelSelected'));
 				return;
 			}
 			const { tailSegments, targetThreadId } = pending;
@@ -1347,6 +1370,9 @@ export default function App() {
 				setAwaitingReply(false);
 				streamStartedAtRef.current = null;
 				void loadMessages(targetThreadId);
+				if (r?.error === 'no-model') {
+					flashComposerAttachErr(t('app.noModelSelected'));
+				}
 				return;
 			}
 			void refreshThreads();
@@ -1362,12 +1388,17 @@ export default function App() {
 			clearStreamingToolPreviewNow,
 			resetLiveAgentBlocks,
 			refreshThreads,
+			flashComposerAttachErr,
 		]
 	);
 
 	const executeSubagentWizardSend = useCallback(
 		async (scope: 'user' | 'project', pending: { tailSegments: ComposerSegment[]; targetThreadId: string }) => {
 			if (!shell) {
+				return;
+			}
+			if (!defaultModel.trim()) {
+				flashComposerAttachErr(t('app.noModelSelected'));
 				return;
 			}
 			const { tailSegments, targetThreadId } = pending;
@@ -1406,6 +1437,8 @@ export default function App() {
 				void loadMessages(targetThreadId);
 				if (r?.error === 'no-workspace') {
 					window.alert(t('subagentWizard.sendErrorNoWs'));
+				} else if (r?.error === 'no-model') {
+					flashComposerAttachErr(t('app.noModelSelected'));
 				}
 				return;
 			}
@@ -1422,6 +1455,7 @@ export default function App() {
 			clearStreamingToolPreviewNow,
 			resetLiveAgentBlocks,
 			refreshThreads,
+			flashComposerAttachErr,
 		]
 	);
 
@@ -1430,17 +1464,6 @@ export default function App() {
 			clearAgentReviewForThread(currentId);
 		}
 	}, [currentId, clearAgentReviewForThread]);
-
-	const flashComposerAttachErr = useCallback((msg: string) => {
-		if (composerAttachErrTimerRef.current !== null) {
-			window.clearTimeout(composerAttachErrTimerRef.current);
-		}
-		setComposerAttachErr(msg);
-		composerAttachErrTimerRef.current = window.setTimeout(() => {
-			setComposerAttachErr(null);
-			composerAttachErrTimerRef.current = null;
-		}, 4200);
-	}, []);
 
 	const persistComposerAttachments = useCallback(
 		async (files: File[]): Promise<string[]> => {
@@ -1570,11 +1593,9 @@ export default function App() {
 				await refreshThreads();
 				const st = (await shell.invoke('settings:get')) as {
 					language?: string;
-					openAI?: { apiKey?: string; baseURL?: string; proxyUrl?: string };
-					anthropic?: { apiKey?: string; baseURL?: string };
-					gemini?: { apiKey?: string };
 					defaultModel?: string;
 					models?: {
+						providers?: UserLlmProvider[];
 						entries?: UserModelEntry[];
 						enabledIds?: string[];
 						thinkingByModelId?: Record<string, unknown>;
@@ -1615,15 +1636,11 @@ export default function App() {
 				setSmoothStreamPreset(coerceStreamSmoothPreset(st.ui?.streamSmoothPreset));
 				setSmoothStreamUseCustomBands(st.ui?.streamSmoothUseCustomBands === true);
 				setSmoothStreamBands(ensureFourStreamSmoothBands(st.ui?.streamSmoothBands));
-				setApiKey(st.openAI?.apiKey ?? '');
-				setBaseURL(st.openAI?.baseURL ?? '');
-				setProxyUrl(st.openAI?.proxyUrl ?? '');
-				setAnthropicApiKey(st.anthropic?.apiKey ?? '');
-				setAnthropicBaseURL(st.anthropic?.baseURL ?? '');
-				setGeminiApiKey(st.gemini?.apiKey ?? '');
+				const rawProviders = Array.isArray(st.models?.providers) ? st.models!.providers! : [];
+				setModelProviders(rawProviders);
 				const rawEntries = Array.isArray(st.models?.entries) ? st.models!.entries! : [];
 				setModelEntries(rawEntries);
-				const saneEnabled = sanitizeEnabledIds(rawEntries, st.models?.enabledIds);
+				const saneEnabled = mergeEnabledIdsWithAllModels(rawEntries, st.models?.enabledIds);
 				setEnabledModelIds(saneEnabled);
 				setDefaultModel(coerceDefaultModel(st.defaultModel, rawEntries, saneEnabled));
 				setThinkingByModelId(coerceThinkingByModelId(st.models?.thinkingByModelId));
@@ -2501,6 +2518,11 @@ export default function App() {
 		if (!text) {
 			return;
 		}
+		const effectiveModelId = (opts?.modelIdOverride ?? defaultModel).trim();
+		if (!effectiveModelId) {
+			flashComposerAttachErr(t('app.noModelSelected'));
+			return;
+		}
 		setPlanQuestion(null);
 		setPlanQuestionRequestId(null);
 		if (opts?.threadId && opts.threadId !== currentId) {
@@ -2632,7 +2654,7 @@ export default function App() {
 
 	const onPlanBuild = useCallback(
 		(modelId: string) => {
-			if (!parsedPlan || !shell) {
+			if (!parsedPlan || !shell || !modelId.trim()) {
 				return;
 			}
 			const threadId = currentIdRef.current;
@@ -2677,7 +2699,7 @@ export default function App() {
 
 	const onExecutePlanFromEditor = useCallback(
 		(modelId: string) => {
-			if (!shell || awaitingReply) {
+			if (!shell || awaitingReply || !modelId.trim()) {
 				return;
 			}
 			const threadId = currentIdRef.current;
@@ -2766,20 +2788,16 @@ export default function App() {
 		}
 		await shell.invoke('settings:set', {
 			language: locale,
-			openAI: {
-				apiKey,
-				baseURL: baseURL || undefined,
-				proxyUrl: proxyUrl.trim() || undefined,
-			},
-			anthropic: {
-				apiKey: anthropicApiKey || undefined,
-				baseURL: anthropicBaseURL.trim() || undefined,
-			},
-			gemini: {
-				apiKey: geminiApiKey || undefined,
-			},
+			openAI: { apiKey: undefined, baseURL: undefined, proxyUrl: undefined },
+			anthropic: { apiKey: undefined, baseURL: undefined },
+			gemini: { apiKey: undefined },
 			defaultModel,
-			models: { entries: modelEntries, enabledIds: enabledModelIds, thinkingByModelId },
+			models: {
+				providers: modelProviders,
+				entries: modelEntries,
+				enabledIds: enabledModelIds,
+				thinkingByModelId,
+			},
 			agent: {
 				importThirdPartyConfigs: true,
 				rules: agentCustomization.rules ?? [],
@@ -2809,12 +2827,7 @@ export default function App() {
 		});
 	}, [
 		shell,
-		apiKey,
-		baseURL,
-		proxyUrl,
-		anthropicApiKey,
-		anthropicBaseURL,
-		geminiApiKey,
+		modelProviders,
 		defaultModel,
 		modelEntries,
 		enabledModelIds,
@@ -2873,26 +2886,13 @@ export default function App() {
 		composerRichHeroRef.current?.focus();
 	}, [closeSettingsPage, shell, t, refreshThreads, loadMessages, clearStreamingToolPreviewNow]);
 
-	const onToggleModelEnabled = useCallback(
-		async (id: string, enabled: boolean) => {
-			const nextSet = new Set(enabledModelIds);
-			if (enabled) {
-				nextSet.add(id);
-			} else {
-				nextSet.delete(id);
-			}
-			const arr = Array.from(nextSet);
-			setEnabledModelIds(arr);
-			if (shell) {
-				await shell.invoke('settings:set', { models: { entries: modelEntries, enabledIds: arr } });
-			}
-		},
-		[shell, enabledModelIds, modelEntries]
-	);
-
 	const onChangeModelEntries = useCallback((entries: UserModelEntry[]) => {
 		setModelEntries(entries);
-		setEnabledModelIds((prev) => sanitizeEnabledIds(entries, prev));
+		setEnabledModelIds((prev) => mergeEnabledIdsWithAllModels(entries, prev));
+	}, []);
+
+	const onChangeModelProviders = useCallback((providers: UserLlmProvider[]) => {
+		setModelProviders(providers);
 	}, []);
 
 	const onPickDefaultModel = useCallback(
@@ -2940,25 +2940,25 @@ export default function App() {
 	}, [shell, onRefreshMcpStatuses]);
 
 	const modelPickerItems = useMemo((): ModelPickerItem[] => {
-		const auto: ModelPickerItem = {
-			id: AUTO_MODEL_ID,
-			label: t('modelPicker.auto'),
-			description: t('modelPicker.autoDesc'),
-		};
 		const enabledSet = new Set(enabledModelIds);
-		const fromUser = modelEntries
+		return modelEntries
 			.filter((e) => enabledSet.has(e.id) && (e.displayName.trim() || e.requestName.trim()))
-			.map((e) => ({
-				id: e.id,
-				label: e.displayName.trim() || e.requestName,
-				description: `${t(`settings.paradigm.${e.paradigm}`)} · ${e.requestName || t('modelPicker.requestNameMissing')}`,
-			}));
-		return [auto, ...fromUser];
-	}, [enabledModelIds, modelEntries, t]);
+			.map((e) => {
+				const paradigm = paradigmForModelEntry(e, modelProviders);
+				const paradigmLabel = paradigm ? t(`settings.paradigm.${paradigm}`) : '—';
+				const provLabel = modelProviders.find((p) => p.id === e.providerId)?.displayName?.trim() ?? '';
+				return {
+					id: e.id,
+					label: e.displayName.trim() || e.requestName,
+					description: `${paradigmLabel} · ${e.requestName || t('modelPicker.requestNameMissing')}`,
+					providerLabel: provLabel,
+				};
+			});
+	}, [enabledModelIds, modelEntries, modelProviders, t]);
 
 	const modelPillLabel = useMemo(() => {
-		if (defaultModel === AUTO_MODEL_ID) {
-			return t('modelPicker.auto');
+		if (!defaultModel.trim()) {
+			return t('modelPicker.selectModel');
 		}
 		const e = modelEntries.find((x) => x.id === defaultModel);
 		return e ? e.displayName.trim() || e.requestName || defaultModel : defaultModel;
@@ -4244,7 +4244,8 @@ export default function App() {
 	const renderStackedChatComposer = (
 		slot: 'bottom' | 'inline',
 		composer: { segments: ComposerSegment[]; setSegments: typeof setComposerSegments; canSend: boolean },
-		extraClass?: string
+		extraClass?: string,
+		hideModeReset = false
 	) => {
 		const richRef = slot === 'bottom' ? composerRichBottomRef : composerRichInlineRef;
 		const plusRef = slot === 'bottom' ? plusAnchorBottomRef : plusAnchorInlineRef;
@@ -4258,10 +4259,10 @@ export default function App() {
 
 		const barStart = (
 			<div className="ref-capsule-bar-start">
-				<div className="ref-plus-anchor" ref={plusRef}>
+				<div className="ref-plus-anchor ref-editor-rail-mode-cluster" ref={plusRef}>
 					<button
 						type="button"
-						className="ref-plus-btn"
+						className={`ref-mode-chip ref-mode-chip--${composerMode} ref-mode-chip--opens-menu`}
 						aria-expanded={plusMenuOpen}
 						aria-haspopup="menu"
 						title={t('app.addPlusTitle')}
@@ -4272,16 +4273,11 @@ export default function App() {
 							setPlusMenuOpen((o) => !o);
 						}}
 					>
-						<IconPlus className="ref-plus-btn-icon" />
+						<ComposerModeIcon mode={composerMode} className="ref-mode-chip-ico" />
+						<span className="ref-mode-chip-label">{composerModeLabel(composerMode, t)}</span>
+						<IconChevron className="ref-mode-chip-menu-chev" />
 					</button>
-				</div>
-				<div
-					className={`ref-mode-chip ref-mode-chip--${composerMode}`}
-					title={t('app.currentMode', { mode: composerModeLabel(composerMode, t) })}
-				>
-					<ComposerModeIcon mode={composerMode} className="ref-mode-chip-ico" />
-					<span className="ref-mode-chip-label">{composerModeLabel(composerMode, t)}</span>
-					{composerMode !== 'agent' ? (
+					{composerMode !== 'agent' && !hideModeReset ? (
 						<button
 							type="button"
 							className="ref-mode-chip-clear"
@@ -4399,7 +4395,7 @@ export default function App() {
 		);
 	};
 
-	const renderChatMessageList = (): ReactNode[] =>
+	const renderChatMessageList = (hideModeReset = false): ReactNode[] =>
 		displayMessages.map((m, i) => {
 			const isLast = i === displayMessages.length - 1;
 			const stAt = streamStartedAtRef.current;
@@ -4487,7 +4483,8 @@ export default function App() {
 								setSegments: setInlineResendSegments,
 								canSend: canSendInlineResend,
 							},
-							'ref-capsule--inline-edit'
+							'ref-capsule--inline-edit',
+							hideModeReset
 						)}
 					</div>
 				);
@@ -4583,7 +4580,7 @@ export default function App() {
 		const messagesEl = hasConversation ? (
 			<div className="ref-messages" ref={messagesViewportRef} onScroll={onMessagesScroll}>
 				<div className="ref-messages-track" ref={messagesTrackRef}>
-					{renderChatMessageList()}
+					{renderChatMessageList(isEditorRail)}
 				</div>
 			</div>
 		) : null;
@@ -4647,16 +4644,6 @@ export default function App() {
 									<span className="ref-mode-chip-label">{composerModeLabel(composerMode, t)}</span>
 									<IconChevron className="ref-mode-chip-menu-chev" />
 								</button>
-								{composerMode !== 'agent' ? (
-									<button
-										type="button"
-										className="ref-mode-chip-clear"
-										aria-label={t('app.resetAgentModeAria')}
-										onClick={() => setComposerModePersist('agent')}
-									>
-										<IconChipClear className="ref-mode-chip-clear-svg" />
-									</button>
-								) : null}
 							</div>
 							<div className="ref-model-pill-anchor" ref={modelPillHeroRef}>
 								<button
@@ -4850,7 +4837,7 @@ export default function App() {
 						segments: composerSegments,
 						setSegments: setComposerSegments,
 						canSend: canSendComposer,
-					})
+					}, undefined, isEditorRail)
 				) : isEditorRail ? null : (
 					<>
 						<div className="ref-capsule">
@@ -4891,10 +4878,10 @@ export default function App() {
 								/>
 							</div>
 							<div className="ref-capsule-bar">
-								<div className="ref-plus-anchor" ref={plusAnchorHeroRef}>
+								<div className="ref-plus-anchor ref-editor-rail-mode-cluster" ref={plusAnchorHeroRef}>
 									<button
 										type="button"
-										className="ref-plus-btn"
+										className={`ref-mode-chip ref-mode-chip--${composerMode} ref-mode-chip--opens-menu`}
 										aria-expanded={plusMenuOpen}
 										aria-haspopup="menu"
 										title={t('app.addPlusTitle')}
@@ -4905,15 +4892,10 @@ export default function App() {
 											setPlusMenuOpen((o) => !o);
 										}}
 									>
-										<IconPlus className="ref-plus-btn-icon" />
+										<ComposerModeIcon mode={composerMode} className="ref-mode-chip-ico" />
+										<span className="ref-mode-chip-label">{composerModeLabel(composerMode, t)}</span>
+										<IconChevron className="ref-mode-chip-menu-chev" />
 									</button>
-								</div>
-								<div
-									className={`ref-mode-chip ref-mode-chip--${composerMode}`}
-									title={t('app.currentMode', { mode: composerModeLabel(composerMode, t) })}
-								>
-									<ComposerModeIcon mode={composerMode} className="ref-mode-chip-ico" />
-									<span className="ref-mode-chip-label">{composerModeLabel(composerMode, t)}</span>
 									{composerMode !== 'agent' ? (
 										<button
 											type="button"
@@ -5578,10 +5560,13 @@ export default function App() {
 															value={editorPlanBuildModelId}
 															disabled={editorPlanFileIsBuilt}
 															onChange={setEditorPlanBuildModelId}
-															options={modelPickerItems.map((m) => ({
-																value: m.id,
-																label: m.label,
-															}))}
+															options={[
+																{ value: '', label: t('plan.review.pickModel'), disabled: true },
+																...modelPickerItems.map((m) => ({
+																	value: m.id,
+																	label: m.label,
+																})),
+															]}
 														/>
 														{editorPlanFileIsBuilt ? (
 															<span className="ref-editor-plan-built" role="status">
@@ -5591,7 +5576,11 @@ export default function App() {
 															<button
 																type="button"
 																className="ref-editor-plan-build-btn"
-																disabled={awaitingReply}
+																disabled={
+																	awaitingReply ||
+																	!editorPlanBuildModelId.trim() ||
+																	modelPickerItems.length === 0
+																}
 																onClick={() => onExecutePlanFromEditor(editorPlanBuildModelId)}
 															>
 																{t('plan.review.build')}
@@ -5894,10 +5883,13 @@ export default function App() {
 												value={editorPlanBuildModelId}
 												disabled={editorPlanFileIsBuilt}
 												onChange={setEditorPlanBuildModelId}
-												options={modelPickerItems.map((m) => ({
-													value: m.id,
-													label: m.label,
-												}))}
+												options={[
+													{ value: '', label: t('plan.review.pickModel'), disabled: true },
+													...modelPickerItems.map((m) => ({
+														value: m.id,
+														label: m.label,
+													})),
+												]}
 											/>
 											{editorPlanFileIsBuilt ? (
 												<span className="ref-editor-plan-built" role="status">
@@ -5907,7 +5899,11 @@ export default function App() {
 												<button
 													type="button"
 													className="ref-editor-plan-build-btn"
-													disabled={awaitingReply}
+													disabled={
+														awaitingReply ||
+														!editorPlanBuildModelId.trim() ||
+														modelPickerItems.length === 0
+													}
 													onClick={() => onExecutePlanFromEditor(editorPlanBuildModelId)}
 												>
 													{t('plan.review.build')}
@@ -6289,23 +6285,11 @@ export default function App() {
 							key={settingsMountKey}
 							initialNav={settingsInitialNav}
 							onClose={() => void closeSettingsPage()}
-							apiKey={apiKey}
-							baseURL={baseURL}
 							defaultModel={defaultModel}
-							proxyUrl={proxyUrl}
-							anthropicApiKey={anthropicApiKey}
-							anthropicBaseURL={anthropicBaseURL}
-							geminiApiKey={geminiApiKey}
+							modelProviders={modelProviders}
 							modelEntries={modelEntries}
-							enabledIds={enabledModelIds}
-							onChangeApiKey={setApiKey}
-							onChangeBaseURL={setBaseURL}
-							onChangeProxyUrl={setProxyUrl}
-							onChangeAnthropicApiKey={setAnthropicApiKey}
-							onChangeAnthropicBaseURL={setAnthropicBaseURL}
-							onChangeGeminiApiKey={setGeminiApiKey}
+							onChangeModelProviders={onChangeModelProviders}
 							onChangeModelEntries={onChangeModelEntries}
-							onToggleEnabled={(id, on) => void onToggleModelEnabled(id, on)}
 							onPickDefaultModel={(id) => void onPickDefaultModel(id)}
 							agentCustomization={mergedAgentCustomization}
 							onChangeAgentCustomization={onChangeMergedAgentCustomization}
