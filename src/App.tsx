@@ -46,6 +46,14 @@ import { mergeAgentFileChangesWithGit } from './agentFileChangesFromGit';
 import { ModelPickerDropdown, type ModelPickerItem } from './ModelPickerDropdown';
 import { VoidSelect } from './VoidSelect';
 import { SettingsPage, type SettingsNavId } from './SettingsPage';
+import { useAppColorScheme } from './useAppColorScheme';
+import {
+	type AppColorMode,
+	getVoidMonacoTheme,
+	readStoredColorMode,
+	type ThemeTransitionOrigin,
+	writeStoredColorMode,
+} from './colorMode';
 import {
 	coerceDefaultModel,
 	mergeEnabledIdsWithAllModels,
@@ -157,6 +165,7 @@ type EditorPtySession = { id: string; title: string };
 type DiffPreview = { diff: string; isBinary: boolean; additions: number; deletions: number };
 
 const SIDEBAR_LAYOUT_KEY = 'async:sidebar-widths-v1';
+const SHELL_LAYOUT_MODE_KEY = 'async:shell-layout-mode-v1';
 const COMPOSER_MODE_KEY = 'async:composer-mode-v1';
 const EDITOR_TERMINAL_HEIGHT_KEY = 'async:editor-terminal-height-v1';
 const EDITOR_TERMINAL_H_MIN = 120;
@@ -294,6 +303,38 @@ function syncDesktopSidebarLayout(
 	void shell.invoke('settings:set', {
 		ui: { sidebarLayout: { left: c.left, right: c.right } },
 	});
+}
+
+function readStoredShellLayoutMode(): LayoutMode {
+	try {
+		if (typeof window !== 'undefined') {
+			const v = localStorage.getItem(SHELL_LAYOUT_MODE_KEY);
+			if (v === 'agent' || v === 'editor') {
+				return v;
+			}
+		}
+	} catch {
+		/* ignore */
+	}
+	return 'agent';
+}
+
+function writeStoredShellLayoutMode(m: LayoutMode) {
+	try {
+		localStorage.setItem(SHELL_LAYOUT_MODE_KEY, m);
+	} catch {
+		/* ignore */
+	}
+}
+
+function syncDesktopShellLayoutMode(
+	shell: NonNullable<Window['asyncShell']> | undefined,
+	m: LayoutMode
+): void {
+	if (!shell) {
+		return;
+	}
+	void shell.invoke('settings:set', { ui: { layoutMode: m } });
 }
 
 function readSidebarLayout(): { left: number; right: number } {
@@ -645,6 +686,9 @@ function threadRowTitle(tr: TFunction, t: ThreadInfo): string {
 
 export default function App() {
 	const shell = useAsyncShell();
+	const [colorMode, setColorMode] = useState<AppColorMode>(() => readStoredColorMode());
+	const { effectiveScheme, setTransitionOrigin } = useAppColorScheme({ colorMode, shell: shell ?? undefined });
+	const monacoChromeTheme = getVoidMonacoTheme(effectiveScheme);
 	const { t, setLocale, locale } = useI18n();
 	const [ipcOk, setIpcOk] = useState<string>('…');
 	const [workspace, setWorkspace] = useState<string | null>(null);
@@ -719,7 +763,7 @@ export default function App() {
 	const openFileInTabRef = useRef<(rel: string, revealLine?: number, revealEndLine?: number) => Promise<void>>(
 		async () => {}
 	);
-	const [rightPanelTab, setRightPanelTab] = useState<'explorer' | 'search' | 'git'>('git');
+	const [agentGitPanelOpen, setAgentGitPanelOpen] = useState(true);
 	const [treeEpoch, setTreeEpoch] = useState(0);
 	const [commitMsg, setCommitMsg] = useState('');
 	const [lastTurnUsage, setLastTurnUsage] = useState<TurnTokenUsage | null>(null);
@@ -860,7 +904,7 @@ export default function App() {
 	const [indexingSettings, setIndexingSettings] = useState<IndexingSettingsState>(() => normalizeIndexingSettings());
 	const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
 	const [mcpStatuses, setMcpStatuses] = useState<McpServerStatus[]>([]);
-	const [layoutMode, setLayoutMode] = useState<LayoutMode>('editor');
+	const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => readStoredShellLayoutMode());
 	const [homeRecents, setHomeRecents] = useState<string[]>([]);
 	/** 文件菜单「打开最近的文件夹」：与是否打开工作区无关 */
 	const [folderRecents, setFolderRecents] = useState<string[]>([]);
@@ -882,7 +926,7 @@ export default function App() {
 	const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
 	const [quickOpenOpen, setQuickOpenOpen] = useState(false);
 	const [quickOpenSeed, setQuickOpenSeed] = useState('');
-	const [sidebarSearchDraft, setSidebarSearchDraft] = useState('');
+	const [, setSidebarSearchDraft] = useState('');
 	const [editorTerminalVisible, setEditorTerminalVisible] = useState(true);
 	const [editorTerminalHeightPx, setEditorTerminalHeightPx] = useState(() => readEditorTerminalHeightPx());
 	const [editorTerminalSessions, setEditorTerminalSessions] = useState<EditorPtySession[]>([]);
@@ -1051,6 +1095,27 @@ export default function App() {
 			),
 		[threads]
 	);
+
+	const agentSidebarWorkspaces = useMemo(() => {
+		const seen = new Set<string>();
+		const ordered: string[] = [];
+		if (workspace) {
+			seen.add(workspace);
+			ordered.push(workspace);
+		}
+		for (const p of folderRecents) {
+			if (!p || seen.has(p)) {
+				continue;
+			}
+			seen.add(p);
+			ordered.push(p);
+		}
+		return ordered.slice(0, 8).map((path) => ({
+			path,
+			name: workspacePathDisplayName(path),
+			isCurrent: path === workspace,
+		}));
+	}, [workspace, folderRecents]);
 
 	const hasConversation = messages.length > 0 || !!streaming;
 	const changeCount = gitChangedPaths.length;
@@ -1531,6 +1596,8 @@ export default function App() {
 					editor?: Partial<EditorSettings>;
 					ui?: {
 						sidebarLayout?: { left?: unknown; right?: unknown };
+						colorMode?: string;
+						layoutMode?: string;
 					};
 					indexing?: {
 						symbolIndexEnabled?: boolean;
@@ -1554,6 +1621,15 @@ export default function App() {
 					/** 桌面端曾仅依赖 file:// localStorage，易丢；首次把当前布局写入 settings.json */
 					const s0 = readSidebarLayout();
 					syncDesktopSidebarLayout(shell, clampSidebarLayout(s0.left, s0.right));
+				}
+				const lmRaw = st.ui?.layoutMode;
+				if (lmRaw === 'agent' || lmRaw === 'editor') {
+					setLayoutMode(lmRaw);
+					writeStoredShellLayoutMode(lmRaw);
+				} else {
+					const lm0 = readStoredShellLayoutMode();
+					setLayoutMode(lm0);
+					syncDesktopShellLayoutMode(shell, lm0);
 				}
 				const rawProviders = Array.isArray(st.models?.providers) ? st.models!.providers! : [];
 				setModelProviders(rawProviders);
@@ -1584,6 +1660,13 @@ export default function App() {
 					setEditorSettings({ ...defaultEditorSettings(), ...st.editor });
 				}
 				setIndexingSettings(normalizeIndexingSettings(st.indexing));
+				const cm = st.ui?.colorMode;
+				if (cm === 'light' || cm === 'dark' || cm === 'system') {
+					setColorMode(cm);
+					writeStoredColorMode(cm);
+				} else {
+					setColorMode(readStoredColorMode());
+				}
 				// Load MCP servers
 				const mcpSt = (await shell.invoke('mcp:getServers')) as { servers?: McpServerConfig[] } | undefined;
 				setMcpServers(mcpSt?.servers ?? []);
@@ -2092,7 +2175,6 @@ export default function App() {
 	const applyWorkspacePath = useCallback(
 		async (next: string) => {
 			setWorkspace(next);
-			setRightPanelTab('explorer');
 			await refreshGit();
 		},
 		[refreshGit]
@@ -2579,6 +2661,34 @@ export default function App() {
 		[shell]
 	);
 
+	const onChangeColorMode = useCallback(
+		async (next: AppColorMode, origin?: ThemeTransitionOrigin) => {
+			setTransitionOrigin(origin);
+			setColorMode(next);
+			writeStoredColorMode(next);
+			if (shell) {
+				try {
+					await shell.invoke('settings:set', { ui: { colorMode: next } });
+				} catch (e) {
+					console.error('Failed to persist color mode:', e);
+				}
+			}
+		},
+		[shell, setTransitionOrigin]
+	);
+
+	/** 仅工具栏切换时持久化；打开文件等临时切到 editor 不写偏好 */
+	const pickShellLayoutMode = useCallback(
+		(next: LayoutMode) => {
+			setLayoutMode(next);
+			writeStoredShellLayoutMode(next);
+			if (shell) {
+				void shell.invoke('settings:set', { ui: { layoutMode: next } });
+			}
+		},
+		[shell]
+	);
+
 	const persistSettings = useCallback(async () => {
 		if (!shell) {
 			return;
@@ -2615,6 +2725,7 @@ export default function App() {
 				tsLspEnabled: indexingSettings.tsLspEnabled,
 			},
 			mcp: { servers: mcpServers },
+			ui: { colorMode, layoutMode },
 		});
 	}, [
 		shell,
@@ -2628,6 +2739,8 @@ export default function App() {
 		indexingSettings,
 		locale,
 		mcpServers,
+		colorMode,
+		layoutMode,
 	]);
 
 	/** 离开设置页时写入磁盘（返回、点遮罩、Esc 等） */
@@ -2810,7 +2923,9 @@ export default function App() {
 			}
 			setActiveTabId(tid);
 			setFilePath(rel);
-			setRightPanelTab('explorer');
+			if (layoutMode === 'agent') {
+				setLayoutMode('editor');
+			}
 			const s =
 				typeof revealLine === 'number' && Number.isFinite(revealLine) && revealLine > 0
 					? Math.floor(revealLine)
@@ -2837,7 +2952,7 @@ export default function App() {
 				setEditorValue(t('app.readFileFailed', { detail: String(err) }));
 			}
 		},
-		[shell, t]
+		[layoutMode, shell, t]
 	);
 
 	openFileInTabRef.current = openFileInTab;
@@ -3091,8 +3206,8 @@ export default function App() {
 
 	const focusSearchSidebarFromQuickOpen = useCallback((q: string) => {
 		setSidebarSearchDraft(q);
-		setLayoutMode('agent');
-		setRightPanelTab('search');
+		setQuickOpenSeed(`%${q}`);
+		setQuickOpenOpen(true);
 	}, []);
 
 	const appendEditorTerminal = useCallback(async (opts?: { cwdRel?: string }) => {
@@ -3709,15 +3824,6 @@ export default function App() {
 		return () => document.removeEventListener('pointerdown', onDocPointerDown, true);
 	}, [resendFromUserIndex, slashCommand]);
 
-	const editorFileBasename = useMemo(() => {
-		const p = filePath.trim();
-		if (!p) {
-			return '';
-		}
-		const i = p.replace(/\\/g, '/').lastIndexOf('/');
-		return i >= 0 ? p.slice(i + 1) : p;
-	}, [filePath]);
-
 	const commitStaged = async () => {
 		if (!shell) {
 			return;
@@ -4308,7 +4414,7 @@ export default function App() {
 				<div className="ref-plus-anchor ref-editor-rail-mode-cluster" ref={plusRef}>
 					<button
 						type="button"
-						className={`ref-mode-chip ref-mode-chip--${composerMode} ref-mode-chip--opens-menu`}
+						className={`ref-mode-chip ref-mode-chip--${composerMode} ref-mode-chip--opens-menu is-active`}
 						aria-expanded={plusMenuOpen}
 						aria-haspopup="menu"
 						title={t('app.addPlusTitle')}
@@ -4429,6 +4535,7 @@ export default function App() {
 
 	const renderChatMessageList = (hideModeReset = false): ReactNode[] =>
 		displayMessages.map((m, i) => {
+			const convoKey = messagesThreadId ?? currentId ?? 'no-thread';
 			const isLast = i === displayMessages.length - 1;
 			const stAt = streamStartedAtRef.current;
 			const ftAt = firstTokenAtRef.current;
@@ -4521,11 +4628,11 @@ export default function App() {
 					</div>
 				);
 				return i === lastUserMessageIndex ? (
-					<div key={`u-edit-${i}`} className="ref-msg-sticky-user-wrap">
+					<div key={`u-edit-${convoKey}-${i}`} className="ref-msg-sticky-user-wrap">
 						{inner}
 					</div>
 				) : (
-					<Fragment key={`u-edit-${i}`}>{inner}</Fragment>
+					<Fragment key={`u-edit-${convoKey}-${i}`}>{inner}</Fragment>
 				);
 			}
 
@@ -4558,16 +4665,16 @@ export default function App() {
 					</div>
 				);
 				return i === lastUserMessageIndex ? (
-					<div key={`u-${i}`} className="ref-msg-sticky-user-wrap">
+					<div key={`u-${convoKey}-${i}`} className="ref-msg-sticky-user-wrap">
 						{inner}
 					</div>
 				) : (
-					<Fragment key={`u-${i}`}>{inner}</Fragment>
+					<Fragment key={`u-${convoKey}-${i}`}>{inner}</Fragment>
 				);
 			}
 
 			return (
-				<div key={`a-${i}`} className="ref-msg-slot ref-msg-slot--assistant">
+				<div key={`a-${convoKey}-${i}`} className="ref-msg-slot ref-msg-slot--assistant">
 					{thoughtBlock && !thoughtAfterBody ? thoughtBlock : null}
 					<div className="ref-msg-assistant-body">
 						{pendingEmptyAssistant ? (
@@ -4608,10 +4715,15 @@ export default function App() {
 		layout: 'agent-center' | 'editor-rail' = 'agent-center'
 	): ReactNode => {
 		const isEditorRail = layout === 'editor-rail';
+		const conversationRenderKey = messagesThreadId ?? currentId ?? 'no-thread';
 
 		const messagesEl = hasConversation ? (
 			<div className="ref-messages" ref={messagesViewportRef} onScroll={onMessagesScroll}>
-				<div className="ref-messages-track" ref={messagesTrackRef}>
+				<div
+					key={`messages-track-${conversationRenderKey}`}
+					className="ref-messages-track"
+					ref={messagesTrackRef}
+				>
 					{renderChatMessageList(isEditorRail)}
 				</div>
 			</div>
@@ -4661,7 +4773,7 @@ export default function App() {
 							<div className="ref-plus-anchor ref-editor-rail-mode-cluster" ref={plusAnchorHeroRef}>
 								<button
 									type="button"
-									className={`ref-mode-chip ref-mode-chip--${composerMode} ref-mode-chip--opens-menu`}
+									className={`ref-mode-chip ref-mode-chip--${composerMode} ref-mode-chip--opens-menu is-active`}
 									aria-expanded={plusMenuOpen}
 									aria-haspopup="menu"
 									title={t('app.addPlusTitle')}
@@ -4913,7 +5025,7 @@ export default function App() {
 								<div className="ref-plus-anchor ref-editor-rail-mode-cluster" ref={plusAnchorHeroRef}>
 									<button
 										type="button"
-										className={`ref-mode-chip ref-mode-chip--${composerMode} ref-mode-chip--opens-menu`}
+										className={`ref-mode-chip ref-mode-chip--${composerMode} ref-mode-chip--opens-menu is-active`}
 										aria-expanded={plusMenuOpen}
 										aria-haspopup="menu"
 										title={t('app.addPlusTitle')}
@@ -5158,7 +5270,7 @@ export default function App() {
 	const isEditorHomeMode = !workspace;
 
 	return (
-		<div className="ref-shell">
+		<div className={`ref-shell ${layoutMode === 'agent' ? 'ref-shell--agent-layout' : ''}`}>
 			<header className="ref-menubar">
 				<div className="ref-menubar-left">
 					<div className="ref-brand-block-simple">
@@ -5262,7 +5374,7 @@ export default function App() {
 						<button
 							type="button"
 							className={`ref-layout-btn ${layoutMode === 'agent' ? 'is-active' : ''}`}
-							onClick={() => setLayoutMode('agent')}
+							onClick={() => pickShellLayoutMode('agent')}
 							title="Agent Layout"
 						>
 							<IconSidebarLeft />
@@ -5270,12 +5382,24 @@ export default function App() {
 						<button
 							type="button"
 							className={`ref-layout-btn ${layoutMode === 'editor' ? 'is-active' : ''}`}
-							onClick={() => setLayoutMode('editor')}
+							onClick={() => pickShellLayoutMode('editor')}
 							title="Editor Layout"
 						>
 							<IconSidebarRight />
 						</button>
 					</div>
+					{layoutMode === 'agent' ? (
+						<button
+							type="button"
+							className={`ref-layout-btn ref-layout-btn--git ${agentGitPanelOpen ? 'is-active' : ''}`}
+							onClick={() => setAgentGitPanelOpen((open) => !open)}
+							title={t('app.tabGit')}
+							aria-label={t('app.tabGit')}
+							aria-pressed={agentGitPanelOpen}
+						>
+							<IconGitSCM />
+						</button>
+					) : null}
 					<button
 						type="button"
 						className="ref-icon-tile ref-settings-btn"
@@ -5395,102 +5519,196 @@ export default function App() {
 				</div>
 			) : (
 				<div
-					className={`ref-body ${layoutMode === 'editor' ? 'ref-body--editor' : ''}`}
+					className={`ref-body ${
+						layoutMode === 'editor'
+							? 'ref-body--editor ref-body--editor-shell'
+							: 'ref-body--agent-shell'
+					}`}
 					style={{
-						gridTemplateColumns: `${railWidths.left}px ${RESIZE_HANDLE_PX}px minmax(0, 1fr) ${RESIZE_HANDLE_PX}px ${railWidths.right}px`,
+						gridTemplateColumns:
+							layoutMode === 'agent' && !agentGitPanelOpen
+								? `${railWidths.left}px ${RESIZE_HANDLE_PX}px minmax(0, 1fr) 0px 0px`
+								: `${railWidths.left}px ${RESIZE_HANDLE_PX}px minmax(0, 1fr) ${RESIZE_HANDLE_PX}px ${railWidths.right}px`,
 					}}
 				>
-				<aside className="ref-left" aria-label={t('app.projectAndAgent')}>
+				<aside
+					className={`ref-left ${
+						layoutMode === 'editor' ? 'ref-left--editor-embedded' : 'ref-left--agent-layout'
+					}`}
+					aria-label={t('app.projectAndAgent')}
+				>
 					{layoutMode === 'agent' ? (
-					<>
-					<div className="ref-left-scroll">
-						<div className="ref-project-block">
-							<div className="ref-project-header">{workspaceBasename}</div>
-							<label className="ref-agent-search-wrap">
-								<IconSearch className="ref-agent-search-icon" />
-								<input
-									type="search"
-									className="ref-agent-search-input"
-									placeholder={t('app.searchAgentsPlaceholder')}
-									value={threadSearch}
-									onChange={(e) => setThreadSearch(e.target.value)}
-									aria-label={t('app.searchAgentsAria')}
-								/>
-							</label>
-							<button type="button" className="ref-agent-new-btn" onClick={() => void onNewThread()}>
-								{t('app.newAgent')}
-								<kbd className="ref-kbd">Ctrl+N</kbd>
-							</button>
-							<div className="ref-thread-section-label">{t('app.today')}</div>
-							<div className="ref-thread-list">{todayThreads.map(renderThreadItem)}</div>
-							{archivedThreads.length > 0 ? (
-								<>
-									<div className="ref-thread-section-label ref-thread-section-label--archived">{t('app.archived')}</div>
-									<div className="ref-thread-list">{archivedThreads.map(renderThreadItem)}</div>
-								</>
-							) : null}
-						</div>
-					</div>
-					<div className="ref-left-footer">
-						<button type="button" className="ref-open-workspace" onClick={() => setWorkspacePickerOpen(true)}>
-							{t('app.openWorkspace')}
-						</button>
-						<div className="ref-user-strip">
-							<div className="ref-user-avatar" aria-hidden />
-							<div className="ref-user-meta">
-								<span className="ref-user-name">{t('app.you')}</span>
-								<span className="ref-user-plan">Async</span>
+					<div className="ref-left-agent-nest">
+						<div className="ref-left-scroll">
+							<div className="ref-project-block ref-project-block--agent">
+								<nav className="ref-agent-nav-list" aria-label={t('app.projectAndAgent')}>
+									<button type="button" className="ref-agent-nav-item" onClick={() => void onNewThread()}>
+										<IconPlus className="ref-agent-nav-item-icon" />
+										<span>{t('app.newAgent')}</span>
+									</button>
+									<button
+										type="button"
+										className="ref-agent-nav-item"
+										onClick={() => openSettingsPage('plugins')}
+									>
+										<IconSettings className="ref-agent-nav-item-icon" />
+										<span>{t('settings.nav.plugins')}</span>
+									</button>
+								</nav>
+
+								<div className="ref-agent-sidebar-section">
+									<div className="ref-agent-sidebar-section-head">
+										<span className="ref-agent-sidebar-section-title">{t('app.sidebarThreads')}</span>
+										<div className="ref-agent-sidebar-section-actions">
+											<button
+												type="button"
+												className="ref-agent-sidebar-icon-btn"
+												title={t('app.openWorkspace')}
+												aria-label={t('app.openWorkspace')}
+												onClick={() => setWorkspacePickerOpen(true)}
+											>
+												<IconExplorer />
+											</button>
+											<button
+												type="button"
+												className="ref-agent-sidebar-icon-btn"
+												title={t('common.search')}
+												aria-label={t('common.search')}
+												onClick={() => openQuickOpen()}
+											>
+												<IconSearch />
+											</button>
+										</div>
+									</div>
+
+									<div className="ref-agent-workspace-stack">
+										{agentSidebarWorkspaces.length === 0 ? (
+											<button
+												type="button"
+												className="ref-agent-empty-workspace"
+												onClick={() => setWorkspacePickerOpen(true)}
+											>
+												{t('app.openWorkspace')}
+											</button>
+										) : (
+											agentSidebarWorkspaces.map((ws) => {
+												const showThreads = ws.isCurrent;
+												const hasThreads = todayThreads.length > 0 || archivedThreads.length > 0;
+												return (
+													<div
+														key={ws.path}
+														className={`ref-agent-workspace-group ${ws.isCurrent ? 'is-active' : ''}`}
+													>
+														<button
+															type="button"
+															className={`ref-agent-workspace-row ${ws.isCurrent ? 'is-active' : ''}`}
+															onClick={() => {
+																if (!ws.isCurrent) {
+																	void openWorkspaceByPath(ws.path);
+																}
+															}}
+														>
+															<span className="ref-agent-workspace-row-icon" aria-hidden>
+																<IconExplorer />
+															</span>
+															<span className="ref-agent-workspace-row-label" title={ws.path}>
+																{ws.name}
+															</span>
+														</button>
+
+														{showThreads ? (
+															hasThreads ? (
+																<div className="ref-agent-thread-tree">
+																	<div className="ref-agent-thread-cluster">
+																		<div className="ref-thread-section-label ref-thread-section-label--nested">
+																			{t('app.today')}
+																		</div>
+																		<div className="ref-thread-list ref-thread-list--nested">
+																			{todayThreads.map(renderThreadItem)}
+																		</div>
+																	</div>
+																	{archivedThreads.length > 0 ? (
+																		<div className="ref-agent-thread-cluster">
+																			<div className="ref-thread-section-label ref-thread-section-label--archived ref-thread-section-label--nested">
+																				{t('app.archived')}
+																			</div>
+																			<div className="ref-thread-list ref-thread-list--nested">
+																				{archivedThreads.map(renderThreadItem)}
+																			</div>
+																		</div>
+																	) : null}
+																</div>
+															) : (
+																<div className="ref-agent-workspace-empty">{t('app.noThreads')}</div>
+															)
+														) : (
+															<div className="ref-agent-workspace-empty">{t('app.noThreads')}</div>
+														)}
+													</div>
+												);
+											})
+										)}
+									</div>
+								</div>
 							</div>
 						</div>
-						<div className="ref-ipc-hint">{ipcOk}</div>
+						<div className="ref-left-footer ref-left-footer--agent">
+							<button
+								type="button"
+								className="ref-agent-settings-link"
+								onClick={() => openSettingsPage('general')}
+							>
+								<IconSettings className="ref-agent-settings-link-icon" />
+								<span>{t('app.settings')}</span>
+							</button>
+						</div>
 					</div>
-					</>
 					) : (
 					/* ═══ Editor 布局：左侧 = 文件树 ═══ */
-					<>
-					<div className="ref-left-scroll">
-						<div className="ref-project-block ref-project-block--editor">
-							<div className="ref-explorer-kicker">{t('app.tabExplorer')}</div>
-							<div className="ref-explorer-head ref-explorer-head--editor">
-								<div className="ref-explorer-title-stack">
-									<span className="ref-explorer-title">{workspaceBasename}</span>
-									<span className="ref-explorer-subtitle" title={workspace ?? undefined}>
-										{workspace ?? t('app.noWorkspace')}
-									</span>
+					<div className="ref-left-editor-nest">
+						<div className="ref-left-scroll">
+							<div className="ref-project-block ref-project-block--editor">
+								<div className="ref-explorer-kicker">{t('app.tabExplorer')}</div>
+								<div className="ref-explorer-head ref-explorer-head--editor">
+									<div className="ref-explorer-title-stack">
+										<span className="ref-explorer-title">{workspaceBasename}</span>
+										<span className="ref-explorer-subtitle" title={workspace ?? undefined}>
+											{workspace ?? t('app.noWorkspace')}
+										</span>
+									</div>
+									<button
+										type="button"
+										className="ref-icon-tile"
+										aria-label={t('app.explorerRefreshAria')}
+										onClick={() => void refreshGit()}
+									>
+										<IconRefresh />
+									</button>
 								</div>
-								<button
-									type="button"
-									className="ref-icon-tile"
-									aria-label={t('app.explorerRefreshAria')}
-									onClick={() => void refreshGit()}
-								>
-									<IconRefresh />
-								</button>
-							</div>
-							<div className="ref-explorer-body ref-explorer-body--workspace">
-								{workspace && shell ? (
-									<WorkspaceExplorer
-										key={workspace}
-										shell={shell}
-										pathStatus={gitPathStatus}
-										selectedRel={filePath.trim()}
-										treeEpoch={treeEpoch}
-										onOpenFile={(rel) => void onExplorerOpenFile(rel)}
-										explorerActions={workspaceExplorerActions}
-									/>
-								) : (
-									<p className="ref-explorer-placeholder">{t('app.explorerPlaceholder')}</p>
-								)}
+								<div className="ref-explorer-body ref-explorer-body--workspace">
+									{workspace && shell ? (
+										<WorkspaceExplorer
+											key={workspace}
+											shell={shell}
+											pathStatus={gitPathStatus}
+											selectedRel={filePath.trim()}
+											treeEpoch={treeEpoch}
+											onOpenFile={(rel) => void onExplorerOpenFile(rel)}
+											explorerActions={workspaceExplorerActions}
+										/>
+									) : (
+										<p className="ref-explorer-placeholder">{t('app.explorerPlaceholder')}</p>
+									)}
+								</div>
 							</div>
 						</div>
+						<div className="ref-left-footer ref-left-footer--editor">
+							<button type="button" className="ref-open-workspace" onClick={() => setWorkspacePickerOpen(true)}>
+								{t('app.openWorkspace')}
+							</button>
+							<div className="ref-ipc-hint">{ipcOk}</div>
+						</div>
 					</div>
-					<div className="ref-left-footer ref-left-footer--editor">
-						<button type="button" className="ref-open-workspace" onClick={() => setWorkspacePickerOpen(true)}>
-							{t('app.openWorkspace')}
-						</button>
-						<div className="ref-ipc-hint">{ipcOk}</div>
-					</div>
-					</>
 					)}
 				</aside>
 
@@ -5506,17 +5724,19 @@ export default function App() {
 
 				{layoutMode === 'agent' ? (
 				<main
-					className={`ref-center ${hasConversation ? 'ref-center--chat' : ''}`}
+					className={`ref-center ref-center--agent-layout ${hasConversation ? 'ref-center--chat' : ''}`}
 					aria-label={t('app.commandCenter')}
 					onKeyDown={onPlanNewIdea}
 				>
-					<div className="ref-context-block">
+					<div className="ref-context-block ref-context-block--agent">
 						<div className="ref-context-line">
-							<IconDoc className="ref-context-icon" />
-							<span className="ref-context-title">{workspace ? workspaceBasename : t('app.noWorkspace')}</span>
+							<span className="ref-agent-context-pill">
+								<IconDoc className="ref-context-icon" />
+								<span className="ref-context-title">{workspace ? workspaceBasename : t('app.noWorkspace')}</span>
+							</span>
 						</div>
 						{hasConversation ? (
-							<div className="ref-context-sub" title={currentThreadTitle}>
+							<div className="ref-context-sub ref-context-sub--agent" title={currentThreadTitle}>
 								{currentThreadTitle}
 							</div>
 						) : null}
@@ -5527,7 +5747,7 @@ export default function App() {
 				) : (
 				/* ═══ Editor：中间 = 标签 + 面包屑 + 编辑器（扁平，贴近 VS Code）；底部终端可关 ═══ */
 				<main
-					className="ref-center ref-center--editor-workspace"
+					className="ref-center ref-center--editor-workspace ref-center--editor-shell"
 					aria-label={t('app.editorWorkspaceMainAria')}
 				>
 					<div className="ref-editor-center-split">
@@ -5641,7 +5861,7 @@ export default function App() {
 													<Editor
 														key={filePath.trim()}
 														height="100%"
-														theme="void-dark"
+														theme={monacoChromeTheme}
 														path={monacoDocumentPath || filePath.trim()}
 														language={languageFromFilePath(filePath.trim())}
 														value={editorValue}
@@ -5782,229 +6002,49 @@ export default function App() {
 				)}
 
 				<div
-					className="ref-resize-handle"
+					className={`ref-resize-handle ${
+						layoutMode === 'agent' && !agentGitPanelOpen ? 'is-collapsed' : ''
+					}`}
 					role="separator"
 					aria-orientation="vertical"
 					aria-label={t('app.resizeRightAria')}
 					title={t('app.resizeRightTitle')}
-					onMouseDown={beginResizeRight}
+					onMouseDown={layoutMode === 'agent' && !agentGitPanelOpen ? undefined : beginResizeRight}
 					onDoubleClick={resetRailWidths}
 				/>
 
 				{layoutMode === 'agent' ? (
-				<aside className="ref-right" aria-label={t('app.rightSidebar')}>
-					<div className="ref-right-icon-tabs" role="tablist" aria-label={t('app.rightSidebarViews')}>
-						<button
-							type="button"
-							role="tab"
-							aria-selected={rightPanelTab === 'git'}
-							aria-label={t('app.tabGit')}
-							title={t('app.tabGit')}
-							className={`ref-right-icon-tab ${rightPanelTab === 'git' ? 'is-active' : ''}`}
-							onClick={() => setRightPanelTab('git')}
-						>
-							<IconGitSCM />
-						</button>
-						<button
-							type="button"
-							role="tab"
-							aria-selected={rightPanelTab === 'search'}
-							aria-label={t('app.tabSearch')}
-							title={t('app.tabSearch')}
-							className={`ref-right-icon-tab ${rightPanelTab === 'search' ? 'is-active' : ''}`}
-							onClick={() => setRightPanelTab('search')}
-						>
-							<IconSearch />
-						</button>
-						<button
-							type="button"
-							role="tab"
-							aria-selected={rightPanelTab === 'explorer'}
-							aria-label={t('app.tabExplorer')}
-							title={t('app.tabExplorer')}
-							className={`ref-right-icon-tab ${rightPanelTab === 'explorer' ? 'is-active' : ''}`}
-							onClick={() => setRightPanelTab('explorer')}
-						>
-							<IconExplorer />
-						</button>
-					</div>
-
-					<div className="ref-right-panel-stage">
-						<div key={rightPanelTab} className="ref-right-panel-view">
-					{rightPanelTab === 'explorer' ? (
-						<div className="ref-preview-split">
-							<div className="ref-preview-tree">
-								<div className="ref-explorer-head">
-									<span className="ref-explorer-title">{workspaceBasename}</span>
-									<button
-										type="button"
-										className="ref-icon-tile"
-										aria-label={t('app.explorerRefreshAria')}
-										onClick={() => void refreshGit()}
-									>
-										<IconRefresh />
-									</button>
-								</div>
-								<div className="ref-explorer-body">
-									{workspace && shell ? (
-										<WorkspaceExplorer
-											key={workspace}
-											shell={shell}
-											pathStatus={gitPathStatus}
-											selectedRel={filePath.trim()}
-											treeEpoch={treeEpoch}
-											onOpenFile={(rel) => void onExplorerOpenFile(rel)}
-											explorerActions={workspaceExplorerActions}
-										/>
-									) : (
-										<p className="ref-explorer-placeholder">{t('app.explorerPlaceholder')}</p>
-									)}
-								</div>
+				<aside
+					className={`ref-right ref-right--agent-layout ${agentGitPanelOpen ? 'is-open' : 'is-collapsed'}`}
+					aria-label={t('app.rightSidebar')}
+					aria-hidden={!agentGitPanelOpen}
+				>
+					<div className="ref-agent-review-shell">
+						<div className="ref-agent-review-head">
+							<div className="ref-agent-review-title-stack">
+								<span className="ref-agent-review-kicker">{t('app.tabGit')}</span>
+								<span className="ref-agent-review-title">
+									{changeCount > 0
+										? t('app.gitUncommitted', { count: String(changeCount) })
+										: t('app.gitNoChanges')}
+								</span>
 							</div>
-							<div className="ref-preview-editor" aria-label={t('app.filePreview')}>
-								<div className="ref-editor-toolbar">
-									<span className="ref-editor-file-name" title={filePath.trim() || undefined}>
-										{editorFileBasename || t('app.noFileSelected')}
-									</span>
-									{markdownPaneMode != null ? (
-										<div
-											className="ref-editor-md-mode-toggle"
-											role="group"
-											aria-label={t('app.editorMarkdownModeAria')}
-										>
-											<button
-												type="button"
-												className={`ref-editor-md-mode-btn ${markdownPaneMode === 'source' ? 'is-active' : ''}`}
-												onClick={() => setMarkdownPaneMode('source')}
-											>
-												{t('app.editorMarkdownSource')}
-											</button>
-											<button
-												type="button"
-												className={`ref-editor-md-mode-btn ${markdownPaneMode === 'preview' ? 'is-active' : ''}`}
-												onClick={() => setMarkdownPaneMode('preview')}
-											>
-												{t('app.editorMarkdownPreview')}
-											</button>
-										</div>
-									) : null}
-									<button
-										type="button"
-										className="ref-icon-tile"
-										aria-label={t('app.reloadFileAria')}
-										disabled={!filePath.trim()}
-										onClick={() => void onLoadFile()}
-									>
-										<IconRefresh />
-									</button>
-									<span className={tsLspPillClassName} title={tsLspPillTitle}>
-										LSP
-									</span>
-									<div className="ref-editor-toolbar-spacer" />
-									<button
-										type="button"
-										className="ref-editor-save"
-										disabled={!filePath.trim()}
-										onClick={() => void onSaveFile()}
-									>
-										{t('common.save')}
-									</button>
-									{showPlanFileEditorChrome ? (
-										<div className="ref-editor-plan-chrome">
-											<VoidSelect
-												variant="compact"
-												ariaLabel={t('plan.review.model')}
-												value={editorPlanBuildModelId}
-												disabled={editorPlanFileIsBuilt}
-												onChange={setEditorPlanBuildModelId}
-												options={[
-													{ value: '', label: t('plan.review.pickModel'), disabled: true },
-													...modelPickerItems.map((m) => ({
-														value: m.id,
-														label: m.label,
-													})),
-												]}
-											/>
-											{editorPlanFileIsBuilt ? (
-												<span className="ref-editor-plan-built" role="status">
-													{t('app.planEditorBuilt')}
-												</span>
-											) : (
-												<button
-													type="button"
-													className="ref-editor-plan-build-btn"
-													disabled={
-														awaitingReply ||
-														!editorPlanBuildModelId.trim() ||
-														modelPickerItems.length === 0
-													}
-													onClick={() => onExecutePlanFromEditor(editorPlanBuildModelId)}
-												>
-													{t('plan.review.build')}
-												</button>
-											)}
-										</div>
-									) : null}
-								</div>
-								<div
-									className={`ref-editor-pane${markdownPaneMode === 'preview' ? ' ref-editor-pane--md-preview' : ''}`}
+							<div className="ref-right-icon-tabs ref-right-icon-tabs--single" aria-label={t('app.rightSidebarViews')}>
+								<button
+									type="button"
+									aria-pressed="true"
+									aria-label={t('app.tabGit')}
+									title={t('app.tabGit')}
+									className="ref-right-icon-tab is-active"
+									onClick={() => setAgentGitPanelOpen(false)}
 								>
-									{filePath.trim() ? (
-										markdownPaneMode === 'preview' ? (
-											<div
-												className="ref-editor-md-preview-scroll"
-												role="document"
-												aria-label={t('app.editorMarkdownPreview')}
-											>
-												<ChatMarkdown content={markdownPreviewContent} />
-											</div>
-										) : (
-											<div className="ref-monaco-fill">
-												<Editor
-													key={filePath.trim()}
-													height="100%"
-													theme="void-dark"
-													path={monacoDocumentPath || filePath.trim()}
-													language={languageFromFilePath(filePath.trim())}
-													value={editorValue}
-													onChange={(v) => {
-														setEditorValue(v ?? '');
-														setOpenTabs((prev) =>
-															prev.map((tab) =>
-																tab.filePath === filePath.trim() ? { ...tab, dirty: true } : tab
-															)
-														);
-													}}
-													onMount={onMonacoMount}
-													options={{
-														...editorSettingsToMonacoOptions(editorSettings),
-														scrollbar: {
-															verticalScrollbarSize: 8,
-															horizontalScrollbarSize: 8,
-															useShadows: false,
-														},
-													}}
-												/>
-											</div>
-										)
-									) : (
-										<div className="ref-editor-empty">{t('app.selectFileToView')}</div>
-									)}
-								</div>
+									<IconGitSCM />
+								</button>
 							</div>
 						</div>
-					) : rightPanelTab === 'search' ? (
-						<div className="ref-search-stack">
-							<div className="ref-search-head">{t('app.searchPanelTitle')}</div>
-							{sidebarSearchDraft.trim() ? (
-								<div className="ref-search-draft">
-									<span className="ref-search-draft-label">{t('quickOpen.searchDraftLabel')}</span>
-									{sidebarSearchDraft}
-								</div>
-							) : null}
-							<p className="ref-search-placeholder">{t('app.searchPanelHint')}</p>
-						</div>
-					) : (
+
+						<div className="ref-right-panel-stage">
+							<div className="ref-right-panel-view ref-right-panel-view--agent">
 						<div className="ref-right-git-stack">
 							<div className="ref-right-toolbar">
 								<button type="button" className="ref-icon-tile" aria-label={t('app.gitRefreshAria')} onClick={() => void refreshGit()}>
@@ -6087,14 +6127,14 @@ export default function App() {
 								{gitActionError ? <p className="ref-git-action-error">{gitActionError}</p> : null}
 							</div>
 						</div>
-					)}
+							</div>
 						</div>
 					</div>
 				</aside>
 				) : (
 				/* ═══ Editor 布局：右侧 = Agent 对话（与 Agent 布局同一套消息与输入） ═══ */
 				<aside
-					className={`ref-right ref-right--editor-chat ${hasConversation ? 'ref-right--editor-chat--active' : ''}`}
+					className={`ref-right ref-right--editor-chat ref-right--editor-shell ${hasConversation ? 'ref-right--editor-chat--active' : ''}`}
 					aria-label={t('app.editorAgentChatRail')}
 					onKeyDown={onPlanNewIdea}
 				>
@@ -6345,6 +6385,8 @@ export default function App() {
 							onOpenSkillCreator={startSkillCreatorFlow}
 							onOpenWorkspaceSkillFile={handleOpenWorkspaceSkillFile}
 							onDeleteWorkspaceSkillDisk={handleDeleteWorkspaceSkillDisk}
+							colorMode={colorMode}
+							onChangeColorMode={(m, origin) => void onChangeColorMode(m, origin)}
 						/>
 					</div>
 				</div>

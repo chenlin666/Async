@@ -47,8 +47,14 @@ export type LLMProviderId = ModelRequestParadigm;
 /** 主界面左右侧栏宽度（桌面端持久化，避免 file:// localStorage 因路径变化丢失） */
 export type SidebarLayoutPx = { left: number; right: number };
 
+/** 界面颜色模式：`system` 跟随 OS，有效亮暗由渲染层解析 */
+export type ShellColorMode = 'light' | 'dark' | 'system';
+
 export type ShellUiSettings = {
 	sidebarLayout?: SidebarLayoutPx;
+	colorMode?: ShellColorMode;
+	/** 主壳布局：agent 居中对话 / editor 经典三栏 */
+	layoutMode?: 'agent' | 'editor';
 };
 
 /** 工作区索引与语言服务（未设置字段视为开启，与旧 settings.json 兼容） */
