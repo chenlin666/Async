@@ -1,0 +1,2837 @@
+:root[data-ui-style='mac-codex'] body {
+	background: var(--color-bg-app);
+}
+
+:root[data-ui-style='mac-codex'] .ref-shell {
+	background: var(--app-backdrop);
+}
+
+:root[data-ui-style='mac-codex'] .ref-shell::before {
+	background: var(--app-backdrop);
+	opacity: 1;
+}
+
+:root[data-ui-style='mac-codex'] .ref-menubar {
+	background: color-mix(in srgb, var(--ref-menubar-chrome-bg) 92%, transparent);
+	border-bottom: 1px solid var(--surface-glass-stroke);
+	box-shadow: var(--shadow-toolbar);
+	backdrop-filter: saturate(var(--glass-saturate)) blur(18px);
+	-webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(18px);
+}
+
+:root[data-ui-style='mac-codex'] .ref-global-search-btn {
+	height: 32px;
+	border-radius: var(--radius-chip);
+	background: var(--surface-search-bg);
+	border: 1px solid var(--surface-glass-stroke);
+	box-shadow: var(--shadow-pressed);
+}
+
+:root[data-ui-style='mac-codex'] .ref-global-search-btn:hover {
+	background: color-mix(in srgb, var(--surface-search-bg) 82%, var(--surface-tint-soft));
+	border-color: color-mix(in srgb, var(--surface-glass-stroke) 72%, var(--color-accent) 28%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-body {
+	padding: var(--app-frame-padding);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left,
+:root[data-ui-style='mac-codex'] .ref-right,
+:root[data-ui-style='mac-codex'] .ref-center {
+	border-radius: var(--radius-panel);
+	border: 1px solid var(--surface-glass-stroke);
+	box-shadow: var(--shadow-floating), var(--void-shadow-soft);
+	backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+	-webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+}
+
+:root[data-ui-style='mac-codex'] .ref-left {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-strong) 94%, transparent) 0%, var(--surface-panel-bg) 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-center {
+	background:
+		radial-gradient(circle at top center, var(--surface-tint-soft) 0%, transparent 36%),
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-strong) 94%, transparent) 0%, var(--surface-panel-bg) 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-right {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-strong) 92%, transparent) 0%, var(--surface-panel-bg-soft) 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-resize-handle::after {
+	background: color-mix(in srgb, var(--color-border-subtle) 78%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-resize-handle:hover,
+:root[data-ui-style='mac-codex'] .ref-resize-handle:active,
+:root[data-ui-style='mac-codex'] .ref-settings-resize-handle:hover {
+	background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-agent-search-wrap,
+:root[data-ui-style='mac-codex'] .ref-right-icon-tabs,
+:root[data-ui-style='mac-codex'] .ref-appearance-seg {
+	background: var(--surface-search-bg);
+	border: 1px solid var(--surface-glass-stroke);
+	box-shadow: var(--shadow-pressed);
+	border-radius: var(--radius-control);
+}
+
+:root[data-ui-style='mac-codex'] .ref-right-icon-tabs {
+	padding: 6px;
+	margin-top: 12px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-right-icon-tab {
+	border-radius: 10px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-right-icon-tab:hover,
+:root[data-ui-style='mac-codex'] .ref-appearance-seg-btn:hover {
+	background: color-mix(in srgb, var(--surface-tint-soft) 76%, var(--color-bg-hover));
+}
+
+:root[data-ui-style='mac-codex'] .ref-right-icon-tab.is-active,
+:root[data-ui-style='mac-codex'] .ref-appearance-seg-btn.is-active {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-tint-strong) 78%, var(--color-bg-hover)) 0%, color-mix(in srgb, var(--surface-panel-bg-soft) 92%, transparent) 100%);
+	box-shadow:
+		inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 32%, transparent),
+		0 8px 20px color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-center--chat .ref-command-stack {
+	max-width: min(100%, 760px);
+}
+
+:root[data-ui-style='mac-codex'] .ref-settings-backdrop {
+	background:
+		radial-gradient(circle at top center, color-mix(in srgb, var(--color-accent) 16%, transparent) 0%, transparent 30%),
+		rgba(6, 8, 12, 0.42);
+	backdrop-filter: blur(24px) saturate(130%);
+	-webkit-backdrop-filter: blur(24px) saturate(130%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-settings-mount {
+	padding: 22px;
+	align-items: center;
+	justify-content: center;
+}
+
+:root[data-ui-style='mac-codex'] .ref-settings-root {
+	width: min(1420px, calc(100vw - 44px));
+	height: min(920px, calc(100vh - 44px));
+	max-height: calc(100vh - 44px);
+	border-radius: var(--radius-window);
+	border: 1px solid var(--surface-glass-stroke);
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-strong) 96%, transparent) 0%, color-mix(in srgb, var(--surface-panel-bg) 94%, transparent) 100%);
+	box-shadow: 0 30px 100px rgba(0, 0, 0, 0.28);
+	overflow: hidden;
+}
+
+:root[data-ui-style='mac-codex'] .ref-settings-layout {
+	overflow: hidden;
+	border-radius: inherit;
+}
+
+:root[data-ui-style='mac-codex'] .ref-settings-sidebar {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-strong) 96%, transparent) 0%, color-mix(in srgb, var(--surface-panel-bg) 92%, transparent) 100%);
+	border-right: 1px solid var(--surface-glass-stroke);
+	backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+	-webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+}
+
+:root[data-ui-style='mac-codex'] .ref-settings-main {
+	background:
+		radial-gradient(circle at top center, var(--surface-tint-soft) 0%, transparent 36%),
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-strong) 92%, transparent) 0%, color-mix(in srgb, var(--surface-panel-bg) 88%, transparent) 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-settings-icon-btn,
+:root[data-ui-style='mac-codex'] .ref-settings-nav-row {
+	border: 1px solid transparent;
+}
+
+:root[data-ui-style='mac-codex'] .ref-settings-icon-btn:hover,
+:root[data-ui-style='mac-codex'] .ref-settings-nav-row:hover:not(:disabled) {
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 76%, var(--surface-tint-soft));
+	border-color: var(--surface-glass-stroke);
+}
+
+:root[data-ui-style='mac-codex'] .ref-settings-nav-row.is-active {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-tint-strong) 82%, var(--surface-panel-bg-soft)) 0%, color-mix(in srgb, var(--surface-panel-bg-soft) 94%, transparent) 100%);
+	border-color: color-mix(in srgb, var(--color-accent) 24%, transparent);
+	box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 10%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-settings-title {
+	letter-spacing: -0.035em;
+}
+
+:root[data-ui-style='mac-codex'] .ref-settings-panel {
+	max-width: 760px;
+}
+
+
+:root[data-ui-style='mac-codex'] .ref-quick-open-panel,
+:root[data-ui-style='mac-codex'] .ref-menu-dropdown,
+:root[data-ui-style='mac-codex'] .ref-menu-submenu,
+:root[data-ui-style='mac-codex'] .ref-at-menu,
+:root[data-ui-style='mac-codex'] .ref-slash-menu,
+:root[data-ui-style='mac-codex'] .ref-plus-menu,
+:root[data-ui-style='mac-codex'] .ref-void-select-menu,
+:root[data-ui-style='mac-codex'] .ref-explorer-ctx-menu {
+	background: var(--surface-popover-bg);
+	border: 1px solid var(--surface-glass-stroke);
+	box-shadow: var(--shadow-popover);
+	backdrop-filter: saturate(var(--glass-saturate)) blur(calc(var(--glass-blur) - 6px));
+	-webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(calc(var(--glass-blur) - 6px));
+}
+
+:root[data-ui-style='mac-codex'] .ref-quick-open-backdrop {
+	background:
+		radial-gradient(circle at top center, color-mix(in srgb, var(--color-accent) 18%, transparent) 0%, transparent 30%),
+		rgba(7, 10, 16, 0.38);
+	backdrop-filter: blur(18px) saturate(125%);
+	-webkit-backdrop-filter: blur(18px) saturate(125%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-quick-open-input,
+:root[data-ui-style='mac-codex'] .ref-settings-field input,
+:root[data-ui-style='mac-codex'] .ref-settings-field textarea,
+:root[data-ui-style='mac-codex'] .ref-mistake-limit-textarea,
+:root[data-ui-style='mac-codex'] .ref-plan-q-custom-input,
+:root[data-ui-style='mac-codex'] .ref-void-select-trigger {
+	background: var(--surface-control-bg);
+	border-color: var(--surface-glass-stroke);
+	box-shadow: var(--shadow-pressed);
+}
+
+:root[data-ui-style='mac-codex'] .ref-quick-open-input:focus,
+:root[data-ui-style='mac-codex'] .ref-settings-field input:focus,
+:root[data-ui-style='mac-codex'] .ref-settings-field textarea:focus,
+:root[data-ui-style='mac-codex'] .ref-mistake-limit-textarea:focus,
+:root[data-ui-style='mac-codex'] .ref-plan-q-custom-input:focus,
+:root[data-ui-style='mac-codex'] .ref-void-select-trigger:focus,
+:root[data-ui-style='mac-codex'] .ref-void-select-trigger:focus-visible {
+	border-color: color-mix(in srgb, var(--color-accent) 64%, var(--surface-glass-stroke));
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent), var(--shadow-pressed);
+}
+
+:root[data-ui-style='mac-codex'] .ref-quick-open-input-wrap,
+:root[data-ui-style='mac-codex'] .ref-plus-menu-hint,
+:root[data-ui-style='mac-codex'] .ref-settings-provider-body,
+:root[data-ui-style='mac-codex'] .ref-settings-model-v2-head,
+:root[data-ui-style='mac-codex'] .ref-tool-approval-inline-actions,
+:root[data-ui-style='mac-codex'] .ref-plan-q-head,
+:root[data-ui-style='mac-codex'] .ref-plan-q-foot,
+:root[data-ui-style='mac-codex'] .ref-skill-scope-head,
+:root[data-ui-style='mac-codex'] .ref-plan-review-head,
+:root[data-ui-style='mac-codex'] .ref-plan-review-foot,
+:root[data-ui-style='mac-codex'] .ref-git-card-head,
+:root[data-ui-style='mac-codex'] .ref-agent-diff-card-head,
+:root[data-ui-style='mac-codex'] .ref-right-toolbar {
+	border-color: var(--surface-glass-stroke);
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 92%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-layout-toggle-btns,
+:root[data-ui-style='mac-codex'] .ref-menu-item,
+:root[data-ui-style='mac-codex'] .ref-layout-btn,
+:root[data-ui-style='mac-codex'] .ref-settings-icon-btn,
+:root[data-ui-style='mac-codex'] .ref-plus-btn,
+:root[data-ui-style='mac-codex'] .ref-attach-btn,
+:root[data-ui-style='mac-codex'] .ref-git-card-open,
+:root[data-ui-style='mac-codex'] .ref-settings-set-default,
+:root[data-ui-style='mac-codex'] .ref-settings-remove-model,
+:root[data-ui-style='mac-codex'] .ref-tool-approval-btn--deny,
+:root[data-ui-style='mac-codex'] .ref-agent-review-btn,
+:root[data-ui-style='mac-codex'] .ref-plan-q-btn--ghost,
+:root[data-ui-style='mac-codex'] .ref-skill-scope-btn--ghost,
+:root[data-ui-style='mac-codex'] .ref-plan-review-close,
+:root[data-ui-style='mac-codex'] .ref-explorer-chevron-btn,
+:root[data-ui-style='mac-codex'] .ref-explorer-row,
+:root[data-ui-style='mac-codex'] .ref-explorer-ctx-item,
+:root[data-ui-style='mac-codex'] .ref-menu-dropdown-item,
+:root[data-ui-style='mac-codex'] .ref-void-select-option,
+:root[data-ui-style='mac-codex'] .ref-plus-menu-row,
+:root[data-ui-style='mac-codex'] .ref-at-menu-row,
+:root[data-ui-style='mac-codex'] .ref-slash-menu-row,
+:root[data-ui-style='mac-codex'] .ref-quick-open-row,
+:root[data-ui-style='mac-codex'] .ref-plan-review-full-btn,
+:root[data-ui-style='mac-codex'] .ref-plan-todo,
+:root[data-ui-style='mac-codex'] .ref-skill-scope-opt,
+:root[data-ui-style='mac-codex'] .ref-plan-q-opt,
+:root[data-ui-style='mac-codex'] .ref-settings-api-keys-head,
+:root[data-ui-style='mac-codex'] .ref-settings-model-advanced-summary {
+	transition:
+		background-color 0.2s var(--void-ease-out-expo),
+		border-color 0.2s var(--void-ease-out-expo),
+		box-shadow 0.2s var(--void-ease-out-expo),
+		color 0.2s var(--void-ease-out-expo),
+		transform 0.18s var(--void-ease-out-expo);
+}
+
+:root[data-ui-style='mac-codex'] .ref-menu-item:hover,
+:root[data-ui-style='mac-codex'] .ref-layout-btn:hover,
+:root[data-ui-style='mac-codex'] .ref-git-card-open:hover,
+:root[data-ui-style='mac-codex'] .ref-settings-set-default:hover,
+:root[data-ui-style='mac-codex'] .ref-settings-remove-model:hover,
+:root[data-ui-style='mac-codex'] .ref-tool-approval-btn--deny:hover,
+:root[data-ui-style='mac-codex'] .ref-agent-review-btn--ghost:hover,
+:root[data-ui-style='mac-codex'] .ref-plan-q-btn--ghost:hover,
+:root[data-ui-style='mac-codex'] .ref-skill-scope-btn--ghost:hover,
+:root[data-ui-style='mac-codex'] .ref-plan-review-close:hover,
+:root[data-ui-style='mac-codex'] .ref-menu-dropdown-item:hover:not(:disabled),
+:root[data-ui-style='mac-codex'] .ref-void-select-option:hover:not(:disabled),
+:root[data-ui-style='mac-codex'] .ref-plus-menu-row:hover:not(:disabled),
+:root[data-ui-style='mac-codex'] .ref-at-menu-row:hover,
+:root[data-ui-style='mac-codex'] .ref-slash-menu-row:hover,
+:root[data-ui-style='mac-codex'] .ref-quick-open-row:hover,
+:root[data-ui-style='mac-codex'] .ref-plan-review-full-btn:hover,
+:root[data-ui-style='mac-codex'] .ref-plan-todo:hover,
+:root[data-ui-style='mac-codex'] .ref-skill-scope-opt:hover:not(:disabled),
+:root[data-ui-style='mac-codex'] .ref-plan-q-opt:hover,
+:root[data-ui-style='mac-codex'] .ref-settings-api-keys-head:hover,
+:root[data-ui-style='mac-codex'] .ref-settings-model-advanced-summary:hover,
+:root[data-ui-style='mac-codex'] .ref-explorer-chevron-btn:hover,
+:root[data-ui-style='mac-codex'] .ref-explorer-row:hover,
+:root[data-ui-style='mac-codex'] .ref-explorer-ctx-item:hover:not(.is-disabled):not(:disabled) {
+	background: var(--surface-control-bg-hover);
+	border-color: color-mix(in srgb, var(--surface-glass-stroke) 72%, var(--color-accent) 28%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-layout-btn.is-active,
+:root[data-ui-style='mac-codex'] .ref-menu-item.is-active,
+:root[data-ui-style='mac-codex'] .ref-quick-open-row.is-selected,
+:root[data-ui-style='mac-codex'] .ref-plus-menu-row.is-active,
+:root[data-ui-style='mac-codex'] .ref-at-menu-row.is-active,
+:root[data-ui-style='mac-codex'] .ref-slash-menu-row.is-active,
+:root[data-ui-style='mac-codex'] .ref-void-select-option.is-selected,
+:root[data-ui-style='mac-codex'] .ref-explorer-row.is-selected,
+:root[data-ui-style='mac-codex'] .ref-plan-q-opt.is-selected,
+:root[data-ui-style='mac-codex'] .ref-skill-scope-opt.is-active {
+	background: var(--surface-control-bg-active);
+	border-color: color-mix(in srgb, var(--color-accent) 28%, transparent);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-layout-btn--git {
+	margin-left: 10px;
+	width: 30px;
+	height: 30px;
+	border-radius: 9px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-plus-btn,
+:root[data-ui-style='mac-codex'] .ref-attach-btn,
+:root[data-ui-style='mac-codex'] .ref-menu-item,
+:root[data-ui-style='mac-codex'] .ref-layout-btn,
+:root[data-ui-style='mac-codex'] .ref-settings-remove-model,
+:root[data-ui-style='mac-codex'] .ref-settings-set-default,
+:root[data-ui-style='mac-codex'] .ref-tool-approval-btn--deny,
+:root[data-ui-style='mac-codex'] .ref-agent-review-btn--ghost,
+:root[data-ui-style='mac-codex'] .ref-plan-q-btn--ghost,
+:root[data-ui-style='mac-codex'] .ref-skill-scope-btn--ghost,
+:root[data-ui-style='mac-codex'] .ref-plan-review-close,
+:root[data-ui-style='mac-codex'] .ref-git-card-open {
+	background: var(--surface-control-bg);
+	border: 1px solid var(--surface-glass-stroke);
+	box-shadow: var(--shadow-pressed);
+}
+
+:root[data-ui-style='mac-codex'] .ref-tool-approval-btn--allow,
+:root[data-ui-style='mac-codex'] .ref-agent-review-btn--primary,
+:root[data-ui-style='mac-codex'] .ref-plan-q-btn--primary,
+:root[data-ui-style='mac-codex'] .ref-skill-scope-btn--primary,
+:root[data-ui-style='mac-codex'] .ref-plan-review-build,
+:root[data-ui-style='mac-codex'] .ref-send-btn,
+:root[data-ui-style='mac-codex'] .ref-settings-add-model {
+	background: linear-gradient(180deg, color-mix(in srgb, var(--color-accent) 88%, white 12%) 0%, var(--color-accent) 100%);
+	color: white;
+	border: 1px solid color-mix(in srgb, var(--color-accent) 72%, black 28%);
+	box-shadow: var(--shadow-accent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-tool-approval-btn--allow:hover,
+:root[data-ui-style='mac-codex'] .ref-agent-review-btn--primary:hover,
+:root[data-ui-style='mac-codex'] .ref-plan-q-btn--primary:hover:not(:disabled),
+:root[data-ui-style='mac-codex'] .ref-skill-scope-btn--primary:hover,
+:root[data-ui-style='mac-codex'] .ref-plan-review-build:hover,
+:root[data-ui-style='mac-codex'] .ref-send-btn:hover:not(:disabled),
+:root[data-ui-style='mac-codex'] .ref-settings-add-model:hover {
+	filter: brightness(1.04);
+	transform: translateY(-1px);
+}
+
+:root[data-ui-style='mac-codex'] .ref-send-btn.is-stop {
+	background: linear-gradient(180deg, color-mix(in srgb, var(--void-git-deleted) 92%, white 8%) 0%, var(--void-git-deleted) 100%);
+	border-color: color-mix(in srgb, var(--void-git-deleted) 72%, black 28%);
+	box-shadow: 0 14px 28px color-mix(in srgb, var(--void-git-deleted) 16%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-kbd,
+:root[data-ui-style='mac-codex'] .ref-menu-kbd,
+:root[data-ui-style='mac-codex'] .ref-at-menu-kbd,
+:root[data-ui-style='mac-codex'] .ref-slash-menu-kbd,
+:root[data-ui-style='mac-codex'] .ref-quick-open-row-kbd,
+:root[data-ui-style='mac-codex'] .ref-plan-review-build .ref-kbd,
+:root[data-ui-style='mac-codex'] .ref-slash-help-row-label code,
+:root[data-ui-style='mac-codex'] .ref-slash-help-badge {
+	background: var(--surface-control-bg);
+	border-color: var(--surface-glass-stroke);
+	color: var(--color-text-tertiary);
+	box-shadow: var(--shadow-pressed);
+}
+
+:root[data-ui-style='mac-codex'] .ref-capsule,
+:root[data-ui-style='mac-codex'] .ref-capsule--followup-bar,
+:root[data-ui-style='mac-codex'] .ref-capsule--stacked-chat,
+:root[data-ui-style='mac-codex'] .ref-capsule--compact {
+	background: var(--surface-card-bg);
+	border: 1px solid var(--surface-glass-stroke);
+	box-shadow: var(--shadow-floating), var(--void-shadow-soft);
+	backdrop-filter: saturate(var(--glass-saturate)) blur(calc(var(--glass-blur) - 4px));
+	-webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(calc(var(--glass-blur) - 4px));
+}
+
+:root[data-ui-style='mac-codex'] .ref-capsule--followup-bar,
+:root[data-ui-style='mac-codex'] .ref-capsule--stacked-chat {
+	border-radius: 20px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-capsule-bar,
+:root[data-ui-style='mac-codex'] .ref-capsule-bar--stacked,
+:root[data-ui-style='mac-codex'] .ref-followup-bar-row {
+	border-color: var(--surface-glass-stroke);
+}
+
+:root[data-ui-style='mac-codex'] .ref-inline-file-chip,
+:root[data-ui-style='mac-codex'] .ref-inline-slash-chip,
+:root[data-ui-style='mac-codex'] .ref-file-ref-chip,
+:root[data-ui-style='mac-codex'] .ref-mode-chip,
+:root[data-ui-style='mac-codex'] .ref-model-pill,
+:root[data-ui-style='mac-codex'] .ref-branch-chip,
+:root[data-ui-style='mac-codex'] .ref-git-stat-add,
+:root[data-ui-style='mac-codex'] .ref-git-stat-del,
+:root[data-ui-style='mac-codex'] .ref-settings-provider-summary-tag,
+:root[data-ui-style='mac-codex'] .ref-default-pill {
+	backdrop-filter: saturate(150%) blur(10px);
+	-webkit-backdrop-filter: saturate(150%) blur(10px);
+	box-shadow: var(--shadow-pressed);
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip--agent,
+:root[data-ui-style='mac-codex'] .ref-mode-chip--plan,
+:root[data-ui-style='mac-codex'] .ref-mode-chip--debug,
+:root[data-ui-style='mac-codex'] .ref-mode-chip--ask,
+:root[data-ui-style='mac-codex'] .ref-inline-slash-chip,
+:root[data-ui-style='mac-codex'] .ref-file-ref-chip,
+:root[data-ui-style='mac-codex'] .ref-inline-file-chip,
+:root[data-ui-style='mac-codex'] .ref-model-pill,
+:root[data-ui-style='mac-codex'] .ref-branch-chip {
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 72%, var(--surface-tint-soft));
+	border-color: color-mix(in srgb, var(--color-accent) 22%, var(--surface-glass-stroke));
+	color: var(--color-text-secondary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-msg-sticky-user-wrap {
+	background: transparent;
+	box-shadow: none;
+	border-radius: 22px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-msg-user {
+	background: var(--surface-bubble-user);
+	border-color: color-mix(in srgb, var(--color-accent) 16%, var(--surface-glass-stroke));
+	border-radius: 22px;
+	box-shadow: var(--shadow-floating), var(--shadow-pressed);
+}
+
+:root[data-ui-style='mac-codex'] .ref-msg-user:hover:not(:disabled) {
+	background: linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-soft) 86%, var(--surface-tint-strong)) 0%, color-mix(in srgb, var(--surface-panel-bg) 92%, transparent) 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-msg-assistant-body {
+	padding: 2px 8px;
+	color: var(--color-text-secondary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-tool-approval-inline,
+:root[data-ui-style='mac-codex'] .ref-agent-diff-card,
+:root[data-ui-style='mac-codex'] .ref-agent-review,
+:root[data-ui-style='mac-codex'] .ref-agent-command-card,
+:root[data-ui-style='mac-codex'] .ref-agent-stream-tool,
+:root[data-ui-style='mac-codex'] .ref-git-card,
+:root[data-ui-style='mac-codex'] .ref-plan-q,
+:root[data-ui-style='mac-codex'] .ref-skill-scope,
+:root[data-ui-style='mac-codex'] .ref-plan-review,
+:root[data-ui-style='mac-codex'] .ref-settings-provider-details,
+:root[data-ui-style='mac-codex'] .ref-settings-user-model-card,
+:root[data-ui-style='mac-codex'] .ref-settings-api-keys,
+:root[data-ui-style='mac-codex'] .ref-settings-global-creds,
+:root[data-ui-style='mac-codex'] .ref-settings-custom-endpoint-row {
+	background: var(--surface-card-bg-soft);
+	border: 1px solid var(--surface-glass-stroke);
+	box-shadow: var(--shadow-floating), var(--shadow-pressed);
+}
+
+:root[data-ui-style='mac-codex'] .ref-plan-review-md,
+:root[data-ui-style='mac-codex'] .ref-plan-review-todos,
+:root[data-ui-style='mac-codex'] .ref-agent-stream-tool-pre,
+:root[data-ui-style='mac-codex'] .ref-tool-approval-inline-body,
+:root[data-ui-style='mac-codex'] .ref-mistake-limit-textarea {
+	background: var(--surface-code-bg);
+	border-color: var(--surface-glass-stroke);
+}
+
+:root[data-ui-style='mac-codex'] .ref-plan-review-todos-head,
+:root[data-ui-style='mac-codex'] .ref-model-pill:hover,
+:root[data-ui-style='mac-codex'] .ref-plus-btn:hover,
+:root[data-ui-style='mac-codex'] .ref-attach-btn:hover,
+:root[data-ui-style='mac-codex'] .ref-mode-chip--opens-menu:hover {
+	background: var(--surface-control-bg-hover);
+}
+
+:root[data-ui-style='mac-codex'] .ref-agent-review-bar,
+:root[data-ui-style='mac-codex'] .ref-agent-review-body,
+:root[data-ui-style='mac-codex'] .ref-tool-approval-inline-inner,
+:root[data-ui-style='mac-codex'] .ref-settings-provider-summary,
+:root[data-ui-style='mac-codex'] .ref-settings-model-v2-grid,
+:root[data-ui-style='mac-codex'] .ref-settings-global-creds-body,
+:root[data-ui-style='mac-codex'] .ref-settings-api-keys-body {
+	background: transparent;
+	border-color: var(--surface-glass-stroke);
+}
+
+:root[data-ui-style='mac-codex'] .ref-right-git-stack,
+:root[data-ui-style='mac-codex'] .ref-search-stack,
+:root[data-ui-style='mac-codex'] .ref-explorer-head,
+:root[data-ui-style='mac-codex'] .ref-explorer-ctx-menu,
+:root[data-ui-style='mac-codex'] .ref-settings-provider-root-list {
+	gap: 12px;
+}
+
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-shell,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-shell::before,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-body {
+	background: var(--app-backdrop);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-menubar {
+	background: linear-gradient(180deg, rgba(22, 29, 36, 0.98) 0%, rgba(18, 24, 30, 0.98) 100%);
+	border-bottom: 1px solid rgba(205, 217, 224, 0.05);
+	box-shadow: 0 1px 0 rgba(255, 255, 255, 0.024), 0 18px 42px rgba(0, 0, 0, 0.24);
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-body {
+	padding: 0;
+	background: transparent;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-center,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-right {
+	border-radius: 0;
+	border: none;
+	box-shadow: none;
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left {
+	background:
+		radial-gradient(circle at top left, rgba(55, 214, 212, 0.06) 0%, transparent 30%),
+		linear-gradient(180deg, #182028 0%, #131920 100%);
+	border-right: 1px solid rgba(205, 217, 224, 0.05);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-center,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-body.ref-body--editor-home,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-welcome {
+	background:
+		radial-gradient(circle at top center, rgba(55, 214, 212, 0.04) 0%, transparent 30%),
+		radial-gradient(circle at 88% 10%, rgba(255, 157, 89, 0.05) 0%, transparent 20%),
+		#11171c;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-right {
+	background:
+		radial-gradient(circle at top right, rgba(255, 157, 89, 0.05) 0%, transparent 24%),
+		linear-gradient(180deg, #192028 0%, #141a20 100%);
+	border-left: 1px solid rgba(205, 217, 224, 0.05);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left-scroll {
+	padding: 10px 10px 14px;
+	background: linear-gradient(180deg, rgba(19, 25, 31, 0.48) 0%, rgba(19, 25, 31, 0) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-project-block--editor {
+	position: relative;
+	margin: 6px 6px 14px;
+	border: 1px solid rgba(82, 95, 105, 0.18);
+	border-radius: 20px;
+	background: linear-gradient(180deg, rgba(18, 24, 31, 0.98) 0%, rgba(13, 18, 24, 0.99) 100%);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 18px 36px rgba(0, 0, 0, 0.18);
+	overflow: hidden;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-project-block--editor::before {
+	content: '';
+	position: absolute;
+	inset: 0 0 auto 0;
+	height: 72px;
+	background:
+		linear-gradient(180deg, rgba(55, 214, 212, 0.12) 0%, rgba(55, 214, 212, 0) 100%),
+		radial-gradient(circle at 85% 0%, rgba(255, 157, 89, 0.14) 0%, transparent 45%);
+	pointer-events: none;
+	opacity: 0.8;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-kicker {
+	padding: 12px 14px 0;
+	font-size: 10px;
+	letter-spacing: 0.14em;
+	color: #7b8b97;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-head--editor {
+	margin: 10px 10px 0;
+	padding: 12px 14px;
+	border: 1px solid rgba(92, 106, 117, 0.18);
+	border-radius: 16px;
+	background: linear-gradient(180deg, rgba(24, 31, 39, 0.92) 0%, rgba(18, 23, 29, 0.86) 100%);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-title {
+	font-size: 13px;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-subtitle {
+	color: #6f808c;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-body--workspace {
+	margin: 10px 10px 12px;
+	padding: 8px 0 12px;
+	border: 1px solid rgba(84, 97, 108, 0.18);
+	border-radius: 16px;
+	background: linear-gradient(180deg, rgba(15, 20, 26, 0.92) 0%, rgba(12, 16, 21, 0.98) 100%);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-tree-wrap {
+	position: relative;
+	padding: 0 0 2px;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-tree-wrap::before {
+	content: '';
+	position: absolute;
+	left: 18px;
+	top: 8px;
+	bottom: 8px;
+	width: 1px;
+	background: linear-gradient(180deg, rgba(55, 214, 212, 0.08) 0%, rgba(255, 157, 89, 0.04) 100%);
+	pointer-events: none;
+	opacity: 0.8;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-row {
+	position: relative;
+	gap: 4px;
+	min-height: 32px;
+	margin: 2px 8px;
+	padding-right: 10px;
+	border: 1px solid transparent;
+	border-radius: 12px;
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.012) 0%, rgba(255, 255, 255, 0.004) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-row:hover {
+	background: linear-gradient(180deg, rgba(55, 214, 212, 0.08) 0%, rgba(55, 214, 212, 0.03) 100%);
+	border-color: rgba(55, 214, 212, 0.14);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+	transform: translateX(1px);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-row.is-selected {
+	background: linear-gradient(90deg, rgba(55, 214, 212, 0.16) 0%, rgba(255, 157, 89, 0.08) 100%);
+	border-color: rgba(55, 214, 212, 0.18);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 10px 20px rgba(0, 0, 0, 0.18);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-row.is-selected::before {
+	content: '';
+	position: absolute;
+	left: 4px;
+	top: 6px;
+	bottom: 6px;
+	width: 3px;
+	border-radius: 999px;
+	background: linear-gradient(180deg, #37d6d4 0%, #ff9d59 100%);
+	box-shadow: 0 0 16px rgba(55, 214, 212, 0.3);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-row--nested-dirty .ref-explorer-chevron-btn {
+	color: var(--void-accent-warm);
+	opacity: 0.96;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-chevron-cell {
+	width: 22px;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-chevron-btn {
+	width: 20px;
+	height: 20px;
+	border-radius: 8px;
+	color: #758692;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-chevron-btn:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-row:hover .ref-explorer-chevron-btn {
+	background: rgba(55, 214, 212, 0.1);
+	color: #d9f7f7;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-icon-cell {
+	width: 22px;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-icon-cell svg {
+	width: 16px;
+	height: 16px;
+	filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.24));
+	opacity: 0.98;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-row--dir .ref-explorer-icon-cell svg {
+	filter: drop-shadow(0 3px 10px rgba(255, 157, 89, 0.18));
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-label {
+	padding: 5px 2px;
+	color: #a6b3bd;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-row--dir .ref-explorer-label {
+	color: #d4dde2;
+	font-weight: 600;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-row.is-selected .ref-explorer-label {
+	color: #f5f8fa;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-name--git-m,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-name--git-u,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-name--git-a,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-name--git-d {
+	font-weight: 600;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-badge {
+	min-width: 20px;
+	padding: 2px 6px;
+	border-radius: 999px;
+	border: 1px solid transparent;
+	letter-spacing: 0.02em;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-badge--u {
+	color: #6ce0bf;
+	background: rgba(92, 217, 184, 0.14);
+	border-color: rgba(92, 217, 184, 0.16);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-badge--m {
+	color: #ffba73;
+	background: rgba(255, 157, 89, 0.14);
+	border-color: rgba(255, 157, 89, 0.16);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-badge--a {
+	color: #7be0a8;
+	background: rgba(112, 216, 157, 0.14);
+	border-color: rgba(112, 216, 157, 0.16);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-badge--d {
+	color: #ff8e97;
+	background: rgba(255, 123, 134, 0.14);
+	border-color: rgba(255, 123, 134, 0.16);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-badge--i,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-badge--r,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-badge--c,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-badge--t,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-badge--misc {
+	color: #90a0ad;
+	background: rgba(255, 255, 255, 0.05);
+	border-color: rgba(255, 255, 255, 0.06);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-ctx-menu {
+	background: linear-gradient(180deg, rgba(19, 25, 31, 0.99) 0%, rgba(15, 20, 26, 0.995) 100%);
+	border-color: rgba(90, 104, 114, 0.2);
+	box-shadow: 0 24px 54px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-ctx-item {
+	color: #c4d0d7;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-ctx-item:hover:not(.is-disabled):not(:disabled) {
+	background: linear-gradient(180deg, rgba(55, 214, 212, 0.1) 0%, rgba(55, 214, 212, 0.04) 100%);
+	border-color: transparent;
+	color: #f3f8f9;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-placeholder,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-empty {
+	margin: 12px;
+	padding: 14px 14px;
+	border: 1px dashed rgba(84, 97, 108, 0.2);
+	border-radius: 14px;
+	background: rgba(255, 255, 255, 0.018);
+	color: var(--void-fg-2);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-loading {
+	color: #7f8f9b;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left-footer--editor {
+	padding: 10px 12px 12px;
+	background: linear-gradient(180deg, rgba(17, 23, 28, 0) 0%, rgba(17, 23, 28, 0.86) 44%, rgba(16, 22, 28, 0.98) 100%);
+	border-top: 1px solid rgba(205, 217, 224, 0.04);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-open-workspace {
+	border-radius: 14px;
+	border-color: rgba(55, 214, 212, 0.22);
+	background: linear-gradient(180deg, rgba(55, 214, 212, 0.18) 0%, rgba(17, 113, 121, 0.26) 100%);
+	color: #e6fbfb;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 12px 24px rgba(8, 27, 31, 0.24);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-open-workspace:hover {
+	background: linear-gradient(180deg, rgba(55, 214, 212, 0.24) 0%, rgba(23, 133, 141, 0.3) 100%);
+	border-color: rgba(55, 214, 212, 0.28);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-ipc-hint {
+	color: #61717d;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-icon-tile {
+	border: 1px solid transparent;
+	border-radius: 12px;
+	background: rgba(255, 255, 255, 0.015);
+	color: #82959f;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-icon-tile:hover {
+	background: rgba(55, 214, 212, 0.1);
+	border-color: rgba(55, 214, 212, 0.14);
+	color: #d8f6f7;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-backdrop {
+	background:
+		radial-gradient(circle at top center, rgba(55, 214, 212, 0.12) 0%, transparent 28%),
+		radial-gradient(circle at 86% 10%, rgba(255, 157, 89, 0.08) 0%, transparent 20%),
+		rgba(4, 6, 9, 0.52);
+	backdrop-filter: blur(22px) saturate(120%);
+	-webkit-backdrop-filter: blur(22px) saturate(120%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-root {
+	background: linear-gradient(180deg, rgba(20, 27, 33, 0.988) 0%, rgba(14, 19, 24, 0.988) 100%);
+	border-color: rgba(205, 217, 224, 0.08);
+	box-shadow: 0 32px 96px rgba(0, 0, 0, 0.4);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-sidebar {
+	background: linear-gradient(180deg, rgba(24, 31, 38, 0.98) 0%, rgba(18, 24, 30, 0.98) 100%);
+	border-right: 1px solid rgba(205, 217, 224, 0.05);
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-main {
+	background:
+		radial-gradient(circle at top center, rgba(55, 214, 212, 0.05) 0%, transparent 34%),
+		radial-gradient(circle at 84% 14%, rgba(255, 157, 89, 0.04) 0%, transparent 18%),
+		linear-gradient(180deg, rgba(21, 28, 34, 0.98) 0%, rgba(17, 23, 28, 0.98) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-quick-open-backdrop {
+	background:
+		radial-gradient(circle at top center, rgba(55, 214, 212, 0.12) 0%, transparent 28%),
+		radial-gradient(circle at 84% 12%, rgba(255, 157, 89, 0.08) 0%, transparent 18%),
+		rgba(5, 8, 12, 0.46);
+	backdrop-filter: blur(18px) saturate(120%);
+	-webkit-backdrop-filter: blur(18px) saturate(120%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-global-search-btn,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-right-icon-tabs,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-agent-search-wrap,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-layout-toggle-btns,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-appearance-seg,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-open-workspace,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-thread-title-input,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-provider-details,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-user-model-card,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-api-keys,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-global-creds,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-custom-endpoint-row,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-quick-open-input,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-field input,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-field textarea,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-mistake-limit-textarea,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-q-custom-input,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-void-select-trigger,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plus-btn,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-model-pill,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-mode-chip {
+	background: linear-gradient(180deg, rgba(33, 42, 51, 0.96) 0%, rgba(28, 37, 45, 0.96) 100%);
+	border-color: rgba(205, 217, 224, 0.07);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-project-header,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-thread-section-label,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-local-label {
+	color: #80909c;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-agent-new-btn {
+	justify-content: flex-start;
+	padding: 10px 12px;
+	border-radius: 12px;
+	border-color: rgba(55, 214, 212, 0.22);
+	background: linear-gradient(180deg, rgba(55, 214, 212, 0.14) 0%, rgba(14, 102, 109, 0.28) 100%);
+	color: #e7fbfb;
+	font-size: 13px;
+	font-weight: 600;
+	box-shadow: 0 10px 24px rgba(8, 33, 36, 0.2);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-agent-new-btn:hover {
+	background: linear-gradient(180deg, rgba(55, 214, 212, 0.2) 0%, rgba(18, 121, 129, 0.34) 100%);
+	border-color: rgba(55, 214, 212, 0.28);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-thread-list {
+	gap: 6px;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-thread-item {
+	border-radius: 12px;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-thread-row,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-thread-row-title,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-title,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-welcome-wordmark {
+	color: var(--void-fg-0);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-thread-row-meta,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-thread-stat,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-welcome-action-subtitle,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-welcome-recent-card-path,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-welcome-tagline {
+	color: var(--void-fg-2);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-thread-action,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-git-card-open,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-layout-btn,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-menu-item,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-remove-model,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-set-default,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-review-close {
+	background: transparent;
+	border-color: transparent;
+	box-shadow: none;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-thread-item:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-todo:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-review-full-btn:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-at-menu-row:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-slash-menu-row:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plus-menu-row:hover:not(:disabled),
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-menu-dropdown-item:hover:not(:disabled),
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-void-select-option:hover:not(:disabled),
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-quick-open-row:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-nav-row:hover:not(:disabled),
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-api-keys-head:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-model-advanced-summary:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-thread-action:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-layout-btn:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-menu-item:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-git-card-open:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-remove-model:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-set-default:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-review-close:hover {
+	background: rgba(55, 214, 212, 0.08);
+	border-color: rgba(55, 214, 212, 0.14);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-thread-item.is-active,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-at-menu-row.is-active,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-slash-menu-row.is-active,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plus-menu-row.is-active,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-quick-open-row.is-selected,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-void-select-option.is-selected,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-q-opt.is-selected,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-skill-scope-opt.is-active,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-nav-row.is-active,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-layout-btn.is-active,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-menu-item.is-active,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-right-icon-tab.is-active {
+	background: rgba(55, 214, 212, 0.12);
+	border-color: rgba(55, 214, 212, 0.18);
+	box-shadow: inset 0 0 0 1px rgba(55, 214, 212, 0.1);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-right-toolbar,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-git-card-head,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-provider-summary,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-model-v2-head,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-quick-open-input-wrap,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-review-head,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-tool-approval-inline-actions,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-q-head,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-q-foot,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-skill-scope-head,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-review-foot {
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 56%, transparent);
+	border-color: rgba(205, 217, 224, 0.05);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-launchpad,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-welcome-panel,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-review,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-skill-scope,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-q,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-git-card,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-agent-review,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-agent-diff-card,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-agent-command-card,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-agent-stream-tool,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-tool-approval-inline,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-capsule,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-capsule--followup-bar,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-capsule--stacked-chat,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-capsule--compact {
+	background: var(--surface-card-bg-soft);
+	border-color: rgba(205, 217, 224, 0.06);
+	box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-capsule,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-capsule--followup-bar,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-capsule--stacked-chat,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-capsule--compact {
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-msg-user {
+	background: var(--surface-bubble-user);
+	border-color: rgba(205, 217, 224, 0.06);
+	box-shadow: 0 10px 22px rgba(0, 0, 0, 0.14);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-msg-user:hover:not(:disabled) {
+	background: linear-gradient(180deg, rgba(41, 53, 63, 0.98) 0%, rgba(31, 42, 50, 0.98) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-welcome-inner {
+	max-width: 1040px;
+	gap: 18px;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-launchpad {
+	padding: 38px 40px 34px;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-welcome-brand {
+	margin-bottom: 22px;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-welcome-logo {
+	filter: saturate(1.04) brightness(1.04);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-welcome-action-card,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-welcome-recent-card {
+	background: linear-gradient(180deg, rgba(28, 37, 46, 0.94) 0%, rgba(20, 27, 33, 0.96) 100%);
+	border-color: rgba(205, 217, 224, 0.06);
+	box-shadow: none;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-welcome-action-card:hover:not(:disabled),
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-welcome-recent-card:hover {
+	background: linear-gradient(180deg, rgba(33, 44, 54, 0.96) 0%, rgba(23, 31, 38, 0.98) 100%);
+	border-color: rgba(55, 214, 212, 0.12);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-welcome-action-card--primary {
+	background:
+		radial-gradient(circle at top left, rgba(55, 214, 212, 0.16) 0%, transparent 38%),
+		radial-gradient(circle at 88% 0%, rgba(255, 157, 89, 0.12) 0%, transparent 28%),
+		linear-gradient(180deg, rgba(28, 37, 46, 0.96) 0%, rgba(20, 27, 33, 0.98) 100%);
+	border-color: rgba(55, 214, 212, 0.14);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-welcome-action-icon,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-welcome-recent-card-icon {
+	background: linear-gradient(180deg, rgba(55, 214, 212, 0.12) 0%, rgba(255, 157, 89, 0.08) 100%);
+	color: #effcfc;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-send-btn,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-add-model,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-agent-review-btn--primary,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-q-btn--primary,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-skill-scope-btn--primary,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-review-build,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-tool-approval-btn--allow {
+	background: linear-gradient(180deg, #42dbd8 0%, #20c1c3 100%);
+	border-color: rgba(90, 234, 231, 0.34);
+	color: #082325;
+	box-shadow: 0 12px 26px rgba(10, 94, 99, 0.24);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-send-btn:hover:not(:disabled),
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-settings-add-model:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-agent-review-btn--primary:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-q-btn--primary:hover:not(:disabled),
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-skill-scope-btn--primary:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plan-review-build:hover,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-tool-approval-btn--allow:hover {
+	background: linear-gradient(180deg, #54e3e0 0%, #2ccacc 100%);
+	filter: none;
+	transform: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-preview-split {
+	padding: 12px;
+	gap: 12px;
+	background: transparent;
+}
+
+:root[data-ui-style='mac-codex'] .ref-preview-tree,
+:root[data-ui-style='mac-codex'] .ref-preview-editor {
+	border: 1px solid var(--surface-glass-stroke);
+	border-radius: var(--radius-panel);
+	overflow: hidden;
+	box-shadow: var(--shadow-floating), var(--void-shadow-soft);
+}
+
+:root[data-ui-style='mac-codex'] .ref-preview-tree {
+	width: min(36%, 320px);
+	min-width: 220px;
+	max-width: 360px;
+	background: var(--surface-card-bg-soft);
+}
+
+:root[data-ui-style='mac-codex'] .ref-preview-editor {
+	background: var(--surface-card-bg);
+}
+
+:root[data-ui-style='mac-codex'] .ref-preview-tree .ref-explorer-head,
+:root[data-ui-style='mac-codex'] .ref-preview-tree .ref-explorer-body {
+	background: transparent;
+	border-color: var(--surface-glass-stroke);
+}
+
+:root[data-ui-style='mac-codex'] .ref-editor-toolbar,
+:root[data-ui-style='mac-codex'] .ref-editor-toolbar--workspace {
+	padding: 10px 12px;
+	border-bottom: 1px solid var(--surface-glass-stroke);
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 88%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-editor-canvas,
+:root[data-ui-style='mac-codex'] .ref-editor-pane,
+:root[data-ui-style='mac-codex'] .ref-editor-pane.ref-editor-pane--md-preview,
+:root[data-ui-style='mac-codex'] .ref-monaco-fill,
+:root[data-ui-style='mac-codex'] .ref-editor-empty {
+	background: var(--surface-code-bg);
+}
+
+:root[data-ui-style='mac-codex'] .ref-monaco-fill .monaco-editor,
+:root[data-ui-style='mac-codex'] .ref-monaco-fill .overflow-guard {
+	border-radius: inherit;
+}
+
+:root[data-ui-style='mac-codex'] .ref-editor-md-preview-scroll {
+	height: 100%;
+	overflow: auto;
+	padding: 18px 24px 26px;
+	box-sizing: border-box;
+	background:
+		radial-gradient(circle at top center, var(--surface-tint-soft) 0%, transparent 32%),
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-code-bg) 94%, transparent) 0%, color-mix(in srgb, var(--surface-panel-bg-strong) 90%, transparent) 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-editor-md-mode-toggle {
+	display: inline-flex;
+	align-items: stretch;
+	padding: 2px;
+	border: 1px solid var(--surface-glass-stroke);
+	border-radius: 10px;
+	overflow: hidden;
+	margin-right: 6px;
+	flex-shrink: 0;
+	background: var(--surface-control-bg);
+	box-shadow: var(--shadow-pressed);
+}
+
+:root[data-ui-style='mac-codex'] .ref-editor-md-mode-btn {
+	padding: 5px 10px;
+	border-radius: 8px;
+	color: var(--color-text-tertiary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-editor-md-mode-btn:hover {
+	color: var(--color-text-secondary);
+	background: var(--surface-control-bg-hover);
+}
+
+:root[data-ui-style='mac-codex'] .ref-editor-md-mode-btn.is-active {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-tint-strong) 82%, var(--surface-control-bg-hover)) 0%, color-mix(in srgb, var(--surface-panel-bg-soft) 92%, transparent) 100%);
+	color: var(--color-text-primary);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 26%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-editor-save {
+	padding: 6px 12px;
+	border-radius: 10px;
+	border: 1px solid var(--surface-glass-stroke);
+	background: var(--surface-control-bg);
+	color: var(--color-text-primary);
+	box-shadow: var(--shadow-pressed);
+}
+
+:root[data-ui-style='mac-codex'] .ref-editor-save:hover:not(:disabled) {
+	background: var(--surface-control-bg-hover);
+	border-color: color-mix(in srgb, var(--surface-glass-stroke) 72%, var(--color-accent) 28%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-lsp-pill {
+	background: color-mix(in srgb, var(--surface-control-bg) 82%, transparent);
+	border-color: color-mix(in srgb, var(--surface-glass-stroke) 80%, transparent);
+	color: var(--color-text-tertiary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-editor-empty-state {
+	background: var(--app-backdrop);
+}
+
+:root[data-ui-style='mac-codex'] .ref-editor-empty-card {
+	border: 1px solid var(--surface-glass-stroke);
+	background: var(--surface-card-bg);
+	box-shadow: var(--shadow-floating), var(--void-shadow-soft);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left-scroll {
+	padding: 12px 10px 12px;
+	background: linear-gradient(180deg, rgba(19, 25, 31, 0.44) 0%, rgba(19, 25, 31, 0) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-project-block--editor {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	min-height: 100%;
+	margin: 0;
+	border: 1px solid rgba(82, 95, 105, 0.16);
+	border-radius: 22px;
+	background: linear-gradient(180deg, rgba(20, 27, 34, 0.98) 0%, rgba(14, 19, 25, 0.99) 100%);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.026), 0 14px 30px rgba(0, 0, 0, 0.14);
+	overflow: hidden;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-project-block--editor::before {
+	content: '';
+	position: absolute;
+	inset: 0 0 auto 0;
+	height: 88px;
+	background:
+		linear-gradient(180deg, rgba(55, 214, 212, 0.11) 0%, rgba(55, 214, 212, 0) 100%),
+		radial-gradient(circle at 88% 0%, rgba(255, 157, 89, 0.12) 0%, transparent 44%);
+	pointer-events: none;
+	opacity: 0.75;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-head--editor {
+	margin: 10px 10px 0;
+	padding: 12px 14px;
+	border: 1px solid rgba(92, 106, 117, 0.16);
+	border-radius: 16px;
+	background: linear-gradient(180deg, rgba(24, 31, 39, 0.9) 0%, rgba(18, 23, 29, 0.82) 100%);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.026);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-body--workspace {
+	flex: 1;
+	margin: 10px 10px 12px;
+	padding: 8px 0 12px;
+	border: 1px solid rgba(84, 97, 108, 0.16);
+	border-radius: 16px;
+	background: linear-gradient(180deg, rgba(15, 20, 26, 0.9) 0%, rgba(12, 16, 21, 0.96) 100%);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.018);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-preview-tree {
+	background: linear-gradient(180deg, rgba(20, 27, 34, 0.98) 0%, rgba(14, 19, 25, 0.99) 100%);
+	border-color: rgba(82, 95, 105, 0.16);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.022), 0 14px 30px rgba(0, 0, 0, 0.14);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-preview-tree .ref-explorer-head {
+	padding: 12px 14px;
+	border-bottom-color: rgba(84, 97, 108, 0.16);
+	background: linear-gradient(180deg, rgba(24, 31, 39, 0.88) 0%, rgba(18, 23, 29, 0.8) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-preview-tree .ref-explorer-body {
+	padding: 8px 0 12px;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-preview-editor {
+	background:
+		radial-gradient(circle at top center, rgba(55, 214, 212, 0.045) 0%, transparent 28%),
+		linear-gradient(180deg, rgba(18, 24, 30, 0.98) 0%, rgba(12, 17, 22, 0.99) 100%);
+	border-color: rgba(82, 95, 105, 0.16);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.022), 0 16px 34px rgba(0, 0, 0, 0.16);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-toolbar,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-toolbar--workspace {
+	background: linear-gradient(180deg, rgba(24, 31, 39, 0.9) 0%, rgba(18, 23, 29, 0.8) 100%);
+	border-bottom-color: rgba(84, 97, 108, 0.16);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-canvas,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-pane,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-pane.ref-editor-pane--md-preview,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-monaco-fill,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-empty {
+	background: linear-gradient(180deg, rgba(16, 22, 27, 0.98) 0%, rgba(13, 18, 23, 0.99) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-md-preview-scroll {
+	background:
+		radial-gradient(circle at top center, rgba(55, 214, 212, 0.05) 0%, transparent 28%),
+		linear-gradient(180deg, rgba(19, 25, 31, 0.96) 0%, rgba(14, 19, 24, 0.99) 100%);
+}
+
+/* Phase 7: lighter integrated explorer + stronger mode-chip feedback */
+:root[data-ui-style='mac-codex'] .ref-left-scroll {
+	padding: 6px 8px 10px;
+	background: linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-soft) 26%, transparent) 0%, transparent 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-project-block--editor {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	min-height: 100%;
+	margin: 0;
+	border: none;
+	border-radius: calc(var(--radius-panel) - 4px);
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-strong) 32%, transparent) 0%, transparent 100%);
+	box-shadow: none;
+	overflow: hidden;
+}
+
+:root[data-ui-style='mac-codex'] .ref-project-block--editor::before {
+	content: '';
+	position: absolute;
+	inset: 0 0 auto 0;
+	height: 78px;
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-tint-soft) 94%, transparent) 0%, transparent 100%),
+		radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--void-accent-warm, #ff9d59) 12%, transparent) 0%, transparent 42%);
+	pointer-events: none;
+	opacity: 0.78;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-kicker {
+	padding: 12px 14px 2px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-head--editor {
+	margin: 0;
+	padding: 10px 14px 8px;
+	border: none;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-body--workspace {
+	flex: 1;
+	margin: 0;
+	padding: 4px 0 12px;
+	border: none;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-tree-wrap {
+	position: relative;
+	padding: 0 0 2px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-tree-wrap::before {
+	content: '';
+	position: absolute;
+	left: 19px;
+	top: 8px;
+	bottom: 8px;
+	width: 1px;
+	background: linear-gradient(180deg, color-mix(in srgb, var(--surface-glass-stroke) 78%, transparent) 0%, transparent 100%);
+	opacity: 0.58;
+	pointer-events: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-row {
+	position: relative;
+	gap: 4px;
+	min-height: 30px;
+	margin: 1px 8px;
+	padding-right: 10px;
+	border: 1px solid transparent;
+	border-radius: 12px;
+	background: transparent;
+	box-shadow: none;
+	transform: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-row:hover {
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 68%, var(--surface-tint-soft));
+	border-color: color-mix(in srgb, var(--surface-glass-stroke) 72%, var(--color-accent) 18%);
+	box-shadow: none;
+	transform: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-row.is-selected {
+	background:
+		linear-gradient(90deg, color-mix(in srgb, var(--surface-tint-strong) 78%, transparent) 0%, color-mix(in srgb, var(--surface-panel-bg-soft) 92%, transparent) 100%);
+	border-color: color-mix(in srgb, var(--color-accent) 20%, var(--surface-glass-stroke));
+	box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-row.is-selected::before {
+	content: '';
+	position: absolute;
+	left: 4px;
+	top: 6px;
+	bottom: 6px;
+	width: 2px;
+	border-radius: 999px;
+	background: linear-gradient(180deg, color-mix(in srgb, var(--color-accent) 94%, white 6%) 0%, color-mix(in srgb, var(--color-accent) 78%, transparent) 100%);
+	opacity: 0.92;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-chevron-btn {
+	width: 20px;
+	height: 20px;
+	border-radius: 7px;
+	color: var(--color-text-tertiary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-chevron-btn:hover,
+:root[data-ui-style='mac-codex'] .ref-explorer-row:hover .ref-explorer-chevron-btn {
+	background: color-mix(in srgb, var(--surface-tint-soft) 84%, transparent);
+	color: var(--color-text-primary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-icon-cell {
+	width: 22px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-icon-cell svg {
+	width: 16px;
+	height: 16px;
+	filter: none;
+	opacity: 0.96;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-label {
+	padding: 5px 2px;
+	color: var(--color-text-tertiary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-row--dir .ref-explorer-label {
+	color: var(--color-text-secondary);
+	font-weight: 600;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-row.is-selected .ref-explorer-label {
+	color: var(--color-text-primary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-right-icon-tabs {
+	padding: 5px;
+	margin: 10px 12px 6px;
+	background: color-mix(in srgb, var(--surface-search-bg) 90%, transparent);
+	border-color: color-mix(in srgb, var(--surface-glass-stroke) 88%, transparent);
+	box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 5%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-right-panel-stage {
+	padding: 4px 10px 12px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-right-panel-view {
+	border: 1px solid color-mix(in srgb, var(--surface-glass-stroke) 86%, transparent);
+	border-radius: calc(var(--radius-panel) - 4px);
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-strong) 76%, transparent) 0%, color-mix(in srgb, var(--surface-panel-bg) 68%, transparent) 100%);
+	box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 4%, transparent);
+	overflow: hidden;
+}
+
+:root[data-ui-style='mac-codex'] .ref-preview-split {
+	min-height: 100%;
+	padding: 0;
+	gap: 0;
+	background: transparent;
+}
+
+:root[data-ui-style='mac-codex'] .ref-preview-tree,
+:root[data-ui-style='mac-codex'] .ref-preview-editor {
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+	background: transparent;
+}
+
+:root[data-ui-style='mac-codex'] .ref-preview-tree {
+	width: min(35%, 312px);
+	min-width: 210px;
+	max-width: 340px;
+	border-right: 1px solid color-mix(in srgb, var(--surface-glass-stroke) 88%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-preview-tree .ref-explorer-head,
+:root[data-ui-style='mac-codex'] .ref-preview-tree .ref-explorer-body,
+:root[data-ui-style='mac-codex'] .ref-editor-toolbar,
+:root[data-ui-style='mac-codex'] .ref-editor-toolbar--workspace,
+:root[data-ui-style='mac-codex'] .ref-right-toolbar {
+	background: transparent;
+	box-shadow: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-preview-tree .ref-explorer-head,
+:root[data-ui-style='mac-codex'] .ref-editor-toolbar,
+:root[data-ui-style='mac-codex'] .ref-editor-toolbar--workspace,
+:root[data-ui-style='mac-codex'] .ref-right-toolbar {
+	padding: 12px 14px 10px;
+	border-bottom-color: color-mix(in srgb, var(--surface-glass-stroke) 86%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-preview-tree .ref-explorer-body {
+	padding: 4px 0 12px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip {
+	transition:
+		background 0.22s var(--void-ease-out-expo),
+		border-color 0.22s var(--void-ease-out-expo),
+		box-shadow 0.22s var(--void-ease-out-expo),
+		color 0.22s var(--void-ease-out-expo),
+		transform 0.18s var(--void-ease-spring);
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip--agent,
+:root[data-ui-style='mac-codex'] .ref-mode-chip--plan,
+:root[data-ui-style='mac-codex'] .ref-mode-chip--debug,
+:root[data-ui-style='mac-codex'] .ref-mode-chip--ask {
+	border-width: 1px;
+	border-style: solid;
+	color: var(--mode-chip-text);
+	background: var(--mode-chip-bg);
+	border-color: var(--mode-chip-border);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 10px 22px var(--mode-chip-glow);
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip--agent {
+	--mode-chip-bg: linear-gradient(180deg, rgba(47, 184, 185, 0.14) 0%, rgba(19, 130, 135, 0.08) 100%);
+	--mode-chip-border: rgba(41, 170, 173, 0.24);
+	--mode-chip-text: #0f777c;
+	--mode-chip-glow: rgba(41, 170, 173, 0.12);
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip--plan {
+	--mode-chip-bg: linear-gradient(180deg, rgba(255, 177, 104, 0.16) 0%, rgba(222, 129, 59, 0.08) 100%);
+	--mode-chip-border: rgba(233, 146, 77, 0.24);
+	--mode-chip-text: #92501c;
+	--mode-chip-glow: rgba(233, 146, 77, 0.12);
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip--debug {
+	--mode-chip-bg: linear-gradient(180deg, rgba(255, 121, 110, 0.16) 0%, rgba(202, 83, 85, 0.08) 100%);
+	--mode-chip-border: rgba(224, 95, 98, 0.24);
+	--mode-chip-text: #9e3441;
+	--mode-chip-glow: rgba(224, 95, 98, 0.12);
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip--ask {
+	--mode-chip-bg: linear-gradient(180deg, rgba(110, 160, 255, 0.16) 0%, rgba(75, 111, 214, 0.08) 100%);
+	--mode-chip-border: rgba(95, 138, 236, 0.22);
+	--mode-chip-text: #325aac;
+	--mode-chip-glow: rgba(95, 138, 236, 0.12);
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip--opens-menu:hover {
+	background: var(--mode-chip-bg);
+	border-color: color-mix(in srgb, var(--mode-chip-border) 88%, white 12%);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.11), 0 12px 26px var(--mode-chip-glow);
+	transform: translateY(-1px);
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip.is-active {
+	border-color: color-mix(in srgb, var(--mode-chip-border) 82%, white 12%);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.1),
+		0 0 0 1px color-mix(in srgb, var(--mode-chip-border) 42%, transparent),
+		0 12px 24px var(--mode-chip-glow);
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip.is-active .ref-mode-chip-label,
+:root[data-ui-style='mac-codex'] .ref-mode-chip.is-active .ref-mode-chip-ico,
+:root[data-ui-style='mac-codex'] .ref-mode-chip.is-active .ref-mode-chip-menu-chev {
+	color: inherit;
+	opacity: 0.96;
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip--opens-menu[aria-expanded='true'] {
+	border-color: color-mix(in srgb, var(--mode-chip-border) 82%, white 18%);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.12),
+		0 0 0 1px color-mix(in srgb, var(--mode-chip-border) 58%, transparent),
+		0 14px 28px var(--mode-chip-glow);
+	transform: translateY(-1px);
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip-menu-chev {
+	opacity: 0.62;
+	transition: transform 0.18s var(--void-ease-out-expo), opacity 0.18s var(--void-ease-out-expo);
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip--opens-menu:hover .ref-mode-chip-menu-chev,
+:root[data-ui-style='mac-codex'] .ref-mode-chip--opens-menu[aria-expanded='true'] .ref-mode-chip-menu-chev {
+	opacity: 0.88;
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip--opens-menu[aria-expanded='true'] .ref-mode-chip-menu-chev {
+	transform: rotate(180deg);
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip-clear {
+	border: 1px solid color-mix(in srgb, var(--surface-glass-stroke) 88%, transparent);
+	background: color-mix(in srgb, var(--surface-control-bg) 84%, transparent);
+	color: var(--color-text-tertiary);
+	box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 6%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-mode-chip-clear:hover {
+	background: color-mix(in srgb, var(--surface-control-bg-hover) 84%, transparent);
+	border-color: color-mix(in srgb, var(--surface-glass-stroke) 68%, var(--color-accent) 22%);
+	color: var(--color-text-primary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-plus-menu-row--mode.is-active {
+	border-color: color-mix(in srgb, var(--mode-chip-border) 82%, transparent);
+	background: var(--mode-chip-bg);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.08),
+		0 10px 22px var(--mode-chip-glow);
+}
+
+:root[data-ui-style='mac-codex'] .ref-plus-menu-row--mode.is-active .ref-plus-menu-label,
+:root[data-ui-style='mac-codex'] .ref-plus-menu-row--mode.is-active .ref-plus-menu-ico,
+:root[data-ui-style='mac-codex'] .ref-plus-menu-row--mode.is-active .ref-plus-menu-check {
+	color: var(--mode-chip-text);
+}
+
+:root[data-ui-style='mac-codex'] .ref-plus-menu-row--agent {
+	--mode-chip-bg: linear-gradient(180deg, rgba(47, 184, 185, 0.14) 0%, rgba(19, 130, 135, 0.08) 100%);
+	--mode-chip-border: rgba(41, 170, 173, 0.24);
+	--mode-chip-text: #0f777c;
+	--mode-chip-glow: rgba(41, 170, 173, 0.12);
+}
+
+:root[data-ui-style='mac-codex'] .ref-plus-menu-row--plan {
+	--mode-chip-bg: linear-gradient(180deg, rgba(255, 177, 104, 0.16) 0%, rgba(222, 129, 59, 0.08) 100%);
+	--mode-chip-border: rgba(233, 146, 77, 0.24);
+	--mode-chip-text: #92501c;
+	--mode-chip-glow: rgba(233, 146, 77, 0.12);
+}
+
+:root[data-ui-style='mac-codex'] .ref-plus-menu-row--debug {
+	--mode-chip-bg: linear-gradient(180deg, rgba(255, 121, 110, 0.16) 0%, rgba(202, 83, 85, 0.08) 100%);
+	--mode-chip-border: rgba(224, 95, 98, 0.24);
+	--mode-chip-text: #9e3441;
+	--mode-chip-glow: rgba(224, 95, 98, 0.12);
+}
+
+:root[data-ui-style='mac-codex'] .ref-plus-menu-row--ask {
+	--mode-chip-bg: linear-gradient(180deg, rgba(110, 160, 255, 0.16) 0%, rgba(75, 111, 214, 0.08) 100%);
+	--mode-chip-border: rgba(95, 138, 236, 0.22);
+	--mode-chip-text: #325aac;
+	--mode-chip-glow: rgba(95, 138, 236, 0.12);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left-scroll {
+	background: linear-gradient(180deg, rgba(19, 25, 31, 0.34) 0%, rgba(19, 25, 31, 0) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-project-block--editor {
+	background: linear-gradient(180deg, rgba(21, 29, 36, 0.56) 0%, rgba(21, 29, 36, 0.08) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-project-block--editor::before {
+	background:
+		linear-gradient(180deg, rgba(55, 214, 212, 0.08) 0%, rgba(55, 214, 212, 0) 100%),
+		radial-gradient(circle at 88% 0%, rgba(255, 157, 89, 0.08) 0%, transparent 40%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-kicker {
+	color: #738390;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-tree-wrap::before {
+	background: linear-gradient(180deg, rgba(205, 217, 224, 0.08) 0%, rgba(205, 217, 224, 0) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-row:hover {
+	background: linear-gradient(180deg, rgba(31, 40, 48, 0.84) 0%, rgba(27, 35, 42, 0.78) 100%);
+	border-color: rgba(55, 214, 212, 0.1);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-row.is-selected {
+	background: linear-gradient(90deg, rgba(55, 214, 212, 0.11) 0%, rgba(28, 39, 47, 0.92) 84%);
+	border-color: rgba(55, 214, 212, 0.14);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-chevron-btn {
+	color: #75828d;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-label {
+	color: #a5b2bc;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-row--dir .ref-explorer-label {
+	color: #d1dae0;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-right-icon-tabs {
+	background: rgba(24, 31, 38, 0.92);
+	border-color: rgba(205, 217, 224, 0.07);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-right-panel-view {
+	background: linear-gradient(180deg, rgba(19, 26, 32, 0.94) 0%, rgba(16, 22, 28, 0.9) 100%);
+	border-color: rgba(205, 217, 224, 0.07);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-preview-tree {
+	border-right-color: rgba(205, 217, 224, 0.07);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-preview-tree .ref-explorer-head,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-toolbar,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-editor-toolbar--workspace,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-right-toolbar {
+	border-bottom-color: rgba(205, 217, 224, 0.07);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-mode-chip--agent {
+	--mode-chip-bg: linear-gradient(180deg, rgba(55, 214, 212, 0.16) 0%, rgba(19, 114, 120, 0.16) 100%);
+	--mode-chip-border: rgba(55, 214, 212, 0.24);
+	--mode-chip-text: #ddfbfb;
+	--mode-chip-glow: rgba(12, 95, 101, 0.2);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-mode-chip--plan {
+	--mode-chip-bg: linear-gradient(180deg, rgba(255, 173, 97, 0.16) 0%, rgba(150, 89, 42, 0.18) 100%);
+	--mode-chip-border: rgba(255, 163, 84, 0.22);
+	--mode-chip-text: #ffe0c3;
+	--mode-chip-glow: rgba(128, 76, 32, 0.2);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-mode-chip--debug {
+	--mode-chip-bg: linear-gradient(180deg, rgba(255, 122, 114, 0.16) 0%, rgba(130, 52, 61, 0.18) 100%);
+	--mode-chip-border: rgba(255, 126, 118, 0.22);
+	--mode-chip-text: #ffd4d1;
+	--mode-chip-glow: rgba(118, 40, 48, 0.22);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-mode-chip--ask {
+	--mode-chip-bg: linear-gradient(180deg, rgba(118, 165, 255, 0.16) 0%, rgba(62, 84, 165, 0.18) 100%);
+	--mode-chip-border: rgba(120, 164, 255, 0.22);
+	--mode-chip-text: #dae6ff;
+	--mode-chip-glow: rgba(49, 74, 152, 0.22);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plus-menu-row--agent {
+	--mode-chip-bg: linear-gradient(180deg, rgba(55, 214, 212, 0.16) 0%, rgba(19, 114, 120, 0.16) 100%);
+	--mode-chip-border: rgba(55, 214, 212, 0.24);
+	--mode-chip-text: #ddfbfb;
+	--mode-chip-glow: rgba(12, 95, 101, 0.2);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plus-menu-row--plan {
+	--mode-chip-bg: linear-gradient(180deg, rgba(255, 173, 97, 0.16) 0%, rgba(150, 89, 42, 0.18) 100%);
+	--mode-chip-border: rgba(255, 163, 84, 0.22);
+	--mode-chip-text: #ffe0c3;
+	--mode-chip-glow: rgba(128, 76, 32, 0.2);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plus-menu-row--debug {
+	--mode-chip-bg: linear-gradient(180deg, rgba(255, 122, 114, 0.16) 0%, rgba(130, 52, 61, 0.18) 100%);
+	--mode-chip-border: rgba(255, 126, 118, 0.22);
+	--mode-chip-text: #ffd4d1;
+	--mode-chip-glow: rgba(118, 40, 48, 0.22);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-plus-menu-row--ask {
+	--mode-chip-bg: linear-gradient(180deg, rgba(118, 165, 255, 0.16) 0%, rgba(62, 84, 165, 0.18) 100%);
+	--mode-chip-border: rgba(120, 164, 255, 0.22);
+	--mode-chip-text: #dae6ff;
+	--mode-chip-glow: rgba(49, 74, 152, 0.22);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-mode-chip-clear {
+	background: rgba(32, 41, 50, 0.78);
+	border-color: rgba(205, 217, 224, 0.08);
+	color: #8f9ca8;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-mode-chip-clear:hover {
+	background: rgba(39, 49, 59, 0.92);
+	border-color: rgba(55, 214, 212, 0.14);
+	color: #eff7fa;
+}
+
+/* Phase 8: embed explorer into outer window + tighten dark titlebar harmony */
+:root[data-ui-style='mac-codex'] .ref-left {
+	position: relative;
+	background: transparent;
+	border-right-color: color-mix(in srgb, var(--surface-glass-stroke) 72%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-strong) 52%, transparent) 0%, transparent 100%),
+		linear-gradient(90deg, color-mix(in srgb, var(--surface-panel-bg-soft) 36%, transparent) 0%, transparent 78%);
+	pointer-events: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left-scroll {
+	position: relative;
+	padding: 10px 12px 12px 10px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left-scroll::after {
+	content: '';
+	position: absolute;
+	inset: 8px 10px 10px 8px;
+	border-radius: 20px;
+	border: 1px solid color-mix(in srgb, var(--surface-glass-stroke) 62%, transparent);
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-strong) 34%, transparent) 0%, color-mix(in srgb, var(--surface-panel-bg-soft) 12%, transparent) 100%);
+	box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 4%, transparent);
+	pointer-events: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-project-block--editor {
+	position: relative;
+	z-index: 1;
+	border-radius: 18px;
+	background:
+		radial-gradient(circle at top left, color-mix(in srgb, var(--surface-tint-soft) 88%, transparent) 0%, transparent 32%),
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-strong) 22%, transparent) 0%, color-mix(in srgb, var(--surface-panel-bg-soft) 10%, transparent) 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-project-block--editor::before {
+	opacity: 0.58;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-kicker,
+:root[data-ui-style='mac-codex'] .ref-explorer-head--editor,
+:root[data-ui-style='mac-codex'] .ref-explorer-body--workspace,
+:root[data-ui-style='mac-codex'] .ref-left-footer--editor {
+	position: relative;
+	z-index: 1;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-head--editor {
+	padding: 12px 16px 8px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-body--workspace {
+	padding: 4px 0 10px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left-footer--editor {
+	padding: 8px 14px 12px;
+	background: transparent;
+	border-top: none;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left {
+	border-right-color: rgba(205, 217, 224, 0.04);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left::before {
+	background:
+		radial-gradient(circle at 0% 0%, rgba(55, 214, 212, 0.045) 0%, transparent 28%),
+		linear-gradient(180deg, rgba(20, 27, 34, 0.2) 0%, rgba(17, 23, 28, 0) 100%),
+		linear-gradient(90deg, rgba(20, 27, 34, 0.54) 0%, rgba(20, 27, 34, 0.18) 74%, rgba(20, 27, 34, 0) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left-scroll {
+	background: transparent;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left-scroll::after {
+	border-color: rgba(205, 217, 224, 0.05);
+	background:
+		radial-gradient(circle at top left, rgba(55, 214, 212, 0.04) 0%, transparent 26%),
+		linear-gradient(180deg, rgba(21, 29, 36, 0.44) 0%, rgba(18, 25, 31, 0.16) 100%);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.028);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-project-block--editor {
+	background:
+		radial-gradient(circle at top left, rgba(55, 214, 212, 0.05) 0%, transparent 30%),
+		linear-gradient(180deg, rgba(17, 23, 28, 0.18) 0%, rgba(17, 23, 28, 0.04) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-project-block--editor::before {
+	opacity: 0.44;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-head--editor {
+	padding: 12px 16px 8px;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-body--workspace {
+	padding: 4px 0 10px;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left-footer--editor {
+	background: transparent;
+	border-top: none;
+}
+
+/* Phase 9: make explorer feel like window structure, not a standalone column */
+:root[data-ui-style='mac-codex'] .ref-project-block--editor {
+	display: grid;
+	grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-kicker {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 14px 18px 4px;
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: color-mix(in srgb, var(--color-text-tertiary) 92%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-kicker::before {
+	content: '';
+	width: 14px;
+	height: 1px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--surface-glass-stroke) 82%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-head--editor {
+	position: relative;
+	padding: 12px 18px 10px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-head--editor::after {
+	content: '';
+	position: absolute;
+	left: 18px;
+	right: 18px;
+	bottom: 0;
+	height: 1px;
+	background: linear-gradient(90deg, color-mix(in srgb, var(--surface-glass-stroke) 88%, transparent) 0%, transparent 100%);
+	opacity: 0.9;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-title-stack {
+	gap: 3px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-title {
+	font-size: 13px;
+	font-weight: 650;
+	letter-spacing: -0.012em;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-subtitle {
+	font-size: 10.5px;
+	letter-spacing: 0.01em;
+	color: color-mix(in srgb, var(--color-text-tertiary) 88%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-head--editor .ref-icon-tile {
+	width: 28px;
+	height: 28px;
+	border-radius: 10px;
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 36%, transparent);
+	border: 1px solid color-mix(in srgb, var(--surface-glass-stroke) 58%, transparent);
+	box-shadow: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-head--editor .ref-icon-tile:hover {
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 52%, var(--surface-tint-soft));
+	border-color: color-mix(in srgb, var(--surface-glass-stroke) 64%, var(--color-accent) 16%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-explorer-body--workspace {
+	padding: 8px 0 10px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left-footer--editor {
+	position: relative;
+	display: grid;
+	gap: 8px;
+	padding: 10px 16px 14px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left-footer--editor::before {
+	content: '';
+	position: absolute;
+	left: 18px;
+	right: 18px;
+	top: 0;
+	height: 1px;
+	background: linear-gradient(90deg, color-mix(in srgb, var(--surface-glass-stroke) 82%, transparent) 0%, transparent 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left-footer--editor .ref-open-workspace {
+	border-radius: 14px;
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-soft) 82%, var(--surface-tint-soft)) 0%, color-mix(in srgb, var(--surface-panel-bg-strong) 84%, transparent) 100%);
+	border-color: color-mix(in srgb, var(--surface-glass-stroke) 82%, var(--color-accent) 12%);
+	color: var(--color-text-secondary);
+	font-weight: 600;
+	box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 6%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left-footer--editor .ref-open-workspace:hover {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-soft) 88%, var(--surface-tint-strong)) 0%, color-mix(in srgb, var(--surface-panel-bg-strong) 88%, transparent) 100%);
+	border-color: color-mix(in srgb, var(--surface-glass-stroke) 74%, var(--color-accent) 22%);
+	color: var(--color-text-primary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-ipc-hint {
+	display: inline-flex;
+	align-items: center;
+	width: fit-content;
+	max-width: 100%;
+	padding: 4px 9px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 58%, transparent);
+	border: 1px solid color-mix(in srgb, var(--surface-glass-stroke) 58%, transparent);
+	font-size: 10px;
+	letter-spacing: 0.01em;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-kicker {
+	color: #74838f;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-kicker::before,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-head--editor::after,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left-footer--editor::before {
+	background: linear-gradient(90deg, rgba(205, 217, 224, 0.08) 0%, rgba(205, 217, 224, 0) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-title {
+	color: #e3eaee;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-subtitle {
+	color: #7d8d99;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-head--editor .ref-icon-tile {
+	background: rgba(26, 33, 40, 0.7);
+	border-color: rgba(205, 217, 224, 0.06);
+	color: #8ea1ac;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-explorer-head--editor .ref-icon-tile:hover {
+	background: rgba(32, 41, 49, 0.94);
+	border-color: rgba(55, 214, 212, 0.1);
+	color: #ebf7f8;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left-footer--editor .ref-open-workspace {
+	background:
+		linear-gradient(180deg, rgba(26, 34, 41, 0.92) 0%, rgba(20, 27, 34, 0.94) 100%);
+	border-color: rgba(205, 217, 224, 0.07);
+	color: #d4dde2;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left-footer--editor .ref-open-workspace:hover {
+	background:
+		linear-gradient(180deg, rgba(31, 40, 48, 0.96) 0%, rgba(22, 30, 36, 0.98) 100%);
+	border-color: rgba(55, 214, 212, 0.1);
+	color: #f1f8fa;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-ipc-hint {
+	background: rgba(26, 34, 41, 0.78);
+	border-color: rgba(205, 217, 224, 0.06);
+	color: #758692;
+}
+
+/* Phase 10: shift editor into one shared workspace shell so explorer feels embedded, not carded */
+:root[data-ui-style='mac-codex'] .ref-body--editor-shell {
+	position: relative;
+	padding: clamp(10px, 1vw, 14px);
+	border-radius: calc(var(--radius-window) - 6px);
+	border: 1px solid color-mix(in srgb, var(--surface-glass-stroke) 94%, transparent);
+	background:
+		radial-gradient(circle at top center, color-mix(in srgb, var(--surface-tint-soft) 94%, transparent) 0%, transparent 34%),
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-strong) 97%, transparent) 0%, color-mix(in srgb, var(--surface-panel-bg) 94%, transparent) 100%);
+	box-shadow:
+		0 28px 72px rgba(0, 0, 0, 0.18),
+		inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 5%, transparent);
+	overflow: hidden;
+	backdrop-filter: saturate(var(--glass-saturate)) blur(calc(var(--glass-blur) + 2px));
+	-webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(calc(var(--glass-blur) + 2px));
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--editor-shell::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	background:
+		radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--surface-tint-soft) 74%, transparent) 0%, transparent 24%),
+		radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--surface-tint-strong) 42%, transparent) 0%, transparent 22%);
+	opacity: 0.68;
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--editor-shell > * {
+	position: relative;
+	z-index: 1;
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--editor-shell > .ref-left--editor-embedded,
+:root[data-ui-style='mac-codex'] .ref-body--editor-shell > .ref-center--editor-shell,
+:root[data-ui-style='mac-codex'] .ref-body--editor-shell > .ref-right--editor-shell {
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--editor-shell > .ref-left--editor-embedded {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-soft) 34%, transparent) 0%, transparent 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--editor-shell > .ref-center--editor-shell {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg) 16%, transparent) 0%, transparent 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--editor-shell > .ref-right--editor-shell {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-soft) 26%, transparent) 0%, transparent 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--editor-shell .ref-resize-handle {
+	background: transparent;
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--editor-shell .ref-resize-handle::after {
+	width: 1px;
+	background:
+		linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--surface-glass-stroke) 90%, transparent) 10%, color-mix(in srgb, var(--surface-glass-stroke) 90%, transparent) 90%, transparent 100%);
+	opacity: 0.94;
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--editor-shell .ref-resize-handle:hover,
+:root[data-ui-style='mac-codex'] .ref-body--editor-shell .ref-resize-handle:active {
+	background: color-mix(in srgb, var(--surface-tint-soft) 34%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--editor-shell .ref-resize-handle:hover::after,
+:root[data-ui-style='mac-codex'] .ref-body--editor-shell .ref-resize-handle:active::after {
+	background:
+		linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--color-accent) 52%, transparent) 12%, color-mix(in srgb, var(--color-accent) 52%, transparent) 88%, transparent 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left-editor-nest {
+	display: grid;
+	grid-template-rows: minmax(0, 1fr) auto;
+	flex: 1;
+	min-height: 0;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-left-scroll {
+	padding: 0;
+	background: transparent;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-left-scroll::after {
+	display: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-project-block--editor {
+	margin: 0;
+	min-height: 100%;
+	border-radius: 0;
+	background: transparent;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-project-block--editor::before {
+	height: 96px;
+	opacity: 0.34;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-explorer-kicker {
+	padding: 18px 18px 6px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-explorer-head--editor {
+	padding: 10px 18px 12px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-explorer-head--editor::after {
+	left: 18px;
+	right: 18px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-explorer-body--workspace {
+	padding: 10px 0 14px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-explorer-tree-wrap {
+	padding-bottom: 6px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-explorer-tree-wrap::before {
+	left: 24px;
+	top: 12px;
+	bottom: 12px;
+	opacity: 0.42;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-explorer-row {
+	margin: 1px 10px;
+	border-radius: 11px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-left-footer--editor {
+	padding: 12px 18px 18px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-left-footer--editor::before {
+	left: 18px;
+	right: 18px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-left-footer--editor .ref-open-workspace {
+	width: 100%;
+	margin-bottom: 0;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-ipc-hint {
+	margin-top: 8px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-center--editor-shell .ref-editor-split-top > .ref-tab-bar,
+:root[data-ui-style='mac-codex'] .ref-center--editor-shell .ref-editor-bc-toolbar-row,
+:root[data-ui-style='mac-codex'] .ref-center--editor-shell .ref-editor-panel-terminal-tabs,
+:root[data-ui-style='mac-codex'] .ref-right--editor-shell .ref-editor-chat-tab-rail {
+	background: transparent;
+}
+
+:root[data-ui-style='mac-codex'] .ref-center--editor-shell .ref-editor-split-top > .ref-tab-bar,
+:root[data-ui-style='mac-codex'] .ref-center--editor-shell .ref-editor-bc-toolbar-row,
+:root[data-ui-style='mac-codex'] .ref-center--editor-shell .ref-editor-panel-terminal-tabs,
+:root[data-ui-style='mac-codex'] .ref-center--editor-shell .ref-editor-toolbar,
+:root[data-ui-style='mac-codex'] .ref-center--editor-shell .ref-editor-toolbar--workspace,
+:root[data-ui-style='mac-codex'] .ref-right--editor-shell .ref-editor-chat-tab-rail {
+	border-bottom-color: color-mix(in srgb, var(--surface-glass-stroke) 86%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-center--editor-shell .ref-editor-split-bottom {
+	border-top: 1px solid color-mix(in srgb, var(--surface-glass-stroke) 86%, transparent);
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-soft) 26%, transparent) 0%, color-mix(in srgb, var(--surface-panel-bg) 20%, transparent) 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-center--editor-shell .ref-editor-canvas,
+:root[data-ui-style='mac-codex'] .ref-center--editor-shell .ref-editor-pane,
+:root[data-ui-style='mac-codex'] .ref-center--editor-shell .ref-monaco-fill,
+:root[data-ui-style='mac-codex'] .ref-center--editor-shell .ref-editor-empty {
+	background: transparent;
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--editor-shell .ref-editor-chat-tab-rail {
+	padding: 12px 16px 10px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--editor-shell .ref-editor-chat-tab-shell {
+	border-radius: 12px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--editor-shell .ref-editor-chat-tab-shell.is-active {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-soft) 86%, transparent) 0%, color-mix(in srgb, var(--surface-panel-bg) 66%, transparent) 100%);
+	border-color: color-mix(in srgb, var(--surface-glass-stroke) 72%, var(--color-accent) 16%);
+	box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 5%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--editor-shell .ref-editor-chat-icon-btn {
+	border-radius: 10px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--editor-shell .ref-editor-chat-icon-btn.is-active {
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 84%, var(--surface-tint-soft));
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--surface-glass-stroke) 70%, var(--color-accent) 18%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-body--editor-shell {
+	border-color: rgba(205, 217, 224, 0.06);
+	background:
+		radial-gradient(circle at top center, rgba(55, 214, 212, 0.05) 0%, transparent 32%),
+		radial-gradient(circle at 92% 0%, rgba(255, 157, 89, 0.05) 0%, transparent 20%),
+		linear-gradient(180deg, rgba(15, 20, 25, 0.98) 0%, rgba(11, 15, 19, 0.98) 100%);
+	box-shadow:
+		0 30px 84px rgba(0, 0, 0, 0.42),
+		inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-body--editor-shell::before {
+	background:
+		radial-gradient(circle at 0% 0%, rgba(55, 214, 212, 0.05) 0%, transparent 24%),
+		radial-gradient(circle at 100% 0%, rgba(255, 157, 89, 0.045) 0%, transparent 20%);
+	opacity: 0.84;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-body--editor-shell > .ref-left--editor-embedded {
+	background: linear-gradient(180deg, rgba(19, 25, 31, 0.34) 0%, rgba(19, 25, 31, 0) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-body--editor-shell > .ref-center--editor-shell {
+	background: linear-gradient(180deg, rgba(17, 23, 28, 0.18) 0%, rgba(17, 23, 28, 0) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-body--editor-shell > .ref-right--editor-shell {
+	background: linear-gradient(180deg, rgba(18, 24, 30, 0.28) 0%, rgba(18, 24, 30, 0) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-body--editor-shell .ref-resize-handle::after {
+	background:
+		linear-gradient(180deg, transparent 0%, rgba(205, 217, 224, 0.08) 10%, rgba(205, 217, 224, 0.08) 90%, transparent 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left--editor-embedded .ref-project-block--editor::before {
+	background:
+		radial-gradient(circle at top left, rgba(55, 214, 212, 0.055) 0%, transparent 34%),
+		linear-gradient(180deg, rgba(55, 214, 212, 0.05) 0%, rgba(55, 214, 212, 0) 100%);
+	opacity: 0.26;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left--editor-embedded .ref-explorer-tree-wrap::before {
+	background: linear-gradient(180deg, rgba(205, 217, 224, 0.07) 0%, rgba(205, 217, 224, 0) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-center--editor-shell .ref-editor-split-bottom {
+	border-top-color: rgba(205, 217, 224, 0.07);
+	background:
+		linear-gradient(180deg, rgba(17, 23, 28, 0.22) 0%, rgba(12, 17, 22, 0.42) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-center--editor-shell .ref-editor-split-top > .ref-tab-bar,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-center--editor-shell .ref-editor-bc-toolbar-row,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-center--editor-shell .ref-editor-panel-terminal-tabs,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-center--editor-shell .ref-editor-toolbar,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-center--editor-shell .ref-editor-toolbar--workspace,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-right--editor-shell .ref-editor-chat-tab-rail {
+	border-bottom-color: rgba(205, 217, 224, 0.07);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-right--editor-shell .ref-editor-chat-tab-shell.is-active {
+	background:
+		linear-gradient(180deg, rgba(30, 39, 47, 0.84) 0%, rgba(24, 31, 38, 0.76) 100%);
+	border-color: rgba(55, 214, 212, 0.12);
+}
+
+/* Phase 11: refit Agent mode to a Codex-like desktop structure without copying color */
+:root[data-ui-style='mac-codex'] .ref-shell--agent-layout .ref-menubar {
+	border-bottom: none;
+	box-shadow: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-shell--agent-layout .ref-body {
+	padding-top: 0;
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--agent-shell {
+	position: relative;
+	overflow: hidden;
+	border-radius: calc(var(--radius-window) - 2px);
+	border: 1px solid color-mix(in srgb, var(--surface-glass-stroke) 90%, transparent);
+	border-top: none;
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+	background:
+		radial-gradient(circle at top center, color-mix(in srgb, var(--surface-tint-soft) 78%, transparent) 0%, transparent 34%),
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-strong) 96%, transparent) 0%, color-mix(in srgb, var(--surface-panel-bg) 90%, transparent) 100%);
+	box-shadow:
+		0 28px 84px rgba(0, 0, 0, 0.24),
+		inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 5%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--agent-shell::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background:
+		radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--surface-tint-soft) 84%, transparent) 0%, transparent 24%),
+		radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--void-accent-warm, #ff9d59) 10%, transparent) 0%, transparent 18%);
+	pointer-events: none;
+	opacity: 0.9;
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--agent-shell > * {
+	position: relative;
+	z-index: 1;
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--agent-shell > .ref-left--agent-layout,
+:root[data-ui-style='mac-codex'] .ref-body--agent-shell > .ref-center--agent-layout,
+:root[data-ui-style='mac-codex'] .ref-body--agent-shell > .ref-right--agent-layout {
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+	background: transparent;
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--agent-shell > .ref-left--agent-layout {
+	background: linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-soft) 22%, transparent) 0%, transparent 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--agent-shell > .ref-center--agent-layout {
+	background: linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-strong) 8%, transparent) 0%, transparent 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--agent-shell > .ref-right--agent-layout {
+	background: linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-soft) 18%, transparent) 0%, transparent 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--agent-shell .ref-resize-handle {
+	background: transparent;
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--agent-shell .ref-resize-handle::after {
+	background:
+		linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--surface-glass-stroke) 90%, transparent) 14%, color-mix(in srgb, var(--surface-glass-stroke) 90%, transparent) 86%, transparent 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--agent-shell .ref-resize-handle:hover,
+:root[data-ui-style='mac-codex'] .ref-body--agent-shell .ref-resize-handle:active {
+	background: color-mix(in srgb, var(--surface-tint-soft) 24%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-body--agent-shell .ref-resize-handle.is-collapsed {
+	opacity: 0;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-left-scroll {
+	padding: 0;
+	background: transparent;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-left-scroll::after {
+	display: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-project-block--agent {
+	margin: 0;
+	min-height: 100%;
+	padding: 16px 18px 10px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-nav-list {
+	gap: 4px;
+	margin-bottom: 22px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-nav-item {
+	padding: 10px 12px;
+	border-radius: 12px;
+	color: var(--color-text-secondary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-nav-item:hover {
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 74%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-sidebar-section {
+	min-height: 0;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-sidebar-section-head {
+	padding: 2px 4px 12px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-sidebar-section-title {
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: color-mix(in srgb, var(--color-text-tertiary) 94%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-sidebar-section-actions {
+	gap: 4px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-sidebar-icon-btn {
+	border-radius: 9px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-sidebar-icon-btn:hover {
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 80%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-workspace-stack {
+	gap: 10px;
+	padding-right: 4px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-workspace-group {
+	gap: 4px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-workspace-row {
+	padding: 8px 10px;
+	border-radius: 12px;
+	color: var(--color-text-secondary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-workspace-row:hover {
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 70%, transparent);
+	color: var(--color-text-primary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-workspace-row.is-active {
+	color: var(--color-text-primary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-workspace-empty,
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-empty-workspace {
+	color: var(--color-text-tertiary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-empty-workspace {
+	margin-top: 4px;
+	border-radius: 14px;
+	border: 1px dashed color-mix(in srgb, var(--surface-glass-stroke) 84%, transparent);
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 30%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-empty-workspace:hover {
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 46%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-thread-tree {
+	padding: 2px 0 2px 18px;
+	gap: 12px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-thread-tree::before {
+	left: 9px;
+	top: 10px;
+	bottom: 12px;
+	background: linear-gradient(180deg, color-mix(in srgb, var(--surface-glass-stroke) 86%, transparent) 0%, transparent 100%);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-thread-cluster {
+	padding-left: 14px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-thread-cluster::before {
+	top: 16px;
+	width: 12px;
+	background: color-mix(in srgb, var(--surface-glass-stroke) 84%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-thread-section-label--nested {
+	padding: 0 0 6px 10px;
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-thread-list--nested {
+	gap: 6px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-thread-list--nested .ref-thread-item {
+	border-radius: 14px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-thread-list--nested .ref-thread-item:hover {
+	transform: translateX(0);
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 78%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-thread-list--nested .ref-thread-item.is-active {
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-tint-strong) 68%, transparent) 0%, color-mix(in srgb, var(--surface-panel-bg-soft) 82%, transparent) 100%);
+	box-shadow:
+		inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 20%, transparent),
+		0 10px 24px rgba(0, 0, 0, 0.14);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-thread-list--nested .ref-thread-row {
+	padding: 10px 4px 10px 12px;
+	border-radius: 14px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-thread-list--nested .ref-thread-row-actions {
+	padding-right: 8px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-left-footer--agent {
+	position: relative;
+	padding: 8px 18px 18px;
+	background: transparent;
+	border-top: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-left-footer--agent::before {
+	display: none;
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-settings-link {
+	border-radius: 12px;
+	color: var(--color-text-secondary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-left--agent-layout .ref-agent-settings-link:hover {
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 76%, transparent);
+	color: var(--color-text-primary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-center--agent-layout {
+	padding: 20px 30px 22px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-center--agent-layout .ref-context-block--agent {
+	margin-bottom: 10px;
+	padding: 0 4px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-center--agent-layout .ref-agent-context-pill {
+	background: color-mix(in srgb, var(--surface-panel-bg-soft) 84%, transparent);
+	border-color: color-mix(in srgb, var(--surface-glass-stroke) 82%, transparent);
+	box-shadow:
+		inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 5%, transparent),
+		0 12px 24px rgba(0, 0, 0, 0.12);
+}
+
+:root[data-ui-style='mac-codex'] .ref-center--agent-layout .ref-context-sub--agent {
+	padding-left: 6px;
+	margin-top: 10px;
+	font-size: 13px;
+	color: var(--color-text-secondary);
+}
+
+:root[data-ui-style='mac-codex'] .ref-center--agent-layout .ref-command-stack,
+:root[data-ui-style='mac-codex'] .ref-center--agent-layout .ref-context-block--agent,
+:root[data-ui-style='mac-codex'] .ref-center--agent-layout .ref-msg-slot,
+:root[data-ui-style='mac-codex'] .ref-center--agent-layout .ref-msg-sticky-user-wrap {
+	max-width: min(100%, 760px);
+	width: min(100%, 760px);
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--agent-layout .ref-agent-review-head {
+	padding: 16px 18px 10px 16px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--agent-layout.is-open {
+	animation: ref-agent-git-rail-in 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes ref-agent-git-rail-in {
+	from {
+		opacity: 0;
+		transform: translateX(22px) scale(0.985);
+		filter: blur(8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(0) scale(1);
+		filter: blur(0);
+	}
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--agent-layout .ref-agent-review-title-stack {
+	gap: 5px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--agent-layout .ref-agent-review-kicker {
+	color: color-mix(in srgb, var(--color-text-tertiary) 92%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--agent-layout .ref-agent-review-head .ref-right-icon-tabs {
+	margin: 0;
+	padding: 4px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--agent-layout .ref-right-panel-stage {
+	padding: 0 14px 14px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--agent-layout .ref-right-panel-view--agent {
+	border: 1px solid color-mix(in srgb, var(--surface-glass-stroke) 88%, transparent);
+	border-radius: 20px;
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-bg-strong) 80%, transparent) 0%, color-mix(in srgb, var(--surface-panel-bg) 68%, transparent) 100%);
+	box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 4%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--agent-layout .ref-right-toolbar,
+:root[data-ui-style='mac-codex'] .ref-right--agent-layout .ref-search-head {
+	padding-left: 16px;
+	padding-right: 16px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--agent-layout .ref-right-toolbar {
+	padding-top: 14px;
+	padding-bottom: 10px;
+	background: transparent;
+	box-shadow: none;
+	border-bottom-color: color-mix(in srgb, var(--surface-glass-stroke) 84%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--agent-layout .ref-git-summary--rich {
+	padding: 0 16px 12px;
+}
+
+:root[data-ui-style='mac-codex'] .ref-right--agent-layout .ref-search-stack {
+	padding: 16px;
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-body--agent-shell {
+	border-color: rgba(205, 217, 224, 0.06);
+	background:
+		radial-gradient(circle at top center, rgba(55, 214, 212, 0.045) 0%, transparent 34%),
+		radial-gradient(circle at 96% 0%, rgba(255, 157, 89, 0.04) 0%, transparent 18%),
+		linear-gradient(180deg, rgba(15, 20, 25, 0.98) 0%, rgba(11, 15, 19, 0.98) 100%);
+	box-shadow:
+		0 30px 84px rgba(0, 0, 0, 0.42),
+		inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-body--agent-shell::before {
+	background:
+		radial-gradient(circle at 0% 0%, rgba(55, 214, 212, 0.05) 0%, transparent 24%),
+		radial-gradient(circle at 100% 0%, rgba(255, 157, 89, 0.045) 0%, transparent 18%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-body--agent-shell > .ref-left--agent-layout {
+	background: linear-gradient(180deg, rgba(19, 25, 31, 0.34) 0%, rgba(19, 25, 31, 0) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-body--agent-shell > .ref-center--agent-layout {
+	background: linear-gradient(180deg, rgba(17, 23, 28, 0.16) 0%, rgba(17, 23, 28, 0) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-body--agent-shell > .ref-right--agent-layout {
+	background: linear-gradient(180deg, rgba(18, 24, 30, 0.26) 0%, rgba(18, 24, 30, 0) 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-body--agent-shell .ref-resize-handle::after {
+	background:
+		linear-gradient(180deg, transparent 0%, rgba(205, 217, 224, 0.08) 12%, rgba(205, 217, 224, 0.08) 88%, transparent 100%);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-left--agent-layout .ref-agent-empty-workspace,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-center--agent-layout .ref-agent-context-pill,
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-right--agent-layout .ref-right-panel-view--agent {
+	border-color: rgba(205, 217, 224, 0.07);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-center--agent-layout .ref-agent-context-pill {
+	background: linear-gradient(180deg, rgba(29, 37, 45, 0.86) 0%, rgba(22, 28, 35, 0.78) 100%);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.028),
+		0 12px 28px rgba(0, 0, 0, 0.22);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-right--agent-layout .ref-right-panel-view--agent {
+	background:
+		linear-gradient(180deg, rgba(20, 27, 34, 0.9) 0%, rgba(15, 20, 25, 0.84) 100%);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.026);
+}
+
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] .ref-right--editor-shell .ref-editor-chat-icon-btn.is-active {
+	background: rgba(28, 36, 43, 0.9);
+	box-shadow: inset 0 0 0 1px rgba(55, 214, 212, 0.12);
+}

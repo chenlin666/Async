@@ -1,0 +1,48 @@
+:root[data-ui-style='mac-codex'][data-color-scheme='light'] {
+	color-scheme: light;
+	--void-bg-0: #eef2f8;
+	--void-bg-1: #fbfcfe;
+	--void-bg-2: #f3f6fb;
+	--void-bg-3: #e5ebf5;
+	--void-fg-0: #18202e;
+	--void-fg-1: #354055;
+	--void-fg-2: #5f6d86;
+	--void-fg-3: #8b98ad;
+	--void-accent-glow: rgba(78, 146, 255, 0.2);
+	--void-accent-soft: rgba(78, 146, 255, 0.1);
+	--void-thought-meta: #7e8aa0;
+	--void-thought-body: #314059;
+	--void-thought-detail: #5b6980;
+	--void-border: rgba(93, 109, 136, 0.18);
+	--void-border-soft: rgba(79, 93, 122, 0.09);
+	--void-ring: #418eff;
+	--void-git-untracked: #1d8f5f;
+	--void-git-modified: #b86b08;
+	--void-git-added: #228b60;
+	--void-git-deleted: #d65055;
+	--void-git-ignored: #9aa6ba;
+	--void-scrollbar-track: rgba(229, 235, 245, 0.78);
+	--void-scrollbar-thumb: rgba(123, 137, 160, 0.38);
+	--void-scrollbar-thumb-hover: rgba(98, 113, 139, 0.5);
+	--void-scrollbar-thumb-active: rgba(82, 96, 120, 0.58);
+	--ref-menubar-chrome-bg: rgba(246, 248, 252, 0.78);
+	--void-sidebar-fill: rgba(251, 252, 254, 0.7);
+	--void-shadow-card: 0 24px 72px rgba(31, 45, 72, 0.14);
+	--void-shadow-soft: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+
+	--surface-panel-bg: rgba(251, 252, 254, 0.8);
+	--surface-panel-bg-strong: rgba(246, 248, 252, 0.9);
+	--surface-panel-bg-soft: rgba(243, 246, 251, 0.82);
+	--surface-glass-stroke: rgba(102, 120, 149, 0.14);
+	--surface-tint-soft: rgba(65, 142, 255, 0.08);
+	--surface-tint-strong: rgba(65, 142, 255, 0.13);
+	--surface-search-bg: rgba(243, 246, 251, 0.78);
+	--shadow-floating: 0 24px 70px rgba(31, 45, 72, 0.14);
+	--shadow-toolbar: 0 1px 0 rgba(255, 255, 255, 0.82), 0 16px 42px rgba(31, 45, 72, 0.12);
+	--shadow-pressed: inset 0 1px 0 rgba(255, 255, 255, 0.84);
+	--app-backdrop:
+		radial-gradient(circle at top center, rgba(65, 142, 255, 0.12) 0%, transparent 34%),
+		radial-gradient(circle at 10% 18%, rgba(56, 189, 248, 0.09) 0%, transparent 22%),
+		radial-gradient(circle at 86% 12%, rgba(167, 139, 250, 0.1) 0%, transparent 24%),
+		linear-gradient(180deg, #f6f8fc 0%, #eef2f8 48%, #ebeff7 100%);
+}

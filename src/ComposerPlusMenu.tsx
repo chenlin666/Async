@@ -231,7 +231,7 @@ export function ComposerPlusMenu({ open, onClose, anchorRef, mode, onSelectMode 
 						type="button"
 						role="menuitemradio"
 						aria-checked={mode === m.id}
-						className={`ref-plus-menu-row ${mode === m.id ? 'is-active' : ''}`}
+						className={`ref-plus-menu-row ref-plus-menu-row--mode ref-plus-menu-row--${m.id} ${mode === m.id ? 'is-active' : ''}`}
 						onClick={() => {
 							onSelectMode(m.id);
 							onClose();

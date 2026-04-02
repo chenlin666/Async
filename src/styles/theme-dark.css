@@ -1,0 +1,63 @@
+:root[data-ui-style='mac-codex']:not([data-color-scheme]),
+:root[data-ui-style='mac-codex'][data-color-scheme='dark'] {
+	color-scheme: dark;
+	--void-bg-0: #11171c;
+	--void-bg-1: #151c22;
+	--void-bg-2: #1e2831;
+	--void-bg-3: #293743;
+	--void-fg-0: #f3f7f8;
+	--void-fg-1: #ced7dc;
+	--void-fg-2: #94a3af;
+	--void-fg-3: #657582;
+	--void-accent-cool: #37d6d4;
+	--void-accent-cool-soft: rgba(55, 214, 212, 0.16);
+	--void-accent-warm: #ff9d59;
+	--void-accent-warm-soft: rgba(255, 157, 89, 0.16);
+	--void-accent-glow: rgba(55, 214, 212, 0.18);
+	--void-accent-soft: rgba(55, 214, 212, 0.1);
+	--void-thought-meta: #8a98a4;
+	--void-thought-body: #d2dbe0;
+	--void-thought-detail: #a5b2bd;
+	--void-border: rgba(205, 217, 224, 0.14);
+	--void-border-soft: rgba(205, 217, 224, 0.07);
+	--void-ring: #37d6d4;
+	--void-git-untracked: #59d9b8;
+	--void-git-modified: #ffb05b;
+	--void-git-added: #70d89d;
+	--void-git-deleted: #ff7b86;
+	--void-git-ignored: #7d8a95;
+	--void-scrollbar-track: rgba(17, 23, 28, 0.66);
+	--void-scrollbar-thumb: rgba(108, 122, 134, 0.42);
+	--void-scrollbar-thumb-hover: rgba(132, 148, 162, 0.56);
+	--void-scrollbar-thumb-active: rgba(164, 178, 191, 0.64);
+	--ref-menubar-chrome-bg: #161d24;
+	--void-sidebar-fill: rgba(19, 25, 31, 0.98);
+	--void-shadow-card: 0 20px 44px rgba(0, 0, 0, 0.26);
+	--void-shadow-soft: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+
+	--surface-panel-bg: rgba(21, 28, 34, 0.96);
+	--surface-panel-bg-strong: rgba(17, 23, 28, 0.985);
+	--surface-panel-bg-soft: rgba(31, 41, 50, 0.98);
+	--surface-glass-stroke: rgba(205, 217, 224, 0.08);
+	--surface-tint-soft: rgba(55, 214, 212, 0.05);
+	--surface-tint-strong: rgba(55, 214, 212, 0.09);
+	--surface-search-bg: rgba(27, 35, 43, 0.97);
+	--shadow-floating: 0 18px 38px rgba(0, 0, 0, 0.2);
+	--shadow-toolbar: 0 1px 0 rgba(255, 255, 255, 0.028);
+	--shadow-pressed: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+	--shadow-popover: 0 22px 52px rgba(0, 0, 0, 0.32);
+	--shadow-accent: 0 14px 28px rgba(28, 172, 175, 0.22);
+	--surface-popover-bg: rgba(20, 27, 33, 0.985);
+	--surface-control-bg: rgba(32, 41, 50, 0.98);
+	--surface-control-bg-hover: rgba(40, 51, 61, 0.98);
+	--surface-control-bg-active: rgba(47, 60, 71, 0.98);
+	--surface-code-bg: rgba(14, 19, 24, 0.96);
+	--surface-bubble-user: linear-gradient(180deg, rgba(38, 49, 58, 0.98) 0%, rgba(28, 38, 46, 0.98) 100%);
+	--surface-card-bg: linear-gradient(180deg, rgba(21, 28, 35, 0.98) 0%, rgba(16, 22, 28, 0.98) 100%);
+	--surface-card-bg-soft: linear-gradient(180deg, rgba(28, 37, 46, 0.98) 0%, rgba(20, 27, 33, 0.98) 100%);
+	--app-backdrop:
+		radial-gradient(circle at top center, rgba(55, 214, 212, 0.08) 0%, transparent 28%),
+		radial-gradient(circle at 84% 12%, rgba(255, 157, 89, 0.08) 0%, transparent 22%),
+		radial-gradient(circle at 14% 18%, rgba(58, 122, 147, 0.06) 0%, transparent 24%),
+		linear-gradient(180deg, #171f26 0%, #11171c 100%);
+}

@@ -4,6 +4,7 @@
  * 全局最多并发 2 次 Monaco colorize，避免多卡片同时抢主线程 / worker。
  */
 import * as monaco from 'monaco-editor';
+import { getVoidMonacoThemeFromDom } from './colorMode';
 
 const COLORIZE_MAX_PARALLEL = 2;
 let colorizeActive = 0;
@@ -106,7 +107,7 @@ async function colorizeJoinedLinesDirect(
 	if (lines.length === 0) return [];
 	const text = lines.join('\n');
 	try {
-		monaco.editor.setTheme('void-dark');
+		monaco.editor.setTheme(getVoidMonacoThemeFromDom());
 		const html = await monaco.editor.colorize(text, languageId, { tabSize: 2 });
 		let out = splitMonacoColorizedHtml(html);
 		if (out.length < lines.length) {
@@ -134,7 +135,7 @@ async function colorizeSearchMatchLinesDirect(
 ): Promise<(string | null)[] | null> {
 	if (lines.length === 0) return [];
 	try {
-		monaco.editor.setTheme('void-dark');
+		monaco.editor.setTheme(getVoidMonacoThemeFromDom());
 		type Bucket = { indices: number[]; texts: string[] };
 		const buckets = new Map<string, Bucket>();
 		for (let i = 0; i < lines.length; i++) {

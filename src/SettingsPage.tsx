@@ -12,6 +12,8 @@ import { SettingsAgentPanel } from './SettingsAgentPanel';
 import { EditorSettingsPanel, type EditorSettings } from './EditorSettingsPanel';
 import { SettingsIndexingPanel } from './SettingsIndexingPanel';
 import { SettingsMcpPanel } from './SettingsMcpPanel';
+import { SettingsAppearancePanel } from './SettingsAppearancePanel';
+import type { AppColorMode, ThemeTransitionOrigin } from './colorMode';
 import type { McpServerConfig, McpServerStatus } from './mcpTypes';
 import type { IndexingSettingsState } from './indexingSettingsTypes';
 import { useI18n, type AppLocale } from './i18n';
@@ -40,7 +42,7 @@ type NavItem = { id: SettingsNavId; label: string; badge?: number; soon?: boolea
 function navItemsForT(t: (key: string) => string): NavItem[] {
 	return [
 		{ id: 'general', label: t('settings.nav.general') },
-		{ id: 'appearance', label: t('settings.nav.appearance'), soon: true },
+		{ id: 'appearance', label: t('settings.nav.appearance') },
 		{ id: 'editor', label: t('settings.nav.editor') },
 		{ id: 'plan', label: t('settings.nav.plan'), soon: true },
 		{ id: 'agents', label: t('settings.nav.agents'), soon: true },
@@ -131,10 +133,21 @@ function IconPlug({ className }: { className?: string }) {
 	);
 }
 
+function IconSunNav({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+			<circle cx="12" cy="12" r="4" />
+			<path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" strokeLinecap="round" />
+		</svg>
+	);
+}
+
 function navIcon(id: SettingsNavId) {
 	switch (id) {
 		case 'general':
 			return <IconGear />;
+		case 'appearance':
+			return <IconSunNav />;
 		case 'models':
 			return <IconChip />;
 		case 'tools':
@@ -178,6 +191,8 @@ type Props = {
 	onRestartMcpServer: (id: string) => void;
 	shell: NonNullable<Window['asyncShell']> | null;
 	workspaceOpen: boolean;
+	colorMode: AppColorMode;
+	onChangeColorMode: (next: AppColorMode, origin?: ThemeTransitionOrigin) => void | Promise<void>;
 };
 
 export function SettingsPage({
@@ -209,6 +224,8 @@ export function SettingsPage({
 	onRestartMcpServer,
 	shell,
 	workspaceOpen,
+	colorMode,
+	onChangeColorMode,
 }: Props) {
 	const { t, locale, setLocale } = useI18n();
 	const navItems = useMemo(() => navItemsForT(t), [t]);
@@ -391,6 +408,7 @@ export function SettingsPage({
 										item.soon &&
 										item.id !== 'models' &&
 										item.id !== 'general' &&
+										item.id !== 'appearance' &&
 										item.id !== 'editor' &&
 										item.id !== 'indexing' &&
 										item.id !== 'tools'
@@ -432,12 +450,14 @@ export function SettingsPage({
 						<div className="ref-settings-main-head">
 							<h1 className="ref-settings-title">
 								{nav === 'general' ? t('settings.title.general') : null}
+								{nav === 'appearance' ? t('settings.title.appearance') : null}
 								{nav === 'models' ? t('settings.title.models') : null}
 								{nav === 'rules' ? t('settings.title.rules') : null}
 								{nav === 'editor' ? t('settings.title.editor') : null}
 								{nav === 'tools' ? t('settings.title.tools') : null}
 								{nav === 'indexing' ? t('settings.title.indexing') : null}
 								{nav !== 'general' &&
+								nav !== 'appearance' &&
 								nav !== 'models' &&
 								nav !== 'rules' &&
 								nav !== 'editor' &&
@@ -475,6 +495,10 @@ export function SettingsPage({
 									/>
 								</div>
 							</div>
+						) : null}
+
+						{nav === 'appearance' ? (
+							<SettingsAppearancePanel value={colorMode} onChange={onChangeColorMode} />
 						) : null}
 
 						{nav === 'models' ? (
@@ -704,6 +728,7 @@ export function SettingsPage({
 						) : null}
 
 						{nav !== 'general' &&
+						nav !== 'appearance' &&
 						nav !== 'models' &&
 						nav !== 'rules' &&
 						nav !== 'editor' &&

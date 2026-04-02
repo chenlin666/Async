@@ -1,6 +1,7 @@
 import { BrowserWindow, app, screen } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { THEME_CHROME } from './themeChrome.js';
 
 const isDev = !app.isPackaged;
 const devUrl = process.env.VITE_DEV_SERVER_URL ?? 'http://127.0.0.1:5173';
@@ -26,17 +27,14 @@ export function createAppWindow(opts?: { blank?: boolean }): void {
 	const x = wa.x + Math.round((wa.width - w) / 2);
 	const y = wa.y + Math.round((wa.height - h) / 2);
 
+	const darkChrome = THEME_CHROME.dark;
 	const titleBarOptions =
 		process.platform === 'darwin'
 			? { titleBarStyle: 'hiddenInset' as const }
 			: process.platform === 'win32'
 				? {
 						titleBarStyle: 'hidden' as const,
-						titleBarOverlay: {
-							color: '#16161c',
-							symbolColor: '#d4d4d8',
-							height: 44,
-						},
+						titleBarOverlay: { ...darkChrome.titleBarOverlay },
 					}
 				: {};
 
@@ -47,7 +45,7 @@ export function createAppWindow(opts?: { blank?: boolean }): void {
 		height: h,
 		minWidth: 800,
 		minHeight: 600,
-		backgroundColor: '#0c0c0e',
+		backgroundColor: darkChrome.backgroundColor,
 		...(appIconPath ? { icon: appIconPath } : {}),
 		...titleBarOptions,
 		webPreferences: {
