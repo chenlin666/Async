@@ -2502,10 +2502,12 @@
 }
 
 :root[data-ui-style='mac-codex'] .ref-left-editor-nest {
-	display: grid;
-	grid-template-rows: minmax(0, 1fr) auto;
+	display: flex;
+	flex-direction: row;
+	align-items: stretch;
 	flex: 1;
 	min-height: 0;
+	min-width: 0;
 }
 
 :root[data-ui-style='mac-codex'] .ref-left--editor-embedded .ref-left-scroll {

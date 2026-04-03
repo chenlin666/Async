@@ -17,7 +17,7 @@ import Editor from '@monaco-editor/react';
 import { PtyTerminalView } from './PtyTerminalView';
 import { DrawerPtyTerminal } from './DrawerPtyTerminal';
 import { ChatMarkdown } from './ChatMarkdown';
-import { languageFromFilePath } from './fileTypeIcons';
+import { FileTypeIcon, languageFromFilePath } from './fileTypeIcons';
 import { OpenWorkspaceModal } from './OpenWorkspaceModal';
 import { WorkspaceExplorer, type GitPathStatusMap, type WorkspaceExplorerActions } from './WorkspaceExplorer';
 import {
@@ -148,6 +148,7 @@ function tagProjectOrigin<T extends { origin?: 'user' | 'project' }>(items: T[] 
 
 type LayoutMode = 'agent' | 'editor';
 type AgentRightSidebarView = 'git' | 'plan';
+type EditorLeftSidebarView = 'explorer' | 'search' | 'git';
 import { useI18n, translateChatError, normalizeLocale, type AppLocale, type TFunction } from './i18n';
 import './monacoSetup';
 
@@ -462,6 +463,14 @@ function changeBadgeLabel(gitLabel: string, t: TFunction): string {
 	}
 }
 
+function changeBadgeVariant(gitLabel: string | undefined): string {
+	const k = String(gitLabel ?? '').toLowerCase();
+	if (k === 'u' || k === 'm' || k === 'a' || k === 'd' || k === 'i' || k === 'r' || k === 'c' || k === 't') {
+		return k;
+	}
+	return 'misc';
+}
+
 function GitDiffLines({ diff, t }: { diff: string; t: TFunction }) {
 	const lines = diff.split('\n');
 	return (
@@ -589,6 +598,47 @@ function IconDoc({ className }: { className?: string }) {
 		<svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
 			<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
 			<polyline points="14 2 14 8 20 8" />
+		</svg>
+	);
+}
+
+function IconNewFile({ className }: { className?: string }) {
+	return (
+		<svg
+			className={className}
+			width="15"
+			height="15"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="1.9"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			aria-hidden
+		>
+			<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+			<path d="M14 3v5h5" />
+			<path d="M12 12v6M9 15h6" />
+		</svg>
+	);
+}
+
+function IconNewFolder({ className }: { className?: string }) {
+	return (
+		<svg
+			className={className}
+			width="15"
+			height="15"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="1.9"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			aria-hidden
+		>
+			<path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5Z" />
+			<path d="M12 11.5v5M9.5 14h5" />
 		</svg>
 	);
 }
@@ -1013,6 +1063,23 @@ export default function App() {
 	const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
 	const [mcpStatuses, setMcpStatuses] = useState<McpServerStatus[]>([]);
 	const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => readStoredShellLayoutMode());
+	const [editorLeftSidebarView, setEditorLeftSidebarView] = useState<EditorLeftSidebarView>('explorer');
+	const [editorExplorerCollapsed, setEditorExplorerCollapsed] = useState(false);
+	const [editorSidebarSearchQuery, setEditorSidebarSearchQuery] = useState('');
+	const editorSidebarSearchInputRef = useRef<HTMLInputElement>(null);
+	const editorExplorerScrollRef = useRef<HTMLDivElement>(null);
+	const scrollEditorExplorerToTop = useCallback(() => {
+		const node = editorExplorerScrollRef.current;
+		if (!node) {
+			return;
+		}
+		node.scrollTop = 0;
+	}, []);
+	const toggleEditorExplorerCollapsed = useCallback(() => {
+		scrollEditorExplorerToTop();
+		setEditorExplorerCollapsed((prev) => !prev);
+		window.requestAnimationFrame(scrollEditorExplorerToTop);
+	}, [scrollEditorExplorerToTop]);
 	const [homeRecents, setHomeRecents] = useState<string[]>([]);
 	/** 文件菜单「打开最近的文件夹」：与是否打开工作区无关 */
 	const [folderRecents, setFolderRecents] = useState<string[]>([]);
@@ -1341,6 +1408,44 @@ export default function App() {
 	const hasConversation = messages.length > 0 || !!streaming;
 	const changeCount = gitChangedPaths.length;
 	const gitPathsKey = useMemo(() => gitChangedPaths.join('\n'), [gitChangedPaths]);
+	const normalizedEditorSidebarSearchQuery = editorSidebarSearchQuery.trim().toLowerCase();
+	const editorSidebarSearchResults = useMemo(() => {
+		if (!normalizedEditorSidebarSearchQuery) {
+			return [];
+		}
+		return workspaceFileList
+			.map((rel) => {
+				const normalizedRel = rel.replace(/\\/g, '/');
+				const fileName = normalizedRel.split('/').pop() ?? normalizedRel;
+				const lowerRel = normalizedRel.toLowerCase();
+				const lowerFileName = fileName.toLowerCase();
+				const fileIndex = lowerFileName.indexOf(normalizedEditorSidebarSearchQuery);
+				const pathIndex = lowerRel.indexOf(normalizedEditorSidebarSearchQuery);
+				if (fileIndex < 0 && pathIndex < 0) {
+					return null;
+				}
+				return {
+					rel: normalizedRel,
+					fileName,
+					dir:
+						normalizedRel.includes('/') ? normalizedRel.slice(0, normalizedRel.lastIndexOf('/')) : '',
+					fileIndex,
+					pathIndex,
+				};
+			})
+			.filter((item): item is NonNullable<typeof item> => item !== null)
+			.sort((a, b) => {
+				const aScore = (a.fileIndex === -1 ? 10_000 : a.fileIndex) + (a.pathIndex === -1 ? 1_000 : a.pathIndex);
+				const bScore = (b.fileIndex === -1 ? 10_000 : b.fileIndex) + (b.pathIndex === -1 ? 1_000 : b.pathIndex);
+				if (aScore !== bScore) {
+					return aScore - bScore;
+				}
+				return a.rel.localeCompare(b.rel);
+			})
+			.slice(0, 120);
+	}, [workspaceFileList, normalizedEditorSidebarSearchQuery]);
+	const editorSidebarSelectedRel = filePath.trim().replace(/\\/g, '/');
+	const editorSidebarWorkspaceLabel = workspace ? workspaceBasename.toLocaleUpperCase() : t('app.noWorkspace');
 
 	const hasSelectedModel = useMemo(() => defaultModel.trim().length > 0, [defaultModel]);
 
@@ -1978,13 +2083,33 @@ export default function App() {
 		}
 		return shell.subscribeThemeMode((payload) => {
 			const next = (payload as { colorMode?: unknown } | null)?.colorMode;
-			if (next === 'light' || next === 'dark' || next === 'system') {
+			if ((next === 'light' || next === 'dark' || next === 'system') && next !== colorMode) {
 				setTransitionOrigin(undefined);
 				setColorMode(next);
 				writeStoredColorMode(next);
 			}
 		});
-	}, [shell, setTransitionOrigin]);
+	}, [shell, setTransitionOrigin, colorMode]);
+
+	useEffect(() => {
+		if (layoutMode !== 'editor' || editorLeftSidebarView !== 'search') {
+			return;
+		}
+		const id = window.setTimeout(() => editorSidebarSearchInputRef.current?.focus(), 0);
+		return () => window.clearTimeout(id);
+	}, [layoutMode, editorLeftSidebarView]);
+
+	useEffect(() => {
+		setEditorExplorerCollapsed(false);
+	}, [workspace]);
+
+	useEffect(() => {
+		if (layoutMode !== 'editor' || editorLeftSidebarView !== 'explorer' || editorExplorerCollapsed) {
+			return;
+		}
+		const id = window.requestAnimationFrame(scrollEditorExplorerToTop);
+		return () => window.cancelAnimationFrame(id);
+	}, [layoutMode, editorLeftSidebarView, editorExplorerCollapsed, workspace, scrollEditorExplorerToTop]);
 
 	useEffect(() => {
 		if (!shell || !currentId) {
@@ -7416,47 +7541,293 @@ export default function App() {
 					) : (
 					/* ═══ Editor 布局：左侧 = 文件树 ═══ */
 					<div className="ref-left-editor-nest">
-						<div className="ref-left-scroll">
-							<div className="ref-project-block ref-project-block--editor">
-								<div className="ref-explorer-kicker">{t('app.tabExplorer')}</div>
-								<div className="ref-explorer-head ref-explorer-head--editor">
-									<div className="ref-explorer-title-stack">
-										<span className="ref-explorer-title">{workspaceBasename}</span>
-										<span className="ref-explorer-subtitle" title={workspace ?? undefined}>
-											{workspace ?? t('app.noWorkspace')}
-										</span>
+						<div className="ref-editor-activity-bar" aria-label={t('app.rightSidebarViews')}>
+							<button
+								type="button"
+								className={`ref-editor-sidebar-tab ${editorLeftSidebarView === 'explorer' ? 'is-active' : ''}`}
+								title={t('app.tabExplorer')}
+								aria-label={t('app.tabExplorer')}
+								aria-pressed={editorLeftSidebarView === 'explorer'}
+								onClick={() => setEditorLeftSidebarView('explorer')}
+							>
+								<IconExplorer />
+							</button>
+							<button
+								type="button"
+								className={`ref-editor-sidebar-tab ${editorLeftSidebarView === 'search' ? 'is-active' : ''}`}
+								title={t('app.tabSearch')}
+								aria-label={t('app.tabSearch')}
+								aria-pressed={editorLeftSidebarView === 'search'}
+								onClick={() => setEditorLeftSidebarView('search')}
+							>
+								<IconSearch />
+							</button>
+							<button
+								type="button"
+								className={`ref-editor-sidebar-tab ${editorLeftSidebarView === 'git' ? 'is-active' : ''}`}
+								title={t('app.tabGit')}
+								aria-label={t('app.tabGit')}
+								aria-pressed={editorLeftSidebarView === 'git'}
+								onClick={() => setEditorLeftSidebarView('git')}
+							>
+								<IconGitSCM />
+							</button>
+							<div className="ref-editor-activity-spacer" aria-hidden />
+							<button
+								type="button"
+								className="ref-editor-sidebar-tab"
+								title={t('settings.nav.plugins')}
+								aria-label={t('settings.nav.plugins')}
+								onClick={() => openSettingsPage('plugins')}
+							>
+								<IconPlugin />
+							</button>
+							<button
+								type="button"
+								className="ref-editor-sidebar-tab"
+								title={t('app.openWorkspace')}
+								aria-label={t('app.openWorkspace')}
+								onClick={() => setWorkspacePickerOpen(true)}
+							>
+								<IconChevron />
+							</button>
+						</div>
+						<div className="ref-editor-sidebar-pane">
+						<>
+							{editorLeftSidebarView === 'explorer' ? (
+								<>
+									<div className="ref-editor-sidebar-section-bar">
+										<button
+											type="button"
+											className="ref-editor-sidebar-section-toggle"
+											onClick={(event) => {
+												event.currentTarget.blur();
+												toggleEditorExplorerCollapsed();
+											}}
+											aria-expanded={!editorExplorerCollapsed}
+										>
+											<div className="ref-editor-sidebar-section-title">
+											<IconChevron className="ref-editor-sidebar-section-chevron" />
+											<span className="ref-editor-sidebar-section-name">{editorSidebarWorkspaceLabel}</span>
+											</div>
+										</button>
+										{workspace && shell ? (
+											<div className="ref-editor-sidebar-section-actions">
+												<button
+													type="button"
+													className="ref-editor-sidebar-action"
+													title={t('app.fileMenu.newFile')}
+													aria-label={t('app.fileMenu.newFile')}
+													onClick={() => void fileMenuNewFile()}
+												>
+													<IconNewFile />
+												</button>
+												<button
+													type="button"
+													className="ref-editor-sidebar-action"
+													title={t('app.openWorkspace')}
+													aria-label={t('app.openWorkspace')}
+													onClick={() => setWorkspacePickerOpen(true)}
+												>
+													<IconNewFolder />
+												</button>
+												<button
+													type="button"
+													className="ref-editor-sidebar-action"
+													aria-label={t('app.explorerRefreshAria')}
+													title={t('common.refresh')}
+													onClick={() => void refreshGit()}
+												>
+													<IconRefresh />
+												</button>
+												<button
+													type="button"
+													className="ref-editor-sidebar-action"
+													title={t('app.workspaceMenuOpenInExplorer')}
+													aria-label={t('app.workspaceMenuOpenInExplorer')}
+													onClick={() => void revealWorkspaceInOs(workspace)}
+												>
+													<IconArrowUpRight />
+												</button>
+											</div>
+										) : null}
 									</div>
-									<button
-										type="button"
-										className="ref-icon-tile"
-										aria-label={t('app.explorerRefreshAria')}
-										onClick={() => void refreshGit()}
+									<div
+										ref={editorExplorerScrollRef}
+										className={`ref-editor-sidebar-scroll ref-editor-sidebar-scroll--explorer ${
+											editorExplorerCollapsed ? 'is-collapsed' : ''
+										}`}
 									>
-										<IconRefresh />
-									</button>
-								</div>
-								<div className="ref-explorer-body ref-explorer-body--workspace">
-									{workspace && shell ? (
+										{workspace && shell ? (
 										<WorkspaceExplorer
 											key={workspace}
 											shell={shell}
 											pathStatus={gitPathStatus}
-											selectedRel={filePath.trim()}
+											selectedRel={editorSidebarSelectedRel}
 											treeEpoch={treeEpoch}
 											onOpenFile={(rel) => void onExplorerOpenFile(rel)}
+											directoryIconMode="hidden"
+											indentBase={0}
+											indentStep={8}
 											explorerActions={workspaceExplorerActions}
 										/>
-									) : (
-										<p className="ref-explorer-placeholder">{t('app.explorerPlaceholder')}</p>
-									)}
-								</div>
-							</div>
-						</div>
-						<div className="ref-left-footer ref-left-footer--editor">
-							<button type="button" className="ref-open-workspace" onClick={() => setWorkspacePickerOpen(true)}>
-								{t('app.openWorkspace')}
-							</button>
-							<div className="ref-ipc-hint">{ipcOk}</div>
+										) : (
+											<div className="ref-editor-sidebar-empty">
+												<p className="ref-editor-sidebar-empty-copy">{t('app.explorerPlaceholder')}</p>
+												<button
+													type="button"
+													className="ref-open-workspace ref-open-workspace--inline"
+													onClick={() => setWorkspacePickerOpen(true)}
+												>
+													{t('app.openWorkspace')}
+												</button>
+												<div className="ref-ipc-hint">{ipcOk}</div>
+											</div>
+										)}
+									</div>
+								</>
+							) : null}
+							{editorLeftSidebarView === 'search' ? (
+								<>
+									<div className="ref-editor-sidebar-section-bar">
+										<div className="ref-editor-sidebar-section-title">
+											<span className="ref-editor-sidebar-section-name">{t('app.tabSearch')}</span>
+										</div>
+									</div>
+									<div className="ref-editor-sidebar-search-field">
+										<IconSearch className="ref-editor-sidebar-search-icon" />
+										<input
+											ref={editorSidebarSearchInputRef}
+											type="search"
+											value={editorSidebarSearchQuery}
+											onChange={(e) => setEditorSidebarSearchQuery(e.target.value)}
+											className="ref-editor-sidebar-search-input"
+											placeholder={t('app.editorSidebarSearchPlaceholder')}
+											aria-label={t('app.tabSearch')}
+										/>
+									</div>
+									<div className="ref-editor-sidebar-scroll ref-editor-sidebar-scroll--list">
+										<div className="ref-editor-sidebar-file-list">
+											{!workspace || !shell ? (
+												<div className="ref-editor-sidebar-empty">
+													<p className="ref-editor-sidebar-empty-copy">{t('app.explorerPlaceholder')}</p>
+													<button
+														type="button"
+														className="ref-open-workspace ref-open-workspace--inline"
+														onClick={() => setWorkspacePickerOpen(true)}
+													>
+														{t('app.openWorkspace')}
+													</button>
+												</div>
+											) : !normalizedEditorSidebarSearchQuery ? (
+												<div className="ref-editor-sidebar-empty">
+													<p className="ref-editor-sidebar-empty-copy">{t('app.editorSidebarSearchHint')}</p>
+												</div>
+											) : editorSidebarSearchResults.length === 0 ? (
+												<div className="ref-editor-sidebar-empty">
+													<p className="ref-editor-sidebar-empty-copy">{t('app.editorSidebarSearchEmpty')}</p>
+												</div>
+											) : (
+												editorSidebarSearchResults.map((result) => (
+													<button
+														key={result.rel}
+														type="button"
+														className={`ref-editor-sidebar-file-row ${editorSidebarSelectedRel === result.rel ? 'is-active' : ''}`}
+														onClick={() => void onExplorerOpenFile(result.rel)}
+														title={result.rel}
+													>
+														<span className="ref-editor-sidebar-file-icon" aria-hidden>
+															<FileTypeIcon fileName={result.fileName} />
+														</span>
+														<span className="ref-editor-sidebar-file-main">
+															<span className="ref-editor-sidebar-file-name">{result.fileName}</span>
+															<span className="ref-editor-sidebar-file-path">{result.dir || workspaceBasename}</span>
+														</span>
+													</button>
+												))
+											)}
+										</div>
+									</div>
+								</>
+							) : null}
+						{editorLeftSidebarView === 'git' ? (
+							<>
+									<div className="ref-editor-sidebar-section-bar">
+										<div className="ref-editor-sidebar-section-title">
+											<span className="ref-editor-sidebar-section-name">{t('app.tabGit')}</span>
+										</div>
+										{workspace && shell ? (
+											<div className="ref-editor-sidebar-section-actions">
+												<button
+													type="button"
+													className="ref-editor-sidebar-action"
+													aria-label={t('app.explorerRefreshAria')}
+													title={t('common.refresh')}
+													onClick={() => void refreshGit()}
+												>
+													<IconRefresh />
+												</button>
+											</div>
+										) : null}
+									</div>
+									<div className="ref-editor-sidebar-scroll ref-editor-sidebar-scroll--list">
+										<div className="ref-editor-sidebar-file-list">
+											{!workspace || !shell ? (
+												<div className="ref-editor-sidebar-empty">
+													<p className="ref-editor-sidebar-empty-copy">{t('app.explorerPlaceholder')}</p>
+													<button
+														type="button"
+														className="ref-open-workspace ref-open-workspace--inline"
+														onClick={() => setWorkspacePickerOpen(true)}
+													>
+														{t('app.openWorkspace')}
+													</button>
+												</div>
+											) : gitChangedPaths.length === 0 ? (
+												<div className="ref-editor-sidebar-empty">
+													<p className="ref-editor-sidebar-empty-copy">{t('app.gitNoChanges')}</p>
+												</div>
+											) : (
+												gitChangedPaths.map((rel) => {
+													const normalizedRel = rel.replace(/\\/g, '/');
+													const fileName = normalizedRel.includes('/')
+														? normalizedRel.slice(normalizedRel.lastIndexOf('/') + 1)
+														: normalizedRel;
+													const dir = normalizedRel.includes('/')
+														? normalizedRel.slice(0, normalizedRel.lastIndexOf('/'))
+														: workspaceBasename;
+													const status = gitPathStatus[rel];
+													const label = status?.label ?? '';
+													return (
+														<button
+															key={rel}
+															type="button"
+															className={`ref-editor-sidebar-file-row ${editorSidebarSelectedRel === normalizedRel ? 'is-active' : ''}`}
+															onClick={() => void onExplorerOpenFile(rel)}
+															title={normalizedRel}
+														>
+															<span className="ref-editor-sidebar-file-icon" aria-hidden>
+																<FileTypeIcon fileName={fileName} />
+															</span>
+															<span className="ref-editor-sidebar-file-main">
+																<span className="ref-editor-sidebar-file-name">{fileName}</span>
+																<span className="ref-editor-sidebar-file-path">{dir}</span>
+															</span>
+															<span
+																className={`ref-explorer-badge ref-explorer-badge--${changeBadgeVariant(label)}`}
+																title={status ? changeBadgeLabel(status.label, t) : t('app.gitChangedFallback')}
+															>
+																{label || '•'}
+															</span>
+														</button>
+													);
+												})
+											)}
+										</div>
+									</div>
+								</>
+							) : null}
+						</>
 						</div>
 					</div>
 					)}

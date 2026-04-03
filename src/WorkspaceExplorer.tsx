@@ -115,6 +115,9 @@ type Props = {
 	selectedRel: string;
 	treeEpoch: number;
 	onOpenFile: (relPath: string) => void;
+	directoryIconMode?: 'all' | 'hidden';
+	indentBase?: number;
+	indentStep?: number;
 	/** 右键菜单；未传则不显示上下文菜单 */
 	explorerActions?: WorkspaceExplorerActions | null;
 };
@@ -129,6 +132,9 @@ export function WorkspaceExplorer({
 	selectedRel,
 	treeEpoch,
 	onOpenFile,
+	directoryIconMode = 'all',
+	indentBase = 10,
+	indentStep = 14,
 	explorerActions: actions,
 }: Props) {
 	const { t } = useI18n();
@@ -252,7 +258,7 @@ export function WorkspaceExplorer({
 				<Fragment key={ent.rel}>
 					<div
 						className={rowClass}
-						style={{ paddingLeft: 10 + depth * 14 }}
+						style={{ paddingLeft: indentBase + depth * indentStep }}
 						role="treeitem"
 						aria-expanded={ent.isDirectory ? isOpen : undefined}
 						onContextMenu={
@@ -280,8 +286,17 @@ export function WorkspaceExplorer({
 								</button>
 							) : null}
 						</span>
-						<span className="ref-explorer-icon-cell" aria-hidden>
-							<FileTypeIcon fileName={ent.name} isDirectory={ent.isDirectory} />
+						<span
+							className={`ref-explorer-icon-cell ${
+								ent.isDirectory && directoryIconMode === 'hidden' ? 'is-folder-hidden' : ''
+							}`}
+							aria-hidden
+						>
+							{ent.isDirectory && directoryIconMode === 'hidden' ? (
+								<span className="ref-explorer-icon-cell-spacer" />
+							) : (
+								<FileTypeIcon fileName={ent.name} isDirectory={ent.isDirectory} />
+							)}
 						</span>
 						<button
 							type="button"
