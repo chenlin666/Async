@@ -57,6 +57,7 @@ export type ShellUiSettings = {
 	fontPreset?: ShellUiFontPreset;
 	uiFontPreset?: ShellUiFontPreset;
 	codeFontPreset?: 'sfmono' | 'monospace' | 'jetbrains';
+	themePresetId?: 'async' | 'graphite' | 'forest' | 'sunset' | 'custom';
 	accentColor?: string;
 	backgroundColor?: string;
 	foregroundColor?: string;

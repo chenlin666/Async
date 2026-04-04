@@ -51,6 +51,7 @@ import { ModelPickerDropdown, type ModelPickerItem } from './ModelPickerDropdown
 import { VoidSelect } from './VoidSelect';
 import type { SettingsNavId } from './SettingsPage';
 import {
+	applyThemePresetToAppearance,
 	applyAppearanceSettingsToDom,
 	defaultAppearanceSettings,
 	normalizeAppearanceSettings,
@@ -871,6 +872,25 @@ export default function App() {
 		if (prevScheme !== effectiveScheme) {
 			effectiveSchemePrevRef.current = effectiveScheme;
 			setAppearanceSettings((cur) => {
+				if (cur.themePresetId !== 'custom') {
+					const next = applyThemePresetToAppearance(cur, cur.themePresetId, effectiveScheme);
+					const s = shellRef.current;
+					if (s) {
+						queueMicrotask(() => {
+							void s.invoke('settings:set', {
+								ui: {
+									themePresetId: next.themePresetId,
+									accentColor: next.accentColor,
+									backgroundColor: next.backgroundColor,
+									foregroundColor: next.foregroundColor,
+									contrast: next.contrast,
+									translucentSidebar: next.translucentSidebar,
+								},
+							});
+						});
+					}
+					return next;
+				}
 				if (!shouldMigrateChromeWhenLeavingScheme(cur, prevScheme)) {
 					return cur;
 				}
@@ -880,6 +900,7 @@ export default function App() {
 					queueMicrotask(() => {
 						void s.invoke('settings:set', {
 							ui: {
+								themePresetId: next.themePresetId,
 								accentColor: next.accentColor,
 								backgroundColor: next.backgroundColor,
 								foregroundColor: next.foregroundColor,
@@ -2056,6 +2077,7 @@ export default function App() {
 						fontPreset?: unknown;
 						uiFontPreset?: unknown;
 						codeFontPreset?: unknown;
+						themePresetId?: unknown;
 						accentColor?: unknown;
 						backgroundColor?: unknown;
 						foregroundColor?: unknown;
@@ -3753,6 +3775,7 @@ export default function App() {
 				fontPreset: appearanceSettings.uiFontPreset,
 				uiFontPreset: appearanceSettings.uiFontPreset,
 				codeFontPreset: appearanceSettings.codeFontPreset,
+				themePresetId: appearanceSettings.themePresetId,
 				accentColor: appearanceSettings.accentColor,
 				backgroundColor: appearanceSettings.backgroundColor,
 				foregroundColor: appearanceSettings.foregroundColor,

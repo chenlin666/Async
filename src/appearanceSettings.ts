@@ -1,5 +1,7 @@
 export type UiFontPresetId = 'apple' | 'inter' | 'segoe';
 export type CodeFontPresetId = 'sfmono' | 'monospace' | 'jetbrains';
+export type ThemePresetId = 'async' | 'graphite' | 'forest' | 'sunset';
+export type ThemePresetSelectionId = ThemePresetId | 'custom';
 
 type AppearanceChromeSeed = {
 	accentColor: string;
@@ -13,6 +15,7 @@ export type AppAppearanceSettings = {
 	accentColor: string;
 	backgroundColor: string;
 	foregroundColor: string;
+	themePresetId: ThemePresetSelectionId;
 	uiFontPreset: UiFontPresetId;
 	codeFontPreset: CodeFontPresetId;
 	translucentSidebar: boolean;
@@ -35,6 +38,8 @@ export const MONOSPACE_CODE_FONT_STACK =
 	'ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace';
 export const JETBRAINS_CODE_FONT_STACK =
 	'"JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, monospace';
+
+export const THEME_PRESET_IDS: readonly ThemePresetId[] = ['async', 'graphite', 'forest', 'sunset'];
 
 /**
  * 与 `styles/theme-dark.css` / `theme-light.css` 中 mac-codex 的 `--void-*` 一致（另补 `--void-accent` = `--void-ring`）。
@@ -139,6 +144,58 @@ export const BUILTIN_COLOR_SCHEME_APPEARANCE: Record<'light' | 'dark', Appearanc
 	},
 };
 
+export const APPEARANCE_THEME_PRESETS: Record<ThemePresetId, Record<'light' | 'dark', AppearanceChromeSeed>> = {
+	async: BUILTIN_COLOR_SCHEME_APPEARANCE,
+	graphite: {
+		dark: {
+			backgroundColor: '#161A20',
+			foregroundColor: '#F5F7FA',
+			accentColor: '#7AA2FF',
+			contrast: 56,
+			translucentSidebar: true,
+		},
+		light: {
+			backgroundColor: '#EEF2F7',
+			foregroundColor: '#202734',
+			accentColor: '#4F7BFF',
+			contrast: 52,
+			translucentSidebar: true,
+		},
+	},
+	forest: {
+		dark: {
+			backgroundColor: '#111915',
+			foregroundColor: '#EEF8F1',
+			accentColor: '#56C987',
+			contrast: 55,
+			translucentSidebar: true,
+		},
+		light: {
+			backgroundColor: '#EDF7F0',
+			foregroundColor: '#183126',
+			accentColor: '#2F9E5C',
+			contrast: 50,
+			translucentSidebar: true,
+		},
+	},
+	sunset: {
+		dark: {
+			backgroundColor: '#1A1513',
+			foregroundColor: '#FFF4EE',
+			accentColor: '#FF9D5C',
+			contrast: 57,
+			translucentSidebar: true,
+		},
+		light: {
+			backgroundColor: '#FFF1E8',
+			foregroundColor: '#3E2617',
+			accentColor: '#E97A2F',
+			contrast: 52,
+			translucentSidebar: true,
+		},
+	},
+};
+
 /** 旧版 index 内置暗色（紫系），切换亮暗时应视为「未自定义」并迁移 */
 const LEGACY_INDEX_BUILTIN_DARK: Pick<
 	AppAppearanceSettings,
@@ -178,6 +235,7 @@ export function defaultAppearanceSettingsForScheme(colorScheme: 'light' | 'dark'
 		accentColor: seed.accentColor,
 		backgroundColor: seed.backgroundColor,
 		foregroundColor: seed.foregroundColor,
+		themePresetId: 'async',
 		uiFontPreset: 'apple',
 		codeFontPreset: 'sfmono',
 		translucentSidebar: seed.translucentSidebar,
@@ -201,6 +259,7 @@ export function isAppearanceFactoryDefault(appearance: AppAppearanceSettings, co
 		'accentColor',
 		'backgroundColor',
 		'foregroundColor',
+		'themePresetId',
 		'uiFontPreset',
 		'codeFontPreset',
 		'translucentSidebar',
@@ -224,6 +283,17 @@ export function normalizeCodeFontPreset(raw: unknown): CodeFontPresetId {
 		return raw;
 	}
 	return 'sfmono';
+}
+
+function isThemePresetId(raw: unknown): raw is ThemePresetId {
+	return typeof raw === 'string' && THEME_PRESET_IDS.includes(raw as ThemePresetId);
+}
+
+export function normalizeThemePresetId(raw: unknown): ThemePresetSelectionId {
+	if (raw === 'custom') {
+		return 'custom';
+	}
+	return isThemePresetId(raw) ? raw : 'custom';
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -250,15 +320,42 @@ function normalizeHexColor(raw: unknown, fallback: string): string {
 	return fallback.toUpperCase();
 }
 
+export function inferThemePresetIdForScheme(
+	appearance: Pick<AppAppearanceSettings, 'accentColor' | 'backgroundColor' | 'foregroundColor' | 'contrast' | 'translucentSidebar'>,
+	scheme: 'light' | 'dark'
+): ThemePresetSelectionId {
+	const normalized = {
+		accentColor: normalizeHexColor(appearance.accentColor, '#000000'),
+		backgroundColor: normalizeHexColor(appearance.backgroundColor, '#000000'),
+		foregroundColor: normalizeHexColor(appearance.foregroundColor, '#FFFFFF'),
+		contrast: clamp(Math.round(appearance.contrast), 0, 100),
+		translucentSidebar: Boolean(appearance.translucentSidebar),
+	};
+	for (const presetId of THEME_PRESET_IDS) {
+		const preset = APPEARANCE_THEME_PRESETS[presetId][scheme];
+		if (
+			normalized.accentColor === preset.accentColor &&
+			normalized.backgroundColor === preset.backgroundColor &&
+			normalized.foregroundColor === preset.foregroundColor &&
+			normalized.contrast === preset.contrast &&
+			normalized.translucentSidebar === preset.translucentSidebar
+		) {
+			return presetId;
+		}
+	}
+	return 'custom';
+}
+
 export function normalizeAppearanceSettings(
 	raw?: Partial<Record<string, unknown>> | null,
 	colorScheme: 'light' | 'dark' = 'dark'
 ): AppAppearanceSettings {
 	const defaults = defaultAppearanceSettingsForScheme(colorScheme);
-	return {
+	const normalized = {
 		accentColor: normalizeHexColor(raw?.accentColor, defaults.accentColor),
 		backgroundColor: normalizeHexColor(raw?.backgroundColor, defaults.backgroundColor),
 		foregroundColor: normalizeHexColor(raw?.foregroundColor, defaults.foregroundColor),
+		themePresetId: 'custom' as ThemePresetSelectionId,
 		uiFontPreset: normalizeUiFontPreset(raw?.uiFontPreset ?? raw?.fontPreset),
 		codeFontPreset: normalizeCodeFontPreset(raw?.codeFontPreset),
 		translucentSidebar: normalizeBoolean(raw?.translucentSidebar, defaults.translucentSidebar),
@@ -266,6 +363,41 @@ export function normalizeAppearanceSettings(
 		usePointerCursors: normalizeBoolean(raw?.usePointerCursors, defaults.usePointerCursors),
 		uiFontSize: normalizeNumber(raw?.uiFontSize, defaults.uiFontSize, 11, 18),
 		codeFontSize: normalizeNumber(raw?.codeFontSize, defaults.codeFontSize, 11, 18),
+	};
+	const explicitThemePresetId = normalizeThemePresetId(raw?.themePresetId);
+	return {
+		...normalized,
+		themePresetId:
+			explicitThemePresetId !== 'custom'
+				? explicitThemePresetId
+				: raw?.themePresetId === 'custom'
+					? 'custom'
+					: inferThemePresetIdForScheme(normalized, colorScheme),
+	};
+}
+
+export function appearanceMatchesThemePreset(
+	appearance: AppAppearanceSettings,
+	presetId: ThemePresetId,
+	scheme: 'light' | 'dark'
+): boolean {
+	return inferThemePresetIdForScheme(appearance, scheme) === presetId;
+}
+
+export function applyThemePresetToAppearance(
+	current: AppAppearanceSettings,
+	presetId: ThemePresetId,
+	scheme: 'light' | 'dark'
+): AppAppearanceSettings {
+	const preset = APPEARANCE_THEME_PRESETS[presetId][scheme];
+	return {
+		...current,
+		accentColor: preset.accentColor,
+		backgroundColor: preset.backgroundColor,
+		foregroundColor: preset.foregroundColor,
+		themePresetId: presetId,
+		translucentSidebar: preset.translucentSidebar,
+		contrast: preset.contrast,
 	};
 }
 
@@ -442,6 +574,7 @@ export function replaceBuiltinChromeColorsForScheme(
 		accentColor: b.accentColor,
 		backgroundColor: b.backgroundColor,
 		foregroundColor: b.foregroundColor,
+		themePresetId: b.themePresetId,
 		contrast: b.contrast,
 		translucentSidebar: b.translucentSidebar,
 	};

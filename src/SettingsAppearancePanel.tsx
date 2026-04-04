@@ -1,15 +1,19 @@
-import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useMemo, type CSSProperties, type ReactNode } from 'react';
 import type { AppColorMode, ThemeTransitionOrigin } from './colorMode';
 import {
+	APPEARANCE_THEME_PRESETS,
 	APPLE_UI_FONT_STACK,
 	JETBRAINS_CODE_FONT_STACK,
 	MONOSPACE_CODE_FONT_STACK,
 	SFMONO_CODE_FONT_STACK,
+	applyThemePresetToAppearance,
 	resolveAppearanceChromeColorVars,
 	defaultAppearanceSettingsForScheme,
+	inferThemePresetIdForScheme,
 	isAppearanceFactoryDefault,
 	type AppAppearanceSettings,
 	type CodeFontPresetId,
+	type ThemePresetId,
 	type UiFontPresetId,
 } from './appearanceSettings';
 import { useI18n } from './i18n';
@@ -37,15 +41,6 @@ function IconMonitor({ className }: { className?: string }) {
 		<svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
 			<rect x="2" y="3" width="20" height="14" rx="2" />
 			<path d="M8 21h8M12 17v4" strokeLinecap="round" />
-		</svg>
-	);
-}
-
-function IconCopy({ className }: { className?: string }) {
-	return (
-		<svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-			<rect x="9" y="9" width="11" height="11" rx="2" />
-			<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" strokeLinecap="round" strokeLinejoin="round" />
 		</svg>
 	);
 }
@@ -105,7 +100,6 @@ function normalizeHexInput(value: string, fallback: string): string {
 
 export function SettingsAppearancePanel({ value, onChange, effectiveColorScheme, appearance, onChangeAppearance }: Props) {
 	const { t } = useI18n();
-	const [copyState, setCopyState] = useState<'idle' | 'copied'>('idle');
 	const modes: { id: AppColorMode; label: string; icon: ReactNode }[] = [
 		{ id: 'light', label: t('settings.appearance.light'), icon: <IconSun className="ref-appearance-seg-ico" /> },
 		{ id: 'dark', label: t('settings.appearance.dark'), icon: <IconMoon className="ref-appearance-seg-ico" /> },
@@ -125,39 +119,37 @@ export function SettingsAppearancePanel({ value, onChange, effectiveColorScheme,
 		() => resolveAppearanceChromeColorVars(appearance, effectiveColorScheme) as CSSProperties,
 		[appearance, effectiveColorScheme]
 	);
+	const themePresets = useMemo(
+		() =>
+			(Object.keys(APPEARANCE_THEME_PRESETS) as ThemePresetId[]).map((id) => ({
+				id,
+				label: t(`settings.appearance.preset.${id}`),
+				light: APPEARANCE_THEME_PRESETS[id].light,
+				dark: APPEARANCE_THEME_PRESETS[id].dark,
+			})),
+		[t]
+	);
 
 	const patch = (partial: Partial<AppAppearanceSettings>) => {
 		void onChangeAppearance({ ...appearance, ...partial });
 	};
 
+	const patchChrome = (
+		partial: Partial<Pick<AppAppearanceSettings, 'accentColor' | 'backgroundColor' | 'foregroundColor' | 'contrast' | 'translucentSidebar'>>
+	) => {
+		const next = { ...appearance, ...partial };
+		void onChangeAppearance({
+			...next,
+			themePresetId: inferThemePresetIdForScheme(next, effectiveColorScheme),
+		});
+	};
+
 	const handleColorChange = (key: 'accentColor' | 'backgroundColor' | 'foregroundColor', next: string) => {
-		patch({ [key]: normalizeHexInput(next, appearance[key]) } as Partial<AppAppearanceSettings>);
+		patchChrome({ [key]: normalizeHexInput(next, appearance[key]) } as Partial<AppAppearanceSettings>);
 	};
 
 	const handleResetFactoryDefaults = () => {
 		void onChangeAppearance(defaultAppearanceSettingsForScheme(effectiveColorScheme));
-	};
-
-	const handleCopyTheme = async () => {
-		const payload = {
-			accentColor: appearance.accentColor,
-			backgroundColor: appearance.backgroundColor,
-			foregroundColor: appearance.foregroundColor,
-			uiFontPreset: appearance.uiFontPreset,
-			codeFontPreset: appearance.codeFontPreset,
-			translucentSidebar: appearance.translucentSidebar,
-			contrast: appearance.contrast,
-			usePointerCursors: appearance.usePointerCursors,
-			uiFontSize: appearance.uiFontSize,
-			codeFontSize: appearance.codeFontSize,
-		};
-		try {
-			await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-			setCopyState('copied');
-			window.setTimeout(() => setCopyState('idle'), 1400);
-		} catch {
-			setCopyState('idle');
-		}
 	};
 
 	return (
@@ -212,10 +204,6 @@ export function SettingsAppearancePanel({ value, onChange, effectiveColorScheme,
 								<p className="ref-appearance-theme-editor-desc">{t('settings.appearance.themeEditorDesc')}</p>
 							</div>
 							<div className="ref-appearance-theme-editor-actions">
-								<button type="button" className="ref-appearance-toolbar-btn" onClick={() => void handleCopyTheme()}>
-									<IconCopy />
-									{copyState === 'copied' ? t('settings.appearance.copiedTheme') : t('settings.appearance.copyTheme')}
-								</button>
 								<button
 									type="button"
 									className="ref-appearance-toolbar-btn"
@@ -230,6 +218,50 @@ export function SettingsAppearancePanel({ value, onChange, effectiveColorScheme,
 							</div>
 						</div>
 
+						<ThemeField
+							label={t('settings.appearance.themePreset')}
+							description={t('settings.appearance.themePresetDesc')}
+						>
+							<div className="ref-appearance-preset-grid" role="list" aria-label={t('settings.appearance.themePreset')}>
+								{themePresets.map((preset) => {
+									const active = appearance.themePresetId === preset.id;
+									return (
+										<button
+											key={preset.id}
+											type="button"
+											role="listitem"
+											className={`ref-appearance-preset-btn${active ? ' is-active' : ''}`}
+											onClick={() => void onChangeAppearance(applyThemePresetToAppearance(appearance, preset.id, effectiveColorScheme))}
+											aria-pressed={active}
+										>
+											<span className="ref-appearance-preset-previews" aria-hidden>
+												<span
+													className="ref-appearance-preset-mini"
+													style={
+														{
+															'--preset-bg': preset.light.backgroundColor,
+															'--preset-fg': preset.light.foregroundColor,
+															'--preset-accent': preset.light.accentColor,
+														} as CSSProperties
+													}
+												/>
+												<span
+													className="ref-appearance-preset-mini"
+													style={
+														{
+															'--preset-bg': preset.dark.backgroundColor,
+															'--preset-fg': preset.dark.foregroundColor,
+															'--preset-accent': preset.dark.accentColor,
+														} as CSSProperties
+													}
+												/>
+											</span>
+											<span className="ref-appearance-preset-name">{preset.label}</span>
+										</button>
+									);
+								})}
+							</div>
+						</ThemeField>
 						<ThemeField label={t('settings.appearance.accent')}>
 							<div className="ref-appearance-color-control">
 								<input type="color" value={appearance.accentColor} onChange={(e) => handleColorChange('accentColor', e.target.value)} />
@@ -278,7 +310,7 @@ export function SettingsAppearancePanel({ value, onChange, effectiveColorScheme,
 								className={`ref-settings-toggle ${appearance.translucentSidebar ? 'is-on' : ''}`}
 								role="switch"
 								aria-checked={appearance.translucentSidebar}
-								onClick={() => patch({ translucentSidebar: !appearance.translucentSidebar })}
+								onClick={() => patchChrome({ translucentSidebar: !appearance.translucentSidebar })}
 							>
 								<span className="ref-settings-toggle-knob" />
 							</button>
@@ -290,7 +322,7 @@ export function SettingsAppearancePanel({ value, onChange, effectiveColorScheme,
 									min={0}
 									max={100}
 									value={appearance.contrast}
-									onChange={(e) => patch({ contrast: clamp(Number(e.target.value), 0, 100) })}
+									onChange={(e) => patchChrome({ contrast: clamp(Number(e.target.value), 0, 100) })}
 								/>
 								<span>{appearance.contrast}</span>
 							</div>
