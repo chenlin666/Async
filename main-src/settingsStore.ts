@@ -49,11 +49,13 @@ export type SidebarLayoutPx = { left: number; right: number };
 
 /** 界面颜色模式：`system` 跟随 OS，有效亮暗由渲染层解析 */
 export type ShellColorMode = 'light' | 'dark' | 'system';
+export type ShellUiFontPreset = 'apple' | 'inter' | 'segoe';
 
 export type ShellUiSettings = {
 	sidebarLayout?: SidebarLayoutPx;
 	colorMode?: ShellColorMode;
-	/** 主壳布局：agent 居中对话 / editor 经典三栏 */
+	fontPreset?: ShellUiFontPreset;
+	/** Desktop shell layout: centered agent workspace or classic editor three-column layout. */
 	layoutMode?: 'agent' | 'editor';
 };
 

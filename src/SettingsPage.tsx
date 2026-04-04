@@ -8,6 +8,7 @@ import {
 } from './modelCatalog';
 import { LLM_PROVIDER_OPTIONS, type ModelRequestParadigm } from './llmProvider';
 import type { AgentCustomization } from './agentSettingsTypes';
+import type { AppAppearanceSettings } from './appearanceSettings';
 import type { EditorSettings } from './EditorSettingsPanel';
 import type { AppColorMode, ThemeTransitionOrigin } from './colorMode';
 import type { McpServerConfig, McpServerStatus } from './mcpTypes';
@@ -336,6 +337,8 @@ type Props = {
 	workspaceOpen: boolean;
 	colorMode: AppColorMode;
 	onChangeColorMode: (next: AppColorMode, origin?: ThemeTransitionOrigin) => void | Promise<void>;
+	appearanceSettings: AppAppearanceSettings;
+	onChangeAppearanceSettings: (next: AppAppearanceSettings) => void | Promise<void>;
 	layoutMode: ShellLayoutMode;
 	onChangeLayoutMode: (next: ShellLayoutMode) => void | Promise<void>;
 };
@@ -371,6 +374,8 @@ export function SettingsPage({
 	workspaceOpen,
 	colorMode,
 	onChangeColorMode,
+	appearanceSettings,
+	onChangeAppearanceSettings,
 	layoutMode,
 	onChangeLayoutMode,
 }: Props) {
@@ -673,7 +678,12 @@ export function SettingsPage({
 
 						{nav === 'appearance' ? (
 							<Suspense fallback={<SettingsPanelSkeleton />}>
-								<SettingsAppearancePanel value={colorMode} onChange={onChangeColorMode} />
+								<SettingsAppearancePanel
+									value={colorMode}
+									onChange={onChangeColorMode}
+									appearance={appearanceSettings}
+									onChangeAppearance={onChangeAppearanceSettings}
+								/>
 							</Suspense>
 						) : null}
 

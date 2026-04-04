@@ -50,6 +50,12 @@ import { mergeAgentFileChangesWithGit } from './agentFileChangesFromGit';
 import { ModelPickerDropdown, type ModelPickerItem } from './ModelPickerDropdown';
 import { VoidSelect } from './VoidSelect';
 import type { SettingsNavId } from './SettingsPage';
+import {
+	applyAppearanceSettingsToDom,
+	defaultAppearanceSettings,
+	normalizeAppearanceSettings,
+	type AppAppearanceSettings,
+} from './appearanceSettings';
 import { useAppColorScheme } from './useAppColorScheme';
 import {
 	type AppColorMode,
@@ -842,8 +848,13 @@ function threadRowTitle(tr: TFunction, t: ThreadInfo): string {
 export default function App() {
 	const shell = useAsyncShell();
 	const [colorMode, setColorMode] = useState<AppColorMode>(() => readStoredColorMode());
+	const [appearanceSettings, setAppearanceSettings] = useState<AppAppearanceSettings>(() => defaultAppearanceSettings());
 	const { effectiveScheme, setTransitionOrigin } = useAppColorScheme({ colorMode, shell: shell ?? undefined });
 	const monacoChromeTheme = getVoidMonacoTheme(effectiveScheme);
+
+	useEffect(() => {
+		applyAppearanceSettingsToDom(appearanceSettings);
+	}, [appearanceSettings]);
 	const { t, setLocale, locale } = useI18n();
 	const [ipcOk, setIpcOk] = useState<string>('…');
 	const [workspace, setWorkspace] = useState<string | null>(null);
@@ -2000,6 +2011,7 @@ export default function App() {
 					ui?: {
 						sidebarLayout?: { left?: unknown; right?: unknown };
 						colorMode?: string;
+						fontPreset?: unknown;
 						layoutMode?: string;
 					};
 					indexing?: {
@@ -2063,6 +2075,7 @@ export default function App() {
 					setEditorSettings({ ...defaultEditorSettings(), ...st.editor });
 				}
 				setIndexingSettings(normalizeIndexingSettings(st.indexing));
+				setAppearanceSettings(normalizeAppearanceSettings({ uiFontPreset: st.ui?.fontPreset }));
 				const cm = st.ui?.colorMode;
 				if (cm === 'light' || cm === 'dark' || cm === 'system') {
 					setColorMode(cm);
@@ -3684,7 +3697,7 @@ export default function App() {
 				tsLspEnabled: indexingSettings.tsLspEnabled,
 			},
 			mcp: { servers: mcpServers },
-			ui: { colorMode, layoutMode },
+			ui: { colorMode, fontPreset: appearanceSettings.uiFontPreset, layoutMode },
 		});
 	}, [
 		shell,
@@ -3699,6 +3712,7 @@ export default function App() {
 		locale,
 		mcpServers,
 		colorMode,
+		appearanceSettings,
 		layoutMode,
 	]);
 
@@ -8832,6 +8846,8 @@ export default function App() {
 								onDeleteWorkspaceSkillDisk={handleDeleteWorkspaceSkillDisk}
 								colorMode={colorMode}
 								onChangeColorMode={(m, origin) => void onChangeColorMode(m, origin)}
+								appearanceSettings={appearanceSettings}
+								onChangeAppearanceSettings={setAppearanceSettings}
 								layoutMode={layoutMode}
 								onChangeLayoutMode={(next) => void switchLayoutModeFromSettings(next)}
 							/>
