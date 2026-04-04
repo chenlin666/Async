@@ -121,8 +121,11 @@ import {
 } from '../workspaceSemanticIndex.js';
 import { getGitContextBlock, clearGitContextCache } from '../gitContext.js';
 import { buildRelevantMemoryContextBlock } from '../memdir/findRelevantMemories.js';
-import { loadMemoryPrompt } from '../memdir/memdir.js';
-import { queueExtractMemories } from '../services/extractMemories/extractMemories.js';
+import { ensureMemoryDirExists, loadMemoryPrompt } from '../memdir/memdir.js';
+import { scanMemoryFiles } from '../memdir/memoryScan.js';
+import { getAutoMemEntrypoint } from '../memdir/paths.js';
+import { buildMemoryEntrypoint, queueExtractMemories } from '../services/extractMemories/extractMemories.js';
+import { getWorkspaceIndexDir } from '../workspaceIndexPaths.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -917,11 +920,45 @@ export function registerIpc(): void {
 		return {
 			ok: true as const,
 			workspaceRoot: w.root,
+			indexDir: w.root ? getWorkspaceIndexDir(w.root) : null,
 			fileCount: w.fileCount,
 			symbolUniqueNames: sym.uniqueNames,
 			symbolIndexedFiles: sym.filesWithSymbols,
 			semanticChunks: sem.chunks,
 			semanticBusy: sem.busy,
+		};
+	});
+
+	ipcMain.handle('workspace:memory:stats', async () => {
+		const root = getWorkspaceRoot();
+		if (!root) {
+			return { ok: false as const, error: 'no-workspace' as const };
+		}
+		const memoryDir = await ensureMemoryDirExists(root);
+		const entrypointPath = getAutoMemEntrypoint(root);
+		const headers = memoryDir ? await scanMemoryFiles(memoryDir) : [];
+		let entryCount = 0;
+		let entrypointExists = false;
+		if (entrypointPath && fs.existsSync(entrypointPath) && fs.statSync(entrypointPath).isFile()) {
+			entrypointExists = true;
+			try {
+				const raw = fs.readFileSync(entrypointPath, 'utf8');
+				entryCount = raw
+					.split(/\r?\n/)
+					.map((line) => line.trim())
+					.filter(Boolean).length;
+			} catch {
+				entryCount = 0;
+			}
+		}
+		return {
+			ok: true as const,
+			workspaceRoot: root,
+			memoryDir,
+			entrypointPath,
+			entrypointExists,
+			topicFiles: headers.length,
+			entryCount,
 		};
 	});
 
@@ -939,6 +976,26 @@ export function registerIpc(): void {
 			scheduleWorkspaceSemanticRebuild(root, files);
 		}
 		return { ok: true as const };
+	});
+
+	ipcMain.handle('workspace:memory:rebuild', async () => {
+		const root = getWorkspaceRoot();
+		if (!root) {
+			return { ok: false as const, error: 'no-workspace' as const };
+		}
+		const memoryDir = await ensureMemoryDirExists(root);
+		const entrypointPath = getAutoMemEntrypoint(root);
+		if (!memoryDir || !entrypointPath) {
+			return { ok: false as const, error: 'memory-unavailable' as const };
+		}
+		const headers = await scanMemoryFiles(memoryDir);
+		await fs.promises.writeFile(entrypointPath, buildMemoryEntrypoint(headers), 'utf8');
+		return {
+			ok: true as const,
+			memoryDir,
+			entrypointPath,
+			topicFiles: headers.length,
+		};
 	});
 
 	ipcMain.handle('threads:list', () => {

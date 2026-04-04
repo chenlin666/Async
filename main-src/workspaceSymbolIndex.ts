@@ -6,6 +6,7 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { getSettings } from './settingsStore.js';
+import { getWorkspaceSymbolsIndexPath } from './workspaceIndexPaths.js';
 
 export type WorkspaceSymbolHit = {
 	name: string;
@@ -38,6 +39,8 @@ const byLowerName = new Map<string, WorkspaceSymbolHit[]>();
 const byFile = new Map<string, WorkspaceSymbolHit[]>();
 
 let fullRebuildTimer: ReturnType<typeof setTimeout> | null = null;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let rebuildingAll = false;
 
 export function clearWorkspaceSymbolIndex(): void {
 	indexedRoot = null;
@@ -46,6 +49,53 @@ export function clearWorkspaceSymbolIndex(): void {
 	if (fullRebuildTimer) {
 		clearTimeout(fullRebuildTimer);
 		fullRebuildTimer = null;
+	}
+	if (persistTimer) {
+		clearTimeout(persistTimer);
+		persistTimer = null;
+	}
+}
+
+function schedulePersistWorkspaceSymbolIndex(): void {
+	if (!indexedRoot || rebuildingAll) {
+		return;
+	}
+	if (persistTimer) {
+		clearTimeout(persistTimer);
+	}
+	persistTimer = setTimeout(() => {
+		persistTimer = null;
+		void persistWorkspaceSymbolIndex();
+	}, 250);
+}
+
+async function persistWorkspaceSymbolIndex(): Promise<void> {
+	if (!indexedRoot) {
+		return;
+	}
+	const target = getWorkspaceSymbolsIndexPath(indexedRoot);
+	const files: Record<string, WorkspaceSymbolHit[]> = {};
+	for (const [rel, hits] of byFile) {
+		files[rel] = hits;
+	}
+	try {
+		await fsp.mkdir(path.dirname(target), { recursive: true });
+		await fsp.writeFile(
+			target,
+			JSON.stringify(
+				{
+					version: 1,
+					root: indexedRoot,
+					generatedAt: new Date().toISOString(),
+					files,
+				},
+				null,
+				2
+			),
+			'utf8'
+		);
+	} catch {
+		/* ignore */
 	}
 }
 
@@ -214,6 +264,7 @@ export async function indexWorkspaceSourceFile(rootNorm: string, rel: string): P
 		}
 		const text = buf.toString('utf8');
 		addSymbols(rel, extractSymbols(rel, text));
+		schedulePersistWorkspaceSymbolIndex();
 	} catch {
 		/* ignore */
 	}
@@ -221,6 +272,7 @@ export async function indexWorkspaceSourceFile(rootNorm: string, rel: string): P
 
 export function removeWorkspaceSymbolsForRel(rel: string): void {
 	removeFileSymbols(rel);
+	schedulePersistWorkspaceSymbolIndex();
 }
 
 export function removeWorkspaceSymbolsUnderPrefix(prefixRel: string): void {
@@ -230,6 +282,7 @@ export function removeWorkspaceSymbolsUnderPrefix(prefixRel: string): void {
 			removeFileSymbols(k);
 		}
 	}
+	schedulePersistWorkspaceSymbolIndex();
 }
 
 /**
@@ -258,11 +311,17 @@ async function runFullRebuild(rootNorm: string, relativeFiles: string[]): Promis
 	indexedRoot = rootNorm;
 	byLowerName.clear();
 	byFile.clear();
+	rebuildingAll = true;
 	const targets = relativeFiles.filter(isSourceRel).slice(0, 12_000);
-	/* 顺序写入，避免并行 addSymbols 破坏 Map */
-	for (const rel of targets) {
-		await indexWorkspaceSourceFile(rootNorm, rel);
+	/* ????????? addSymbols ?? Map */
+	try {
+		for (const rel of targets) {
+			await indexWorkspaceSourceFile(rootNorm, rel);
+		}
+	} finally {
+		rebuildingAll = false;
 	}
+	schedulePersistWorkspaceSymbolIndex();
 }
 
 export function getWorkspaceSymbolIndexStats(): { uniqueNames: number; filesWithSymbols: number } {

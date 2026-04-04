@@ -342,7 +342,7 @@ export const messagesZhCN: Record<string, string> = {
 	'settings.nav.rules': '规则、技能与子代理',
 	'settings.nav.tools': '工具与 MCP',
 	'settings.nav.hooks': '钩子',
-	'settings.nav.indexing': '索引与文档',
+	'settings.nav.indexing': '代码索引与记忆',
 	'settings.nav.network': '网络',
 	'settings.nav.beta': '测试版',
 	'settings.nav.dev': '开发',
@@ -750,9 +750,10 @@ export const messagesZhCN: Record<string, string> = {
 	// settings nav
 	'settings.nav.editor': '编辑器',
 	'settings.title.editor': '编辑器',
-	'settings.title.indexing': '索引与文档',
+	'settings.title.indexing': '代码索引与记忆',
 	'settings.indexing.lead':
-		'管理工作区文件列表之上的能力：TypeScript 语言服务、导出符号索引，以及用于 Agent 上下文的本地语义块（TF-IDF）。关闭某项后对应功能立即停用；重新开启后可使用下方按钮重建索引。',
+		'管理 Async 的代码检索能力，并查看已对齐 Claude Code 的项目记忆层。代码索引会持久化到 `.async/index/`；项目记忆则把长期知识存放在 `.async/memory/` 中。',
+	'settings.indexing.codeIndexTitle': '代码索引',
 	'settings.indexing.tsLsp': 'TypeScript / JavaScript 语言服务',
 	'settings.indexing.tsLspDesc': '跳转定义等；依赖本机已安装的 typescript-language-server。',
 	'settings.indexing.symbolIndex': '导出符号索引',
@@ -764,6 +765,7 @@ export const messagesZhCN: Record<string, string> = {
 	'settings.indexing.noWorkspace': '未打开工作区，无统计数据。',
 	'settings.indexing.statsLoading': '正在读取…',
 	'settings.indexing.statsUnavailable': '无法获取统计。',
+	'settings.indexing.indexDir': '索引目录',
 	'settings.indexing.statFiles': '已索引文件数',
 	'settings.indexing.statSymbols': '符号名条数',
 	'settings.indexing.statSymbolFiles': '含符号文件',
@@ -774,6 +776,25 @@ export const messagesZhCN: Record<string, string> = {
 	'settings.indexing.rebuildAll': '全部重建',
 	'settings.indexing.rebuilding': '处理中…',
 	'settings.indexing.refreshStats': '刷新统计',
+	'settings.indexing.memoryTitle': '项目记忆',
+	'settings.indexing.memoryLead':
+		'Async 现在使用 Claude Code 风格的文件式记忆来保存长期项目知识。`MEMORY.md` 只作为索引，具体内容保存在各个主题文件中。',
+	'settings.indexing.memoryLayoutTitle': '存储结构',
+	'settings.indexing.memoryLayoutDesc':
+		'项目记忆位于 `.async/memory/`。应保持 `MEMORY.md` 简短，只放索引行，把实际内容拆分到主题文件里。',
+	'settings.indexing.memoryAgentTitle': '使用方式',
+	'settings.indexing.memoryAgentDesc':
+		'主 Agent 和 Subagent 在对话中都可以召回相关记忆；助手回复完成后，后台提炼流程会继续更新这些记忆文件。',
+	'settings.indexing.memoryStatsTitle': '项目记忆状态',
+	'settings.indexing.memoryStatsHint': '仅显示当前工作区。记忆文件不会进入普通语义代码索引。',
+	'settings.indexing.memoryDir': '记忆目录',
+	'settings.indexing.memoryEntrypoint': '入口索引',
+	'settings.indexing.memoryTopicFiles': '主题文件数',
+	'settings.indexing.memoryIndexEntries': '索引条目数',
+	'settings.indexing.rebuildMemory': '重建 MEMORY.md',
+	'settings.indexing.openMemoryDir': '定位记忆目录',
+	'settings.indexing.openMemoryEntrypoint': '定位 MEMORY.md',
+	'settings.indexing.refreshMemoryStats': '刷新记忆状态',
 
 	// editor settings panel
 	'editorSettings.lead': '自定义编辑器外观与行为，改动即时生效。',

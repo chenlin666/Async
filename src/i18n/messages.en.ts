@@ -340,7 +340,7 @@ export const messagesEn: Record<string, string> = {
 	'settings.nav.rules': 'Rules, Skills, Subagents',
 	'settings.nav.tools': 'Tools & MCPs',
 	'settings.nav.hooks': 'Hooks',
-	'settings.nav.indexing': 'Indexing & Docs',
+	'settings.nav.indexing': 'Code Indexing & Memory',
 	'settings.nav.network': 'Network',
 	'settings.nav.beta': 'Beta',
 	'settings.nav.dev': 'Dev',
@@ -746,9 +746,10 @@ export const messagesEn: Record<string, string> = {
 	// settings nav
 	'settings.nav.editor': 'Editor',
 	'settings.title.editor': 'Editor',
-	'settings.title.indexing': 'Indexing & docs',
+	'settings.title.indexing': 'Code indexing & memory',
 	'settings.indexing.lead':
-		'Control features built on the workspace file list: TypeScript language service, exported symbol index, and local TF-IDF code chunks for Agent context. Disabling an option takes effect immediately; use rebuild after re-enabling.',
+		'Control Async’s code retrieval stack and inspect the Claude-style project memory layer. Code indexes are persisted under `.async/index/`; project memory stores durable notes under `.async/memory/`.',
+	'settings.indexing.codeIndexTitle': 'Code indexing',
 	'settings.indexing.tsLsp': 'TypeScript / JavaScript language service',
 	'settings.indexing.tsLspDesc': 'Go to definition, etc. Requires typescript-language-server on the machine.',
 	'settings.indexing.symbolIndex': 'Exported symbol index',
@@ -760,6 +761,7 @@ export const messagesEn: Record<string, string> = {
 	'settings.indexing.noWorkspace': 'No workspace open — no stats.',
 	'settings.indexing.statsLoading': 'Loading…',
 	'settings.indexing.statsUnavailable': 'Could not load stats.',
+	'settings.indexing.indexDir': 'Index directory',
 	'settings.indexing.statFiles': 'Indexed files',
 	'settings.indexing.statSymbols': 'Symbol names',
 	'settings.indexing.statSymbolFiles': 'files with symbols',
@@ -770,6 +772,25 @@ export const messagesEn: Record<string, string> = {
 	'settings.indexing.rebuildAll': 'Rebuild all',
 	'settings.indexing.rebuilding': 'Working…',
 	'settings.indexing.refreshStats': 'Refresh stats',
+	'settings.indexing.memoryTitle': 'Project memory',
+	'settings.indexing.memoryLead':
+		'Async now uses a Claude Code–style file memory for durable project knowledge. `MEMORY.md` is the index, and individual topic files hold the actual notes.',
+	'settings.indexing.memoryLayoutTitle': 'Storage layout',
+	'settings.indexing.memoryLayoutDesc':
+		'Project memory lives under `.async/memory/`. Keep `MEMORY.md` short and link out to topic files instead of dumping everything into one file.',
+	'settings.indexing.memoryAgentTitle': 'How it is used',
+	'settings.indexing.memoryAgentDesc':
+		'Agent and subagents can recall relevant memory entries during a turn, and background extraction updates memory files after assistant replies.',
+	'settings.indexing.memoryStatsTitle': 'Project memory status',
+	'settings.indexing.memoryStatsHint': 'Shown for the current workspace only. Memory files are excluded from the normal semantic code index.',
+	'settings.indexing.memoryDir': 'Memory directory',
+	'settings.indexing.memoryEntrypoint': 'Entrypoint index',
+	'settings.indexing.memoryTopicFiles': 'Topic files',
+	'settings.indexing.memoryIndexEntries': 'Index entries',
+	'settings.indexing.rebuildMemory': 'Rebuild MEMORY.md',
+	'settings.indexing.openMemoryDir': 'Reveal memory folder',
+	'settings.indexing.openMemoryEntrypoint': 'Reveal MEMORY.md',
+	'settings.indexing.refreshMemoryStats': 'Refresh memory status',
 
 	// editor settings panel
 	'editorSettings.lead': 'Customize editor appearance and behavior. Changes apply instantly.',

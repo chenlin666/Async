@@ -5,6 +5,7 @@
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { getSettings } from './settingsStore.js';
+import { getWorkspaceSemanticIndexPath } from './workspaceIndexPaths.js';
 
 const CODE_EXT = new Set([
 	'ts',
@@ -107,6 +108,7 @@ let chunks: Chunk[] = [];
 let idf = new Map<string, number>();
 let chunkCount = 0;
 let rebuildBusy: Promise<void> | null = null;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function clearWorkspaceSemanticIndex(): void {
 	semRoot = null;
@@ -114,6 +116,56 @@ export function clearWorkspaceSemanticIndex(): void {
 	idf = new Map();
 	chunkCount = 0;
 	rebuildBusy = null;
+	if (persistTimer) {
+		clearTimeout(persistTimer);
+		persistTimer = null;
+	}
+}
+
+function schedulePersistWorkspaceSemanticIndex(): void {
+	if (!semRoot) {
+		return;
+	}
+	if (persistTimer) {
+		clearTimeout(persistTimer);
+	}
+	persistTimer = setTimeout(() => {
+		persistTimer = null;
+		void persistWorkspaceSemanticIndex();
+	}, 250);
+}
+
+async function persistWorkspaceSemanticIndex(): Promise<void> {
+	if (!semRoot) {
+		return;
+	}
+	const target = getWorkspaceSemanticIndexPath(semRoot);
+	try {
+		await fsp.mkdir(path.dirname(target), { recursive: true });
+		await fsp.writeFile(
+			target,
+			JSON.stringify(
+				{
+					version: 1,
+					root: semRoot,
+					generatedAt: new Date().toISOString(),
+					chunks: chunks.map((ch) => ({
+						id: ch.id,
+						relPath: ch.relPath,
+						startLine: ch.startLine,
+						text: ch.text,
+						tf: [...ch.tf.entries()],
+					})),
+					idf: [...idf.entries()],
+				},
+				null,
+				2
+			),
+			'utf8'
+		);
+	} catch {
+		/* ignore */
+	}
 }
 
 function isCodeRel(rel: string): boolean {
@@ -260,6 +312,7 @@ async function rebuildInternal(rootNorm: string, relativeFiles: string[]): Promi
 	chunks = next.slice(0, 4000);
 	idf = nextIdf;
 	chunkCount = chunks.length;
+	schedulePersistWorkspaceSemanticIndex();
 }
 
 /**

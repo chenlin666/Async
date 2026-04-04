@@ -14,6 +14,7 @@ import {
 	clearWorkspaceSemanticIndex,
 } from './workspaceSemanticIndex.js';
 import { getSettings } from './settingsStore.js';
+import { getWorkspaceFilesIndexPath } from './workspaceIndexPaths.js';
 
 /** 遍历时跳过的目录名（小写比较） */
 const SKIP_DIR_NAMES = new Set([
@@ -60,12 +61,53 @@ export function registerKnownWorkspaceRelPath(relPath: string): void {
 		return;
 	}
 	relPathSet.add(norm);
+	schedulePersistWorkspaceFileIndex();
 }
 
 let cachedRoot: string | null = null;
 let relPathSet = new Set<string>();
 let watcher: chokidar.FSWatcher | null = null;
 let inFlightRefresh: Promise<string[]> | null = null;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function schedulePersistWorkspaceFileIndex(): void {
+	if (!cachedRoot) {
+		return;
+	}
+	if (persistTimer) {
+		clearTimeout(persistTimer);
+	}
+	persistTimer = setTimeout(() => {
+		persistTimer = null;
+		void persistWorkspaceFileIndexSnapshot();
+	}, 250);
+}
+
+async function persistWorkspaceFileIndexSnapshot(): Promise<void> {
+	if (!cachedRoot) {
+		return;
+	}
+	const target = getWorkspaceFilesIndexPath(cachedRoot);
+	try {
+		await fsp.mkdir(path.dirname(target), { recursive: true });
+		await fsp.writeFile(
+			target,
+			JSON.stringify(
+				{
+					version: 1,
+					root: cachedRoot,
+					generatedAt: new Date().toISOString(),
+					files: sortedFromSet(),
+				},
+				null,
+				2
+			),
+			'utf8'
+		);
+	} catch {
+		/* ignore */
+	}
+}
 
 function normalizeRel(rootNorm: string, absPath: string): string | null {
 	const rel = path.relative(rootNorm, absPath).split(path.sep).join('/');
@@ -217,6 +259,10 @@ export function getIndexedWorkspaceFilesIfFresh(rootAbs: string): string[] | nul
  */
 export function stopWorkspaceFileIndex(): void {
 	stopWatcherOnly();
+	if (persistTimer) {
+		clearTimeout(persistTimer);
+		persistTimer = null;
+	}
 	cachedRoot = null;
 	relPathSet = new Set();
 	inFlightRefresh = null;
@@ -254,6 +300,7 @@ function attachWatcher(rootNorm: string): void {
 			const rel = normalizeRel(rootNorm, absPath);
 			if (rel) {
 				relPathSet.add(rel);
+				schedulePersistWorkspaceFileIndex();
 				void indexWorkspaceSourceFile(rootNorm, rel);
 			}
 		});
@@ -265,6 +312,8 @@ function attachWatcher(rootNorm: string): void {
 		}
 		const rel = normalizeRel(rootNorm, absPath);
 		if (rel) {
+			relPathSet.add(rel);
+			schedulePersistWorkspaceFileIndex();
 			void indexWorkspaceSourceFile(rootNorm, rel);
 		}
 	};
@@ -276,6 +325,7 @@ function attachWatcher(rootNorm: string): void {
 		const rel = normalizeRel(rootNorm, absPath);
 		if (rel) {
 			relPathSet.delete(rel);
+			schedulePersistWorkspaceFileIndex();
 			removeWorkspaceSymbolsForRel(rel);
 		}
 	};
@@ -294,6 +344,7 @@ function attachWatcher(rootNorm: string): void {
 				relPathSet.delete(k);
 			}
 		}
+		schedulePersistWorkspaceFileIndex();
 		removeWorkspaceSymbolsUnderPrefix(rel);
 	};
 
@@ -327,6 +378,7 @@ export async function ensureWorkspaceFileIndex(rootAbs: string): Promise<string[
 		const list = await scanFullAsync(rootNorm);
 		relPathSet = new Set(list);
 		attachWatcher(rootNorm);
+		schedulePersistWorkspaceFileIndex();
 		const sorted = sortedFromSet();
 		const idx = getSettings().indexing;
 		if (idx?.symbolIndexEnabled !== false) {
