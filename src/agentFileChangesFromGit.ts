@@ -5,19 +5,36 @@ export function normalizeWorkspaceRelPath(p: string): string {
 	return p.trim().replace(/\\/g, '/').replace(/^\.\//, '');
 }
 
+function shouldIgnoreWorkspacePathCase(): boolean {
+	if (typeof navigator === 'undefined') {
+		return false;
+	}
+	const platform = String(navigator.platform ?? '').toLowerCase();
+	return platform.includes('win');
+}
+
+export function normalizeWorkspaceRelPathForMatch(p: string): string {
+	const normalized = normalizeWorkspaceRelPath(p);
+	return shouldIgnoreWorkspacePathCase() ? normalized.toLowerCase() : normalized;
+}
+
+export function workspaceRelPathsEqual(a: string, b: string): boolean {
+	return normalizeWorkspaceRelPathForMatch(a) === normalizeWorkspaceRelPathForMatch(b);
+}
+
 export type DiffPreviewStats = { additions: number; deletions: number };
 
 function findDiffPreview(
 	previews: Record<string, DiffPreviewStats>,
 	relPath: string
 ): DiffPreviewStats | undefined {
-	const n = normalizeWorkspaceRelPath(relPath);
+	const n = normalizeWorkspaceRelPathForMatch(relPath);
 	const direct = previews[relPath] ?? previews[n];
 	if (direct) {
 		return direct;
 	}
 	for (const k of Object.keys(previews)) {
-		if (normalizeWorkspaceRelPath(k) === n) {
+		if (normalizeWorkspaceRelPathForMatch(k) === n) {
 			return previews[k];
 		}
 	}
@@ -40,10 +57,10 @@ export function mergeAgentFileChangesWithGit(
 	if (!gitStatusOk) {
 		return fromAssistant;
 	}
-	const gitSet = new Set(gitChangedPaths.map(normalizeWorkspaceRelPath));
+	const gitSet = new Set(gitChangedPaths.map(normalizeWorkspaceRelPathForMatch));
 	const out: FileChangeSummary[] = [];
 	for (const f of fromAssistant) {
-		const n = normalizeWorkspaceRelPath(f.path);
+		const n = normalizeWorkspaceRelPathForMatch(f.path);
 		if (!gitSet.has(n)) {
 			continue;
 		}

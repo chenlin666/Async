@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createTwoFilesPatch } from 'diff';
 import { promisify } from 'node:util';
 import * as path from 'node:path';
 import { getWorkspaceRoot, isPathInsideRoot } from './workspace.js';
@@ -269,23 +270,25 @@ export function countDiffLineStats(diff: string): { additions: number; deletions
 	return { additions, deletions };
 }
 
-function clipDiff(text: string, maxChars: number): string {
-	if (text.length <= maxChars) {
+function clipDiff(text: string, maxChars?: number | null): string {
+	if (!Number.isFinite(maxChars) || !maxChars || maxChars <= 0 || text.length <= maxChars) {
 		return text;
 	}
 	return `${text.slice(0, maxChars)}\n\n… (truncated)`;
 }
 
 export type DiffPreview = { diff: string; isBinary: boolean; additions: number; deletions: number };
+type DiffPreviewOptions = { maxChars?: number | null };
 
 /** Unified diff vs HEAD, or synthetic “all added” for untracked text files. */
-export async function getDiffPreview(relPath: string): Promise<DiffPreview> {
+export async function getDiffPreview(relPath: string, options?: DiffPreviewOptions): Promise<DiffPreview> {
 	const root = repoRoot();
 	const full = path.resolve(root, relPath);
 	if (!isPathInsideRoot(full, root)) {
 		throw new Error('Bad path');
 	}
 	const fs = await import('node:fs');
+	const maxChars = options?.maxChars ?? 14_000;
 
 	let diffText = '';
 	try {
@@ -300,7 +303,7 @@ export async function getDiffPreview(relPath: string): Promise<DiffPreview> {
 
 	if (diffText.trim()) {
 		const { additions, deletions } = countDiffLineStats(diffText);
-		return { diff: clipDiff(diffText, 14_000), isBinary: false, additions, deletions };
+		return { diff: clipDiff(diffText, maxChars), isBinary: false, additions, deletions };
 	}
 
 	if (!fs.existsSync(full)) {
@@ -314,12 +317,14 @@ export async function getDiffPreview(relPath: string): Promise<DiffPreview> {
 
 	const text = buf.toString('utf8');
 	const lines = text.split(/\r?\n/);
-	const max = 56;
-	const chunk = lines.slice(0, max);
-	const synthetic =
-		`--- /dev/null\n+++ b/${relPath.replace(/\\/g, '/')}\n` + chunk.map((l) => `+${l}`).join('\n');
+	const previewAll = !Number.isFinite(maxChars) || !maxChars || maxChars <= 0;
+	const chunk = previewAll ? lines : lines.slice(0, 56);
+	const previewText = chunk.join('\n');
+	const synthetic = createTwoFilesPatch('/dev/null', `b/${relPath.replace(/\\/g, '/')}`, '', previewText, '', '', {
+		context: 3,
+	});
 	return {
-		diff: clipDiff(synthetic, 14_000),
+		diff: clipDiff(synthetic, maxChars),
 		isBinary: false,
 		additions: chunk.length,
 		deletions: 0,

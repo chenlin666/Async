@@ -54,7 +54,12 @@ type Props = {
 	/** 当前工作区根路径，用于把 diff 里的绝对路径转成相对路径 */
 	workspaceRoot?: string | null;
 	/** 点击标题区：右侧打开文件并滚动到首个 hunk 对应行 */
-	onOpenFile?: (relPath: string, revealLine?: number) => void;
+	onOpenFile?: (
+		relPath: string,
+		revealLine?: number,
+		revealEndLine?: number,
+		options?: { diff?: string | null }
+	) => void;
 };
 
 export function AgentDiffCard({ diff, workspaceRoot, onOpenFile }: Props) {
@@ -105,7 +110,7 @@ export function AgentDiffCard({ diff, workspaceRoot, onOpenFile }: Props) {
 		if (!onOpenFile || !openTarget) {
 			return;
 		}
-		onOpenFile(openTarget, revealLine ?? undefined);
+		onOpenFile(openTarget, revealLine ?? undefined, undefined, { diff });
 	};
 
 	const headInner = (

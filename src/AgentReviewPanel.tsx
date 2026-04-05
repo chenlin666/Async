@@ -7,7 +7,12 @@ type Props = {
 	patches: AgentPendingPatch[];
 	workspaceRoot: string | null;
 	busy: boolean;
-	onOpenFile: (rel: string, revealLine?: number) => void;
+	onOpenFile: (
+		rel: string,
+		revealLine?: number,
+		revealEndLine?: number,
+		options?: { diff?: string | null }
+	) => void;
 	onApplyOne: (id: string) => void;
 	onApplyAll: () => void;
 	onDiscard: () => void;

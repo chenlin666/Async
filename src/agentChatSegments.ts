@@ -26,6 +26,7 @@ export type FileChangeSummary = {
 	additions: number;
 	deletions: number;
 	startLine?: number;
+	diff?: string;
 };
 
 export type FileEditSegment = {
@@ -1322,6 +1323,57 @@ function countLines(s: string): number {
 	return s.split('\n').length;
 }
 
+function normalizeSnippetLines(text: string | undefined): string[] {
+	const normalized = String(text ?? '').replace(/\r\n?/g, '\n');
+	if (!normalized) {
+		return [];
+	}
+	return normalized.split('\n');
+}
+
+export function buildFileEditPreviewDiff(edit: {
+	path: string;
+	startLine?: number;
+	oldStr?: string;
+	newStr?: string;
+	isNew?: boolean;
+}): string {
+	const path = String(edit.path ?? '').trim().replace(/\\/g, '/');
+	const oldLines = normalizeSnippetLines(edit.oldStr);
+	const newLines = normalizeSnippetLines(edit.newStr);
+	if (!path || (oldLines.length === 0 && newLines.length === 0)) {
+		return '';
+	}
+	if (edit.isNew && oldLines.length === 0) {
+		const body = newLines.map((line) => `+${line}`).join('\n');
+		return [
+			`diff --git a/${path} b/${path}`,
+			'new file mode 100644',
+			'--- /dev/null',
+			`+++ b/${path}`,
+			`@@ -0,0 +1,${newLines.length} @@`,
+			body,
+		].join('\n');
+	}
+	const startLine =
+		typeof edit.startLine === 'number' && Number.isFinite(edit.startLine) && edit.startLine > 0
+			? Math.floor(edit.startLine)
+			: 1;
+	const oldCount = oldLines.length;
+	const newCount = newLines.length;
+	const body = [
+		...oldLines.map((line) => `-${line}`),
+		...newLines.map((line) => `+${line}`),
+	].join('\n');
+	return [
+		`diff --git a/${path} b/${path}`,
+		`--- a/${path}`,
+		`+++ b/${path}`,
+		`@@ -${startLine},${oldCount} +${startLine},${newCount} @@`,
+		body,
+	].join('\n');
+}
+
 /** Extract cumulative file changes from all segments (for the sticky bottom panel) */
 export function collectFileChanges(segments: AssistantSegment[]): FileChangeSummary[] {
 	const map = new Map<string, FileChangeSummary>();
@@ -1331,6 +1383,12 @@ export function collectFileChanges(segments: AssistantSegment[]): FileChangeSumm
 			existing.additions += seg.additions;
 			existing.deletions += seg.deletions;
 			if (seg.startLine && !existing.startLine) existing.startLine = seg.startLine;
+			if (!existing.diff) {
+				const syntheticDiff = buildFileEditPreviewDiff(seg);
+				if (syntheticDiff) {
+					existing.diff = syntheticDiff;
+				}
+			}
 			map.set(seg.path, existing);
 		}
 	}

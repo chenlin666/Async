@@ -61,7 +61,12 @@ type Props = {
 	agentUi?: boolean;
 	planUi?: boolean;
 	workspaceRoot?: string | null;
-	onOpenAgentFile?: (relPath: string, revealLine?: number, revealEndLine?: number) => void;
+	onOpenAgentFile?: (
+		relPath: string,
+		revealLine?: number,
+		revealEndLine?: number,
+		options?: { diff?: string | null }
+	) => void;
 	onRunCommand?: (cmd: string) => void;
 	streamingToolPreview?: StreamingToolPreview | null;
 	showAgentWorking?: boolean;

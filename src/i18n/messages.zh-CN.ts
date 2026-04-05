@@ -1022,4 +1022,7 @@ export const messagesZhCN: Record<string, string> = {
 	'common.no': '否',
 	'common.edit': '编辑',
 	'common.loading': '加载中…',
+	'app.filePreviewChangeLabel': 'AI 改动',
+	'app.filePreviewAcceptChange': '接受',
+	'app.filePreviewRevertChange': '回退',
 };

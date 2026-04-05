@@ -9,6 +9,7 @@
     "build:main:watch": "node esbuild.main.mjs --watch",
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:renderer",
+    "preview": "npm run build:renderer && vite preview",
     "icons": "node scripts/export-app-icon.mjs",
     "readme:screenshots": "node scripts/export-readme-screenshots.mjs",
     "desktop": "npm run build && cross-env ASYNC_SHELL_LOAD_DIST=1 electron .",

@@ -1,12 +1,17 @@
 import { useLayoutEffect, useMemo, useRef, useState, useEffect } from 'react';
 import { FileTypeIcon } from './fileTypeIcons';
-import type { FileEditSegment } from './agentChatSegments';
+import { buildFileEditPreviewDiff, type FileEditSegment } from './agentChatSegments';
 import { useI18n } from './i18n';
 import { sliceAgentEditPreviewLines } from './pretextLayout';
 
 type Props = {
 	edit: FileEditSegment;
-	onOpenFile?: (relPath: string, revealLine?: number) => void;
+	onOpenFile?: (
+		relPath: string,
+		revealLine?: number,
+		revealEndLine?: number,
+		options?: { diff?: string | null }
+	) => void;
 };
 
 function basename(p: string): string {
@@ -114,6 +119,7 @@ export function AgentEditCard({ edit, onOpenFile }: Props) {
 	const showStreamingEmptyHint = edit.isStreaming && visibleLines.length === 0;
 	const canOpenFile = edit.path.trim().length > 0;
 	const expandRemainingLines = Math.max(0, previewLines.length - collapsedHead.length);
+	const previewDiff = useMemo(() => buildFileEditPreviewDiff(edit), [edit]);
 
 	return (
 		<div className={`ref-edit-card ${edit.isStreaming ? 'ref-edit-card--streaming' : ''}`}>
@@ -123,7 +129,7 @@ export function AgentEditCard({ edit, onOpenFile }: Props) {
 				title={edit.path}
 				onClick={() => {
 					if (canOpenFile) {
-						onOpenFile?.(edit.path, edit.startLine);
+						onOpenFile?.(edit.path, edit.startLine, undefined, { diff: previewDiff || null });
 					}
 				}}
 				disabled={!canOpenFile}

@@ -5,7 +5,12 @@ import { useI18n } from './i18n';
 
 type Props = {
 	files: FileChangeSummary[];
-	onOpenFile?: (relPath: string, revealLine?: number) => void;
+	onOpenFile?: (
+		relPath: string,
+		revealLine?: number,
+		revealEndLine?: number,
+		options?: { diff?: string | null }
+	) => void;
 	onKeepAll?: () => void;
 	onRevertAll?: () => void;
 	onKeepFile?: (relPath: string) => void;
@@ -70,7 +75,7 @@ export function AgentFileChangesPanel({ files, onOpenFile, onKeepAll, onRevertAl
 									type="button"
 									className="ref-fc-row"
 									title={f.path}
-									onClick={() => onOpenFile?.(f.path, f.startLine)}
+									onClick={() => onOpenFile?.(f.path, f.startLine, undefined, { diff: f.diff ?? null })}
 								>
 									<FileTypeIcon
 										fileName={name}

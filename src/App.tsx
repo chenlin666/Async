@@ -14,6 +14,7 @@ import {
 } from 'react';
 import type { editor as MonacoEditorNS } from 'monaco-editor';
 import Editor from '@monaco-editor/react';
+import { createTwoFilesPatch } from 'diff';
 import { PtyTerminalView } from './PtyTerminalView';
 import { DrawerPtyTerminal } from './DrawerPtyTerminal';
 import { ChatMarkdown } from './ChatMarkdown';
@@ -35,10 +36,13 @@ import {
 } from './liveAgentBlocks';
 import { AgentReviewPanel } from './AgentReviewPanel';
 import { AgentFileChangesPanel } from './AgentFileChanges';
+import { AgentFilePreviewPanel } from './AgentFilePreviewPanel';
+import { buildAgentFilePreviewHunks } from './agentFilePreviewDiff';
 import {
 	assistantMessageUsesAgentToolProtocol,
 	segmentAssistantContentUnified,
 	collectFileChanges,
+	countDiffAddDel,
 } from './agentChatSegments';
 import {
 	clearPersistedAgentFileChanges,
@@ -46,7 +50,11 @@ import {
 	readPersistedAgentFileChanges,
 	writePersistedAgentFileChanges,
 } from './agentFileChangesPersist';
-import { mergeAgentFileChangesWithGit } from './agentFileChangesFromGit';
+import {
+	mergeAgentFileChangesWithGit,
+	normalizeWorkspaceRelPath,
+	workspaceRelPathsEqual,
+} from './agentFileChangesFromGit';
 import { ModelPickerDropdown, type ModelPickerItem } from './ModelPickerDropdown';
 import { GitBranchPickerDropdown } from './GitBranchPickerDropdown';
 import { VoidSelect } from './VoidSelect';
@@ -161,7 +169,7 @@ function tagProjectOrigin<T extends { origin?: 'user' | 'project' }>(items: T[] 
 }
 
 type LayoutMode = 'agent' | 'editor';
-type AgentRightSidebarView = 'git' | 'plan';
+type AgentRightSidebarView = 'git' | 'plan' | 'file';
 type EditorLeftSidebarView = 'explorer' | 'search' | 'git';
 import {
 	useI18n,
@@ -192,6 +200,10 @@ type ThreadInfo = {
 	fileStateCount?: number;
 };
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
+
+function debugDiffHead(diff: string, max = 160): string {
+	return diff.replace(/\s+/g, ' ').slice(0, max);
+}
 
 function extractPlanMarkdownPreview(text: string): string {
 	if (!text.trim()) {
@@ -231,6 +243,20 @@ function stripMarkdownSection(markdown: string, headingPattern: string): string 
 }
 type EditorPtySession = { id: string; title: string };
 type DiffPreview = { diff: string; isBinary: boolean; additions: number; deletions: number };
+type AgentConversationFileOpenOptions = { diff?: string | null };
+type AgentFilePreviewState = {
+	relPath: string;
+	revealLine?: number;
+	revealEndLine?: number;
+	loading: boolean;
+	content: string;
+	diff: string;
+	isBinary: boolean;
+	readError: string | null;
+	additions: number;
+	deletions: number;
+	reviewMode: 'snapshot' | 'readonly';
+};
 
 const SIDEBAR_LAYOUT_KEY = 'async:sidebar-widths-v1';
 const SHELL_LAYOUT_MODE_KEY = 'async:shell-layout-mode-v1';
@@ -1017,6 +1043,9 @@ export default function App() {
 	const [executedPlanKeys, setExecutedPlanKeys] = useState<string[]>([]);
 	const [agentRightSidebarOpen, setAgentRightSidebarOpen] = useState(false);
 	const [agentRightSidebarView, setAgentRightSidebarView] = useState<AgentRightSidebarView>('git');
+	const [agentFilePreview, setAgentFilePreview] = useState<AgentFilePreviewState | null>(null);
+	const [agentFilePreviewBusyPatch, setAgentFilePreviewBusyPatch] = useState<string | null>(null);
+	const agentFilePreviewRequestRef = useRef(0);
 	const [treeEpoch, setTreeEpoch] = useState(0);
 	const [commitMsg, setCommitMsg] = useState('');
 	const [lastTurnUsage, setLastTurnUsage] = useState<TurnTokenUsage | null>(null);
@@ -4102,6 +4131,245 @@ export default function App() {
 		[layoutMode, shell, t]
 	);
 
+	const openAgentSidebarFilePreview = useCallback(
+		async (
+			rel: string,
+			revealLine?: number,
+			revealEndLine?: number,
+			options?: AgentConversationFileOpenOptions
+		) => {
+			if (!shell || layoutMode !== 'agent') {
+				await openFileInTab(rel, revealLine, revealEndLine);
+				return;
+			}
+
+			const normalizedRel = normalizeWorkspaceRelPath(rel);
+			const safeRevealLine =
+				typeof revealLine === 'number' && Number.isFinite(revealLine) && revealLine > 0
+					? Math.floor(revealLine)
+					: undefined;
+			const safeRevealEndLine =
+				typeof revealEndLine === 'number' && Number.isFinite(revealEndLine) && revealEndLine > 0
+					? Math.floor(revealEndLine)
+					: undefined;
+			const sourceDiff = typeof options?.diff === 'string' ? options.diff.trim() : '';
+			voidShellDebugLog('agent-file-preview:open:start', {
+				relPath: normalizedRel,
+				revealLine: safeRevealLine ?? null,
+				revealEndLine: safeRevealEndLine ?? null,
+				sourceDiffLength: sourceDiff.length,
+				sourceDiffHead: sourceDiff ? debugDiffHead(sourceDiff) : '',
+				layoutMode,
+				currentId: currentId ?? '',
+			});
+
+			setAgentRightSidebarView('file');
+			setAgentRightSidebarOpen(true);
+			setAgentFilePreview((prev) => ({
+				relPath: normalizedRel,
+				revealLine: safeRevealLine,
+				revealEndLine: safeRevealEndLine,
+				loading: true,
+				content: prev?.relPath === normalizedRel ? prev.content : '',
+				diff: sourceDiff,
+				isBinary: false,
+				readError: null,
+				additions: 0,
+				deletions: 0,
+				reviewMode: prev?.relPath === normalizedRel ? prev.reviewMode : 'readonly',
+			}));
+
+			const requestId = ++agentFilePreviewRequestRef.current;
+			let content = '';
+			let readError: string | null = null;
+			try {
+				const fileResult = (await shell.invoke('fs:readFile', normalizedRel)) as { ok?: boolean; content?: string };
+				if (fileResult.ok && typeof fileResult.content === 'string') {
+					content = fileResult.content;
+				}
+			} catch (err) {
+				readError = err instanceof Error ? err.message : String(err);
+			}
+
+			let previewDiff = sourceDiff;
+			let isBinary = false;
+			let additions = 0;
+			let deletions = 0;
+			let reviewMode: AgentFilePreviewState['reviewMode'] = 'readonly';
+			const isGitChanged = gitChangedPaths.some((path) => workspaceRelPathsEqual(path, normalizedRel));
+			voidShellDebugLog('agent-file-preview:open:path-match', {
+				relPath: normalizedRel,
+				isGitChanged,
+				gitChangedCount: gitChangedPaths.length,
+				gitChangedHead: gitChangedPaths.slice(0, 12).join(' | '),
+			});
+
+			if (currentId) {
+				try {
+					const snapshotResult = (await shell.invoke('agent:getFileSnapshot', currentId, normalizedRel)) as
+						| { ok: true; hasSnapshot: false }
+						| { ok: true; hasSnapshot: true; previousContent: string | null }
+						| { ok?: false };
+					if (snapshotResult?.ok && snapshotResult.hasSnapshot) {
+						const previousContent = snapshotResult.previousContent ?? '';
+						previewDiff = createTwoFilesPatch(
+							`a/${normalizedRel}`,
+							`b/${normalizedRel}`,
+							previousContent,
+							content,
+							'',
+							'',
+							{ context: 3 }
+						).trim();
+						reviewMode = 'snapshot';
+						readError = null;
+						voidShellDebugLog('agent-file-preview:open:snapshot', {
+							relPath: normalizedRel,
+							previousLength: previousContent.length,
+							contentLength: content.length,
+							diffLength: previewDiff.length,
+							hunkCount: buildAgentFilePreviewHunks(previewDiff).length,
+							diffHead: debugDiffHead(previewDiff),
+						});
+					}
+				} catch {
+					/* snapshot lookup failed; fall back to git preview */
+				}
+			}
+
+			if (!previewDiff && gitStatusOk && isGitChanged) {
+				const cachedPreview = Object.entries(diffPreviews).find(
+					([path]) => workspaceRelPathsEqual(path, normalizedRel)
+				)?.[1];
+				voidShellDebugLog('agent-file-preview:open:git-start', {
+					relPath: normalizedRel,
+					hasCachedPreview: Boolean(cachedPreview),
+					cachedDiffLength: String(cachedPreview?.diff ?? '').length,
+					gitStatusOk,
+					isGitChanged,
+				});
+				if (cachedPreview) {
+					isBinary = cachedPreview.isBinary === true;
+					additions = cachedPreview.additions ?? 0;
+					deletions = cachedPreview.deletions ?? 0;
+				}
+				try {
+					const fullDiffResult = (await shell.invoke('git:diffPreview', {
+						relPath: normalizedRel,
+						full: true,
+					})) as
+						| { ok: true; preview: DiffPreview }
+						| { ok: false; error?: string };
+					if (fullDiffResult.ok && fullDiffResult.preview) {
+						previewDiff = String(fullDiffResult.preview.diff ?? '');
+						isBinary = fullDiffResult.preview.isBinary === true;
+						additions = fullDiffResult.preview.additions ?? additions;
+						deletions = fullDiffResult.preview.deletions ?? deletions;
+						reviewMode = 'readonly';
+						voidShellDebugLog('agent-file-preview:open:git-full', {
+							relPath: normalizedRel,
+							diffLength: previewDiff.length,
+							hunkCount: buildAgentFilePreviewHunks(previewDiff).length,
+							isBinary,
+							additions,
+							deletions,
+							diffHead: debugDiffHead(previewDiff),
+						});
+					}
+				} catch {
+					if (cachedPreview) {
+						previewDiff = String(cachedPreview.diff ?? '');
+						isBinary = cachedPreview.isBinary === true;
+						additions = cachedPreview.additions ?? 0;
+						deletions = cachedPreview.deletions ?? 0;
+						reviewMode = 'readonly';
+						voidShellDebugLog('agent-file-preview:open:git-cached-fallback', {
+							relPath: normalizedRel,
+							diffLength: previewDiff.length,
+							hunkCount: buildAgentFilePreviewHunks(previewDiff).length,
+							isBinary,
+							additions,
+							deletions,
+							diffHead: debugDiffHead(previewDiff),
+						});
+					}
+				}
+			}
+
+			if (previewDiff && !isBinary && reviewMode === 'readonly' && buildAgentFilePreviewHunks(previewDiff).length === 0) {
+				try {
+					const fullDiffResult = (await shell.invoke('git:diffPreview', {
+						relPath: normalizedRel,
+						full: true,
+					})) as
+						| { ok: true; preview: DiffPreview }
+						| { ok: false; error?: string };
+					if (fullDiffResult.ok && fullDiffResult.preview) {
+						previewDiff = String(fullDiffResult.preview.diff ?? '');
+						isBinary = fullDiffResult.preview.isBinary === true;
+						additions = fullDiffResult.preview.additions ?? additions;
+						deletions = fullDiffResult.preview.deletions ?? deletions;
+						voidShellDebugLog('agent-file-preview:open:git-retry-full', {
+							relPath: normalizedRel,
+							diffLength: previewDiff.length,
+							hunkCount: buildAgentFilePreviewHunks(previewDiff).length,
+							isBinary,
+							additions,
+							deletions,
+							diffHead: debugDiffHead(previewDiff),
+						});
+					}
+				} catch {
+					/* keep the existing preview fallback */
+				}
+			}
+
+			if (previewDiff) {
+				const stats = countDiffAddDel(previewDiff);
+				additions = additions || stats.additions;
+				deletions = deletions || stats.deletions;
+				readError = null;
+			}
+
+			if (requestId !== agentFilePreviewRequestRef.current) {
+				voidShellDebugLog('agent-file-preview:open:stale', {
+					relPath: normalizedRel,
+					requestId,
+					activeRequestId: agentFilePreviewRequestRef.current,
+				});
+				return;
+			}
+
+			voidShellDebugLog('agent-file-preview:open:final', {
+				relPath: normalizedRel,
+				reviewMode,
+				contentLength: content.length,
+				diffLength: previewDiff.length,
+				hunkCount: buildAgentFilePreviewHunks(previewDiff).length,
+				isBinary,
+				additions,
+				deletions,
+				readError: readError ?? '',
+				diffHead: previewDiff ? debugDiffHead(previewDiff) : '',
+			});
+
+			setAgentFilePreview({
+				relPath: normalizedRel,
+				revealLine: safeRevealLine,
+				revealEndLine: safeRevealEndLine,
+				loading: false,
+				content,
+				diff: previewDiff,
+				isBinary,
+				readError,
+				additions,
+				deletions,
+				reviewMode,
+			});
+		},
+		[currentId, diffPreviews, gitChangedPaths, gitStatusOk, layoutMode, openFileInTab, shell]
+	);
+
 	useEffect(() => {
 		if (isPlanMdPath(filePath.trim())) {
 			setEditorPlanBuildModelId(defaultModel);
@@ -4228,6 +4496,112 @@ export default function App() {
 		window.addEventListener('keydown', handler);
 		return () => window.removeEventListener('keydown', handler);
 	});
+
+	const onAgentConversationOpenFile = useCallback(
+		async (
+			rel: string,
+			revealLine?: number,
+			revealEndLine?: number,
+			options?: AgentConversationFileOpenOptions
+		) => {
+			if (layoutMode === 'agent') {
+				await openAgentSidebarFilePreview(rel, revealLine, revealEndLine, options);
+				return;
+			}
+			await openFileInTab(rel, revealLine, revealEndLine);
+		},
+		[layoutMode, openAgentSidebarFilePreview, openFileInTab]
+	);
+
+	const dismissAgentChangedFile = useCallback((relPath: string) => {
+		if (!currentId) {
+			return;
+		}
+		setDismissedFiles((prev) => {
+			const next = new Set(prev).add(relPath);
+			const last = [...messagesRef.current].reverse().find((m) => m.role === 'assistant');
+			writePersistedAgentFileChanges(currentId, last?.content ?? '', fileChangesDismissedRef.current, next);
+			return next;
+		});
+	}, [currentId]);
+
+	const onAcceptAgentFilePreviewHunk = useCallback(
+		async (patch: string) => {
+			if (!shell || !currentId || !agentFilePreview || !patch.trim()) {
+				return;
+			}
+			setAgentFilePreviewBusyPatch(patch);
+			try {
+				const result = (await shell.invoke('agent:acceptFileHunk', {
+					threadId: currentId,
+					relPath: agentFilePreview.relPath,
+					chunk: patch,
+				})) as { ok?: boolean; cleared?: boolean; error?: string };
+				if (!result?.ok) {
+					flashComposerAttachErr(result?.error ?? 'Unable to accept this change.');
+					return;
+				}
+				if (result.cleared) {
+					dismissAgentChangedFile(agentFilePreview.relPath);
+				}
+				await openAgentSidebarFilePreview(
+					agentFilePreview.relPath,
+					agentFilePreview.revealLine,
+					agentFilePreview.revealEndLine
+				);
+			} finally {
+				setAgentFilePreviewBusyPatch(null);
+			}
+		},
+		[
+			agentFilePreview,
+			currentId,
+			dismissAgentChangedFile,
+			flashComposerAttachErr,
+			openAgentSidebarFilePreview,
+			shell,
+		]
+	);
+
+	const onRevertAgentFilePreviewHunk = useCallback(
+		async (patch: string) => {
+			if (!shell || !currentId || !agentFilePreview || !patch.trim()) {
+				return;
+			}
+			setAgentFilePreviewBusyPatch(patch);
+			try {
+				const result = (await shell.invoke('agent:revertFileHunk', {
+					threadId: currentId,
+					relPath: agentFilePreview.relPath,
+					chunk: patch,
+				})) as { ok?: boolean; cleared?: boolean; error?: string };
+				if (!result?.ok) {
+					flashComposerAttachErr(result?.error ?? 'Unable to revert this change.');
+					return;
+				}
+				if (result.cleared) {
+					dismissAgentChangedFile(agentFilePreview.relPath);
+				}
+				await refreshGit();
+				await openAgentSidebarFilePreview(
+					agentFilePreview.relPath,
+					agentFilePreview.revealLine,
+					agentFilePreview.revealEndLine
+				);
+			} finally {
+				setAgentFilePreviewBusyPatch(null);
+			}
+		},
+		[
+			agentFilePreview,
+			currentId,
+			dismissAgentChangedFile,
+			flashComposerAttachErr,
+			openAgentSidebarFilePreview,
+			refreshGit,
+			shell,
+		]
+	);
 
 	const onExplorerOpenFile = async (rel: string, revealLine?: number, revealEndLine?: number) => {
 		await openFileInTab(rel, revealLine, revealEndLine);
@@ -4415,6 +4789,15 @@ export default function App() {
 			setAgentRightSidebarView('git');
 		}
 	}, [agentRightSidebarView, hasAgentPlanSidebarContent]);
+
+	useEffect(() => {
+		if (!workspace && agentFilePreview) {
+			setAgentFilePreview(null);
+		}
+		if (agentRightSidebarView === 'file' && !agentFilePreview?.relPath) {
+			setAgentRightSidebarView(hasAgentPlanSidebarContent ? 'plan' : 'git');
+		}
+	}, [agentFilePreview, agentRightSidebarView, hasAgentPlanSidebarContent, workspace]);
 
 	useEffect(() => {
 		if (!planTodoDraftOpen) {
@@ -5501,18 +5884,8 @@ export default function App() {
 		try {
 			await shell.invoke('agent:keepFile', currentId, relPath);
 		} catch { /* ignore */ }
-		setDismissedFiles((prev) => {
-			const next = new Set(prev).add(relPath);
-			const last = [...messagesRef.current].reverse().find((m) => m.role === 'assistant');
-			writePersistedAgentFileChanges(
-				currentId,
-				last?.content ?? '',
-				fileChangesDismissedRef.current,
-				next
-			);
-			return next;
-		});
-	}, [shell, currentId]);
+		dismissAgentChangedFile(relPath);
+	}, [dismissAgentChangedFile, shell, currentId]);
 
 	const onRevertFileEdit = useCallback(async (relPath: string) => {
 		if (!shell || !currentId) return;
@@ -5520,18 +5893,8 @@ export default function App() {
 			await shell.invoke('agent:revertFile', currentId, relPath);
 			void refreshGit();
 		} catch { /* ignore */ }
-		setDismissedFiles((prev) => {
-			const next = new Set(prev).add(relPath);
-			const last = [...messagesRef.current].reverse().find((m) => m.role === 'assistant');
-			writePersistedAgentFileChanges(
-				currentId,
-				last?.content ?? '',
-				fileChangesDismissedRef.current,
-				next
-			);
-			return next;
-		});
-	}, [shell, currentId, refreshGit]);
+		dismissAgentChangedFile(relPath);
+	}, [dismissAgentChangedFile, shell, currentId, refreshGit]);
 
 	const syncMessagesScrollIndicators = useCallback(() => {
 		const el = messagesViewportRef.current;
@@ -6320,7 +6683,9 @@ export default function App() {
 								}
 								planUi={composerMode === 'plan'}
 								workspaceRoot={workspace}
-								onOpenAgentFile={(rel, line, end) => void onExplorerOpenFile(rel, line, end)}
+								onOpenAgentFile={(rel, line, end, options) =>
+									void onAgentConversationOpenFile(rel, line, end, options)
+								}
 								onRunCommand={(cmd) => {
 									shell?.invoke('terminal:execLine', cmd).catch(console.error);
 								}}
@@ -6486,7 +6851,9 @@ export default function App() {
 						patches={pendingAgentPatches}
 						workspaceRoot={workspace}
 						busy={agentReviewBusy}
-						onOpenFile={(rel, line) => void onExplorerOpenFile(rel, line)}
+						onOpenFile={(rel, line, end, options) =>
+							void onAgentConversationOpenFile(rel, line, end, options)
+						}
 						onApplyOne={(id) => void onApplyAgentPatchOne(id)}
 						onApplyAll={() => void onApplyAgentPatchesAll()}
 						onDiscard={onDiscardAgentReview}
@@ -6601,7 +6968,9 @@ export default function App() {
 				{hasConversation && composerMode === 'agent' && agentFileChanges.length > 0 && !awaitingReply && !fileChangesDismissed ? (
 					<AgentFileChangesPanel
 						files={agentFileChanges}
-						onOpenFile={(rel, line) => void onExplorerOpenFile(rel, line)}
+						onOpenFile={(rel, line, end, options) =>
+							void onAgentConversationOpenFile(rel, line, end, options)
+						}
 						onKeepAll={onKeepAllEdits}
 						onRevertAll={() => void onRevertAllEdits()}
 						onKeepFile={(rel) => void onKeepFileEdit(rel)}
@@ -6797,12 +7166,16 @@ export default function App() {
 
 	/** 未打开工作区时：Agent / Editor 均显示同一套欢迎页（打开项目、最近项目等） */
 	const isEditorHomeMode = !workspace;
+	const agentFilePreviewTitle =
+		agentFilePreview?.relPath?.split('/').pop() || agentFilePreview?.relPath || t('app.filePreview');
 	const agentRightSidebarTitle =
 		agentRightSidebarView === 'git'
 			? changeCount > 0
 				? t('app.gitUncommitted', { count: String(changeCount) })
 				: t('app.gitNoChanges')
-			: agentPlanPreviewTitle || t('app.planSidebarWaiting');
+			: agentRightSidebarView === 'plan'
+				? agentPlanPreviewTitle || t('app.planSidebarWaiting')
+				: agentFilePreviewTitle;
 	const agentPlanSummaryCard =
 		!awaitingReply && agentPlanEffectivePlan && composerMode === 'plan' ? (
 			<section className="ref-plan-brief-card" aria-label={t('plan.review.label')}>
@@ -7034,6 +7407,122 @@ export default function App() {
 					</div>
 				</section>
 			)}
+		</div>
+	);
+	const agentFileSidebarPanel = agentFilePreview ? (
+		<div className="ref-agent-review-shell">
+			<div className="ref-agent-review-head">
+				<div className="ref-agent-review-title-stack">
+					<span className="ref-agent-review-kicker">{t('app.filePreview')}</span>
+					<span className="ref-agent-review-title">{agentFilePreviewTitle}</span>
+				</div>
+				<div className="ref-right-icon-tabs" aria-label={t('app.rightSidebarViews')}>
+					{hasAgentPlanSidebarContent ? (
+						<button
+							type="button"
+							aria-label={t('app.tabPlan')}
+							title={t('app.tabPlan')}
+							className="ref-right-icon-tab"
+							onClick={() => openAgentRightSidebarView('plan')}
+						>
+							<IconDoc />
+						</button>
+					) : null}
+					<button
+						type="button"
+						aria-label={t('app.tabGit')}
+						title={t('app.tabGit')}
+						className="ref-right-icon-tab"
+						onClick={() => openAgentRightSidebarView('git')}
+					>
+						<IconGitSCM />
+					</button>
+					<button
+						type="button"
+						aria-label={t('common.close')}
+						title={t('common.close')}
+						className="ref-right-icon-tab"
+						onClick={() => setAgentRightSidebarOpen(false)}
+					>
+						<IconCloseSmall />
+					</button>
+				</div>
+			</div>
+			<div className="ref-right-panel-stage">
+				<AgentFilePreviewPanel
+					filePath={agentFilePreview.relPath}
+					content={agentFilePreview.content}
+					diff={agentFilePreview.diff}
+					loading={agentFilePreview.loading}
+					readError={agentFilePreview.readError}
+					isBinary={agentFilePreview.isBinary}
+					revealLine={agentFilePreview.revealLine}
+					revealEndLine={agentFilePreview.revealEndLine}
+					onOpenInEditor={() =>
+						void openFileInTab(
+							agentFilePreview.relPath,
+							agentFilePreview.revealLine,
+							agentFilePreview.revealEndLine
+						)
+					}
+					onAcceptHunk={
+						agentFilePreview.reviewMode === 'snapshot'
+							? (patch) => void onAcceptAgentFilePreviewHunk(patch)
+							: undefined
+					}
+					onRevertHunk={
+						agentFilePreview.reviewMode === 'snapshot'
+							? (patch) => void onRevertAgentFilePreviewHunk(patch)
+							: undefined
+					}
+					busyHunkPatch={agentFilePreviewBusyPatch}
+				/>
+			</div>
+		</div>
+	) : (
+		<div className="ref-agent-review-shell">
+			<div className="ref-agent-review-head">
+				<div className="ref-agent-review-title-stack">
+					<span className="ref-agent-review-kicker">{t('app.filePreview')}</span>
+					<span className="ref-agent-review-title">{t('app.filePreview')}</span>
+				</div>
+				<div className="ref-right-icon-tabs" aria-label={t('app.rightSidebarViews')}>
+					{hasAgentPlanSidebarContent ? (
+						<button
+							type="button"
+							aria-label={t('app.tabPlan')}
+							title={t('app.tabPlan')}
+							className="ref-right-icon-tab"
+							onClick={() => openAgentRightSidebarView('plan')}
+						>
+							<IconDoc />
+						</button>
+					) : null}
+					<button
+						type="button"
+						aria-label={t('app.tabGit')}
+						title={t('app.tabGit')}
+						className="ref-right-icon-tab"
+						onClick={() => openAgentRightSidebarView('git')}
+					>
+						<IconGitSCM />
+					</button>
+					<button
+						type="button"
+						aria-label={t('common.close')}
+						title={t('common.close')}
+						className="ref-right-icon-tab"
+						onClick={() => setAgentRightSidebarOpen(false)}
+					>
+						<IconCloseSmall />
+					</button>
+				</div>
+			</div>
+			<div className="ref-right-panel-stage">
+				<div className="ref-agent-file-preview-state ref-agent-file-preview-state--empty">
+					{t('app.selectFileToView')}
+				</div>
+			</div>
 		</div>
 	);
 
@@ -8524,6 +9013,8 @@ export default function App() {
 				>
 					{agentRightSidebarView === 'plan' ? (
 						agentPlanSidebarPanel
+					) : agentRightSidebarView === 'file' ? (
+						agentFileSidebarPanel
 					) : (
 						<div className="ref-agent-review-shell">
 							<div className="ref-agent-review-head">

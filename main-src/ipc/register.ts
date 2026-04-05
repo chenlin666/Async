@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, clipboard } from 'electron';
 import { createAppWindow } from '../appWindow.js';
 import { applyThemeChromeToWindow, type NativeChromeOverride, type ThemeChromeScheme } from '../themeChrome.js';
+import { applyPatch, formatPatch, parsePatch, reversePatch } from 'diff';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -220,6 +221,39 @@ const mistakeLimitWaiters = new Map<string, (d: MistakeLimitDecision) => void>()
 
 function activeUsageStatsDir(): string | null {
 	return resolveUsageStatsDataDir(getSettings());
+}
+
+function readWorkspaceTextFileIfExists(relPath: string): string | null {
+	const full = resolveWorkspacePath(relPath);
+	if (!fs.existsSync(full)) {
+		return null;
+	}
+	return fs.readFileSync(full, 'utf8');
+}
+
+function contentsEqual(a: string | null, b: string | null): boolean {
+	return (a ?? null) === (b ?? null);
+}
+
+function normalizePatchChunk(chunk: string): string {
+	return String(chunk ?? '').replace(/\r\n/g, '\n').trim();
+}
+
+function reverseUnifiedPatch(chunk: string): string | null {
+	const normalized = normalizePatchChunk(chunk);
+	if (!normalized) {
+		return null;
+	}
+	try {
+		const patches = parsePatch(normalized);
+		const first = patches[0];
+		if (!first) {
+			return null;
+		}
+		return formatPatch(reversePatch(first)).trim();
+	} catch {
+		return null;
+	}
 }
 
 function recordTurnTokenUsageStats(
@@ -1625,6 +1659,94 @@ export function registerIpc(): void {
 		return { ok: true as const };
 	});
 
+	ipcMain.handle('agent:getFileSnapshot', (_e, threadId: string, relPath: string) => {
+		const snapshots = agentRevertSnapshotsByThread.get(String(threadId ?? ''));
+		if (!snapshots || !snapshots.has(relPath)) {
+			return { ok: true as const, hasSnapshot: false as const };
+		}
+		return {
+			ok: true as const,
+			hasSnapshot: true as const,
+			previousContent: snapshots.get(relPath) ?? null,
+		};
+	});
+
+	ipcMain.handle(
+		'agent:acceptFileHunk',
+		(_e, payload: { threadId?: string; relPath?: string; chunk?: string }) => {
+			const threadId = String(payload?.threadId ?? '');
+			const relPath = String(payload?.relPath ?? '');
+			const chunk = normalizePatchChunk(payload?.chunk ?? '');
+			const snapshots = agentRevertSnapshotsByThread.get(threadId);
+			if (!threadId || !relPath || !chunk || !snapshots || !snapshots.has(relPath)) {
+				return { ok: false as const, error: 'missing-snapshot' as const };
+			}
+
+			const previousContent = snapshots.get(relPath) ?? null;
+			const baseline = previousContent ?? '';
+			const nextBaseline = applyPatch(baseline, chunk, { fuzzFactor: 3 });
+			if (nextBaseline === false) {
+				return { ok: false as const, error: 'apply-failed' as const };
+			}
+
+			const currentContent = readWorkspaceTextFileIfExists(relPath);
+			if (contentsEqual(nextBaseline, currentContent)) {
+				snapshots.delete(relPath);
+			} else {
+				snapshots.set(relPath, nextBaseline);
+			}
+			if (snapshots.size === 0) {
+				agentRevertSnapshotsByThread.delete(threadId);
+			}
+			return { ok: true as const, cleared: !snapshots.has(relPath) };
+		}
+	);
+
+	ipcMain.handle(
+		'agent:revertFileHunk',
+		(_e, payload: { threadId?: string; relPath?: string; chunk?: string }) => {
+			const threadId = String(payload?.threadId ?? '');
+			const relPath = String(payload?.relPath ?? '');
+			const chunk = normalizePatchChunk(payload?.chunk ?? '');
+			const snapshots = agentRevertSnapshotsByThread.get(threadId);
+			if (!threadId || !relPath || !chunk || !snapshots || !snapshots.has(relPath)) {
+				return { ok: false as const, error: 'missing-snapshot' as const };
+			}
+
+			const reversed = reverseUnifiedPatch(chunk);
+			if (!reversed) {
+				return { ok: false as const, error: 'reverse-failed' as const };
+			}
+
+			const previousContent = snapshots.get(relPath) ?? null;
+			const currentContent = readWorkspaceTextFileIfExists(relPath);
+			const currentText = currentContent ?? '';
+			const reverted = applyPatch(currentText, reversed, { fuzzFactor: 3 });
+			if (reverted === false) {
+				return { ok: false as const, error: 'apply-failed' as const };
+			}
+
+			const full = resolveWorkspacePath(relPath);
+			if (previousContent === null && reverted === '') {
+				if (fs.existsSync(full)) {
+					fs.unlinkSync(full);
+				}
+			} else {
+				fs.mkdirSync(path.dirname(full), { recursive: true });
+				fs.writeFileSync(full, reverted, 'utf8');
+			}
+
+			const nextContent = readWorkspaceTextFileIfExists(relPath);
+			if (contentsEqual(previousContent, nextContent)) {
+				snapshots.delete(relPath);
+			}
+			if (snapshots.size === 0) {
+				agentRevertSnapshotsByThread.delete(threadId);
+			}
+			return { ok: true as const, cleared: !snapshots.has(relPath) };
+		}
+	);
+
 	ipcMain.handle('agent:revertFile', (_e, threadId: string, relPath: string) => {
 		const snapshots = agentRevertSnapshotsByThread.get(threadId);
 		if (!snapshots || !snapshots.has(relPath)) {
@@ -1955,6 +2077,38 @@ export function registerIpc(): void {
 			return { ok: false as const, error: String(e) };
 		}
 	});
+
+	ipcMain.handle(
+		'git:diffPreview',
+		async (_e, payload: { relPath?: string; full?: boolean; maxChars?: number | null }) => {
+			try {
+				const root = getWorkspaceRoot();
+				if (!root) {
+					return { ok: false as const, error: 'No workspace' };
+				}
+				const relPath = String(payload?.relPath ?? '').trim();
+				if (!relPath) {
+					return { ok: false as const, error: 'Bad path' };
+				}
+				const preview = await gitService.getDiffPreview(relPath, {
+					maxChars: payload?.full ? null : payload?.maxChars,
+				});
+				console.log('[git:diffPreview]', {
+					relPath,
+					full: payload?.full === true,
+					maxChars: payload?.maxChars ?? null,
+					diffLength: String(preview.diff ?? '').length,
+					isBinary: preview.isBinary,
+					additions: preview.additions,
+					deletions: preview.deletions,
+					diffHead: String(preview.diff ?? '').replace(/\s+/g, ' ').slice(0, 160),
+				});
+				return { ok: true as const, preview };
+			} catch (e) {
+				return { ok: false as const, error: String(e) };
+			}
+		}
+	);
 
 	ipcMain.handle('git:listBranches', async () => {
 		try {

@@ -218,6 +218,9 @@ export const messagesEn: Record<string, string> = {
 	'explorer.errRename': 'Could not rename.',
 	'explorer.errDelete': 'Could not delete.',
 	'app.filePreview': 'File preview',
+	'app.filePreviewChangeLabel': 'AI change',
+	'app.filePreviewAcceptChange': 'Accept',
+	'app.filePreviewRevertChange': 'Revert',
 	'app.noFileSelected': 'No file selected',
 	'app.editorEmptyTitle': 'Open a file to start editing',
 	'app.editorEmptyDescription':
