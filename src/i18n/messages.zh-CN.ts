@@ -1026,4 +1026,7 @@ export const messagesZhCN: Record<string, string> = {
 	'app.filePreviewChangeLabel': 'AI 改动',
 	'app.filePreviewAcceptChange': '保留',
 	'app.filePreviewRevertChange': '撤销',
+	'agent.commandPermission.aria': '执行命令权限',
+	'agent.commandPermission.ask': '每次询问',
+	'agent.commandPermission.always': '总是执行',
 };

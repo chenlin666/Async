@@ -566,6 +566,9 @@ export const messagesEn: Record<string, string> = {
 	'agent.toolApproval.titleWrite': 'Allow this file write?',
 	'agent.toolApproval.allow': 'Allow',
 	'agent.toolApproval.deny': 'Deny',
+	'agent.commandPermission.aria': 'Command execution permission',
+	'agent.commandPermission.ask': 'Ask every time',
+	'agent.commandPermission.always': 'Always run',
 	'agent.mistakeLimit.title': 'Repeated tool failures',
 	'agent.mistakeLimit.body':
 		'{count} tool calls in a row have failed (threshold {threshold}). Continue, add guidance, or stop this run.',

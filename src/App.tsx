@@ -59,6 +59,10 @@ import {
 import { ModelPickerDropdown, type ModelPickerItem } from './ModelPickerDropdown';
 import { GitBranchPickerDropdown } from './GitBranchPickerDropdown';
 import { VoidSelect } from './VoidSelect';
+import {
+	AgentCommandPermissionDropdown,
+	type CommandPermissionMode,
+} from './AgentCommandPermissionDropdown';
 import type { SettingsNavId } from './SettingsPage';
 import {
 	applyThemePresetToAppearance,
@@ -517,6 +521,10 @@ function changeBadgeVariant(gitLabel: string | undefined): string {
 		return k;
 	}
 	return 'misc';
+}
+
+function shellCommandPermissionMode(agent: AgentCustomization | undefined): CommandPermissionMode {
+	return agent?.confirmShellCommands === false ? 'always' : 'ask';
 }
 
 function GitDiffLines({ diff, t }: { diff: string; t: TFunction }) {
@@ -6542,9 +6550,37 @@ export default function App() {
 		persistRailWidths(defaultQuarterRailWidths());
 	}, [persistRailWidths]);
 
+	const commandPermissionMode = shellCommandPermissionMode(agentCustomization);
+
+	const onChangeCommandPermissionMode = useCallback(
+		async (mode: CommandPermissionMode) => {
+			const patch: Partial<AgentCustomization> =
+				mode === 'always'
+					? { confirmShellCommands: false }
+					: {
+							confirmShellCommands: true,
+							skipSafeShellCommandsConfirm: false,
+						};
+			setAgentCustomization((prev) => ({ ...prev, ...patch }));
+			if (!shell) {
+				return;
+			}
+			await shell.invoke('settings:set', { agent: patch });
+		},
+		[shell]
+	);
+
 	const composerGitBranchRowEl = useMemo(
 		() => (
 			<div className="ref-composer-git-branch-row">
+				<AgentCommandPermissionDropdown
+					value={commandPermissionMode}
+					onChange={(mode) => void onChangeCommandPermissionMode(mode)}
+					askLabel={t('agent.commandPermission.ask')}
+					alwaysLabel={t('agent.commandPermission.always')}
+					ariaLabel={t('agent.commandPermission.aria')}
+					disabled={!shell}
+				/>
 				<button
 					ref={composerGitBranchAnchorRef}
 					type="button"
@@ -6571,7 +6607,7 @@ export default function App() {
 				</button>
 			</div>
 		),
-		[gitBranch, gitBranchPickerOpen, gitStatusOk, t]
+		[commandPermissionMode, gitBranch, gitBranchPickerOpen, gitStatusOk, onChangeCommandPermissionMode, shell, t]
 	);
 
 	const renderStackedChatComposer = (

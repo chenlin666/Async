@@ -271,6 +271,7 @@
 :root[data-ui-style='mac-codex'] .ref-at-menu,
 :root[data-ui-style='mac-codex'] .ref-slash-menu,
 :root[data-ui-style='mac-codex'] .ref-plus-menu,
+:root[data-ui-style='mac-codex'] .ref-command-permission-menu,
 :root[data-ui-style='mac-codex'] .ref-void-select-menu,
 :root[data-ui-style='mac-codex'] .ref-explorer-ctx-menu {
 	background: var(--surface-popover-bg);
@@ -308,6 +309,21 @@
 :root[data-ui-style='mac-codex'] .ref-void-select-trigger:focus-visible {
 	border-color: var(--void-input-focus-border, color-mix(in srgb, var(--color-accent) 64%, var(--surface-glass-stroke)));
 	box-shadow: var(--void-input-focus-shadow, 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent));
+}
+
+:root[data-ui-style='mac-codex'] .ref-command-permission-trigger {
+	box-shadow:
+		inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 5%, transparent),
+		0 10px 22px color-mix(in srgb, var(--ref-command-permission-tone) 12%, transparent);
+}
+
+:root[data-ui-style='mac-codex'] .ref-command-permission-trigger:focus,
+:root[data-ui-style='mac-codex'] .ref-command-permission-trigger:focus-visible {
+	border-color: color-mix(in srgb, var(--ref-command-permission-tone) 54%, var(--surface-glass-stroke));
+	box-shadow:
+		inset 0 1px 0 color-mix(in srgb, var(--color-text-primary) 5%, transparent),
+		0 0 0 3px color-mix(in srgb, var(--ref-command-permission-tone) 18%, transparent),
+		0 10px 22px color-mix(in srgb, var(--ref-command-permission-tone) 14%, transparent);
 }
 
 :root[data-ui-style='mac-codex'] .ref-quick-open-input-wrap,

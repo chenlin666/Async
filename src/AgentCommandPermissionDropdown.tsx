@@ -1,0 +1,239 @@
+import type { CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { computeClampedPopoverLayout, type ClampedPopoverLayout } from './anchorPopoverLayout';
+
+export type CommandPermissionMode = 'ask' | 'always';
+
+type Props = {
+	value: CommandPermissionMode;
+	onChange: (next: CommandPermissionMode) => void;
+	askLabel: string;
+	alwaysLabel: string;
+	ariaLabel: string;
+	disabled?: boolean;
+};
+
+const MENU_Z = 6000;
+
+function IconShield({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden>
+			<path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-3z" strokeLinejoin="round" />
+		</svg>
+	);
+}
+
+function IconSpark({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+			<path d="M12 3l1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7L12 3z" strokeLinejoin="round" />
+		</svg>
+	);
+}
+
+function IconCheck({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+			<path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+		</svg>
+	);
+}
+
+function IconChevron({ className }: { className?: string }) {
+	return (
+		<svg className={className} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+			<path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+		</svg>
+	);
+}
+
+export function AgentCommandPermissionDropdown({
+	value,
+	onChange,
+	askLabel,
+	alwaysLabel,
+	ariaLabel,
+	disabled,
+}: Props) {
+	const triggerRef = useRef<HTMLButtonElement>(null);
+	const menuRef = useRef<HTMLDivElement>(null);
+	const triggerId = useId();
+	const titleId = `${triggerId}-title`;
+	const listId = `${triggerId}-listbox`;
+	const [open, setOpen] = useState(false);
+	const [layout, setLayout] = useState<ClampedPopoverLayout>({
+		placement: 'below',
+		left: 0,
+		width: 184,
+		top: 80,
+		maxHeightPx: 160,
+		minHeightPx: 80,
+	});
+
+	const options = useMemo(
+		() => [
+			{ value: 'ask' as const, label: askLabel, icon: IconShield },
+			{ value: 'always' as const, label: alwaysLabel, icon: IconSpark },
+		],
+		[askLabel, alwaysLabel]
+	);
+
+	const selected = options.find((option) => option.value === value) ?? options[0];
+	const SelectedIcon = selected.icon;
+	const triggerModeClass = `ref-command-permission-trigger--${selected.value}`;
+
+	const recompute = useCallback(() => {
+		const trigger = triggerRef.current;
+		const menu = menuRef.current;
+		if (!trigger || !menu) {
+			return;
+		}
+		const rect = trigger.getBoundingClientRect();
+		const menuWidth = Math.max(180, Math.ceil(rect.width));
+		const naturalHeight = Math.min(240, Math.max(menu.scrollHeight, options.length * 46 + 12));
+		setLayout(
+			computeClampedPopoverLayout(rect, {
+				viewportWidth: window.innerWidth,
+				viewportHeight: window.innerHeight,
+				menuWidth,
+				contentHeight: naturalHeight,
+			})
+		);
+	}, [options.length]);
+
+	useLayoutEffect(() => {
+		if (!open) {
+			return;
+		}
+		recompute();
+		const id = requestAnimationFrame(recompute);
+		return () => cancelAnimationFrame(id);
+	}, [open, recompute, value]);
+
+	useEffect(() => {
+		if (!open) {
+			return;
+		}
+		const onScroll = () => recompute();
+		const onResize = () => recompute();
+		window.addEventListener('scroll', onScroll, true);
+		window.addEventListener('resize', onResize);
+		return () => {
+			window.removeEventListener('scroll', onScroll, true);
+			window.removeEventListener('resize', onResize);
+		};
+	}, [open, recompute]);
+
+	useEffect(() => {
+		if (!open) {
+			return;
+		}
+		const onDoc = (event: MouseEvent) => {
+			const target = event.target as Node;
+			if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) {
+				return;
+			}
+			setOpen(false);
+		};
+		document.addEventListener('mousedown', onDoc);
+		return () => document.removeEventListener('mousedown', onDoc);
+	}, [open]);
+
+	useEffect(() => {
+		if (!open) {
+			return;
+		}
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') {
+				event.preventDefault();
+				setOpen(false);
+				triggerRef.current?.focus();
+			}
+		};
+		document.addEventListener('keydown', onKey);
+		return () => document.removeEventListener('keydown', onKey);
+	}, [open]);
+
+	const menuStyle: CSSProperties = {
+		position: 'fixed',
+		zIndex: MENU_Z,
+		left: layout.left,
+		width: layout.width,
+		maxHeight: layout.maxHeightPx,
+		minHeight: Math.min(layout.minHeightPx, layout.maxHeightPx),
+		overflow: 'auto',
+		...(layout.placement === 'below' ? { top: layout.top } : { bottom: layout.bottom }),
+	};
+
+	const menu = open ? (
+		<div
+			ref={menuRef}
+			className="ref-command-permission-menu"
+			role="dialog"
+			aria-labelledby={titleId}
+			style={menuStyle}
+		>
+			<div id={titleId} className="ref-command-permission-menu-title">
+				{ariaLabel}
+			</div>
+			<div id={listId} className="ref-command-permission-menu-list" role="listbox" aria-labelledby={titleId}>
+				{options.map((option) => {
+					const isSelected = option.value === value;
+					const OptionIcon = option.icon;
+					return (
+						<button
+							key={option.value}
+							type="button"
+							role="option"
+							aria-selected={isSelected}
+							className={`ref-command-permission-option ref-command-permission-option--${option.value} ${isSelected ? 'is-selected' : ''}`}
+							onClick={() => {
+								onChange(option.value);
+								setOpen(false);
+								triggerRef.current?.focus();
+							}}
+						>
+							<span className="ref-command-permission-option-main">
+								<span className="ref-command-permission-option-ico-wrap">
+									<OptionIcon className="ref-command-permission-option-ico" />
+								</span>
+								<span className="ref-command-permission-option-label">{option.label}</span>
+							</span>
+							{isSelected ? <IconCheck className="ref-command-permission-option-check" /> : null}
+						</button>
+					);
+				})}
+			</div>
+		</div>
+	) : null;
+
+	return (
+		<div className="ref-command-permission">
+			<button
+				ref={triggerRef}
+				id={triggerId}
+				type="button"
+				className={`ref-command-permission-trigger ${triggerModeClass} ${open ? 'is-open' : ''}`}
+				aria-label={ariaLabel}
+				aria-haspopup="listbox"
+				aria-expanded={open}
+				aria-controls={open ? listId : undefined}
+				disabled={disabled}
+				onClick={() => {
+					if (disabled) {
+						return;
+					}
+					setOpen((prev) => !prev);
+				}}
+			>
+				<span className="ref-command-permission-trigger-ico-wrap">
+					<SelectedIcon className="ref-command-permission-trigger-ico" />
+				</span>
+				<span className="ref-command-permission-trigger-label">{selected.label}</span>
+				<IconChevron className="ref-command-permission-trigger-chev" />
+			</button>
+			{typeof document !== 'undefined' && menu ? createPortal(menu, document.body) : null}
+		</div>
+	);
+}
