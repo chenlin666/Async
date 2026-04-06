@@ -614,6 +614,13 @@ export function useFileOperations(p: UseFileOperationsParams) {
 		await shell.invoke('app:newWindow');
 	}, [shell]);
 
+	const fileMenuNewEditorWindow = useCallback(async () => {
+		if (!shell) {
+			return;
+		}
+		await shell.invoke('app:newEditorWindow');
+	}, [shell]);
+
 	const fileMenuQuit = useCallback(async () => {
 		if (shell) {
 			await shell.invoke('app:quit');
@@ -661,6 +668,7 @@ export function useFileOperations(p: UseFileOperationsParams) {
 		fileMenuRevertFile,
 		fileMenuCloseEditor,
 		fileMenuNewWindow,
+		fileMenuNewEditorWindow,
 		fileMenuQuit,
 		closeEditorTerminalSession,
 		spawnEditorTerminal,

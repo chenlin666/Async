@@ -17,6 +17,7 @@ export interface AppMenubarProps {
 	canCloseFolder: boolean;
 	onNewFile: () => void;
 	onNewWindow: () => void;
+	onNewEditorWindow: () => void;
 	onOpenFile: () => void;
 	onOpenFolder: () => void;
 	onOpenRecentPath: (path: string) => void;
@@ -72,7 +73,7 @@ export const AppMenubar = memo(function AppMenubar(props: AppMenubarProps) {
 	const {
 		layoutMode,
 		folderRecents, canSave, canEditorClose, canCloseFolder,
-		onNewFile, onNewWindow, onOpenFile, onOpenFolder, onOpenRecentPath,
+		onNewFile, onNewWindow, onNewEditorWindow, onOpenFile, onOpenFolder, onOpenRecentPath,
 		onSave, onSaveAs, onRevert, onCloseEditor, onCloseFolder, onQuit,
 		canEditUndoRedo, canEditCut, canEditCopy, canEditPaste, canEditSelectAll,
 		executeEditAction,
@@ -289,6 +290,7 @@ export const AppMenubar = memo(function AppMenubar(props: AppMenubarProps) {
 								isDesktopShell={!!shell}
 								windowMaximized={localWindowMaximized}
 								onNewWindow={onNewWindow}
+								onNewEditorWindow={onNewEditorWindow}
 								onMinimize={onMinimize}
 								onToggleMaximize={onToggleMaximize}
 								onCloseWindow={onCloseWindow}

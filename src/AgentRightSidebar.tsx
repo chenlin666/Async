@@ -78,17 +78,45 @@ export type AgentRightSidebarProps = {
 	gitActionError: string | null;
 };
 
+/** 侧栏卡片：去掉 `diff --git` / `index` / `---` / `+++` 文件头；并省略 `@@ … @@` hunk 行（仅预览里不展示行号范围头，正文仍是标准 unified diff 的 +/- 与上下文行） */
+function trimGitDiffForSidebarCard(raw: string): string {
+	const lines = raw.split('\n');
+	const idx = lines.findIndex((l) => l.startsWith('@@'));
+	if (idx < 0) {
+		return raw;
+	}
+	const body = lines.slice(idx).filter((l) => !l.startsWith('@@'));
+	return body.join('\n');
+}
+
+function gitSidebarDiffLineClass(line: string): string {
+	const base = 'ref-git-diff-line';
+	if (line.startsWith('+') && !line.startsWith('+++')) {
+		return `${base} is-add`;
+	}
+	if (line.startsWith('-') && !line.startsWith('---')) {
+		return `${base} is-del`;
+	}
+	if (
+		line.startsWith('diff --git') ||
+		line.startsWith('index ') ||
+		line.startsWith('--- ') ||
+		line.startsWith('+++ ') ||
+		line.startsWith('Binary files ') ||
+		line.startsWith('GIT binary patch')
+	) {
+		return `${base} is-meta`;
+	}
+	return base;
+}
+
 function GitDiffLines({ diff, t }: { diff: string; t: TFunction }) {
-	const lines = diff.split('\n').slice(0, 120);
+	const trimmed = trimGitDiffForSidebarCard(diff);
+	const lines = trimmed.split('\n').slice(0, 120);
 	return (
 		<div className="ref-git-card-diff" role="region" aria-label={t('git.diffPreview')}>
 			{lines.map((line, i) => {
-				const mod =
-					line.startsWith('+') && !line.startsWith('+++')
-						? 'ref-git-card-line is-add'
-						: line.startsWith('-') && !line.startsWith('---')
-							? 'ref-git-card-line is-del'
-							: 'ref-git-card-line';
+				const mod = gitSidebarDiffLineClass(line);
 				return (
 					<div key={i} className={mod}>
 						{line || '\u00a0'}

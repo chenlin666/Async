@@ -167,7 +167,6 @@ import {
 	clampEditorTerminalHeight,
 	EDITOR_TERMINAL_H_MAX_RATIO,
 	EDITOR_TERMINAL_H_MIN,
-	EDITOR_TERMINAL_HEIGHT_KEY,
 } from './hooks/useEditorTabs';
 import { AgentChatPanel } from './AgentChatPanel';
 import { AgentLeftSidebar } from './AgentLeftSidebar';
@@ -248,8 +247,8 @@ function stripMarkdownSection(markdown: string, headingPattern: string): string 
 	return markdown.replace(regex, '').replace(/\n{3,}/g, '\n\n').trim();
 }
 type DiffPreview = { diff: string; isBinary: boolean; additions: number; deletions: number };
-const SIDEBAR_LAYOUT_KEY = 'async:sidebar-widths-v1';
-const SHELL_LAYOUT_MODE_KEY = 'async:shell-layout-mode-v1';
+const DEFAULT_SIDEBAR_LAYOUT_KEY = 'async:sidebar-widths-v1';
+const DEFAULT_SHELL_LAYOUT_MODE_KEY = 'async:shell-layout-mode-v1';
 function sameStringArray(a: string[], b: string[]): boolean {
 	if (a.length !== b.length) {
 		return false;
@@ -346,10 +345,10 @@ function syncDesktopSidebarLayout(
 	});
 }
 
-function readStoredShellLayoutMode(): LayoutMode {
+function readStoredShellLayoutModeFromKey(storageKey: string): LayoutMode {
 	try {
 		if (typeof window !== 'undefined') {
-			const v = localStorage.getItem(SHELL_LAYOUT_MODE_KEY);
+			const v = localStorage.getItem(storageKey);
 			if (v === 'agent' || v === 'editor') {
 				return v;
 			}
@@ -360,9 +359,9 @@ function readStoredShellLayoutMode(): LayoutMode {
 	return 'agent';
 }
 
-function writeStoredShellLayoutMode(m: LayoutMode) {
+function writeStoredShellLayoutMode(m: LayoutMode, storageKey: string) {
 	try {
-		localStorage.setItem(SHELL_LAYOUT_MODE_KEY, m);
+		localStorage.setItem(storageKey, m);
 	} catch {
 		/* ignore */
 	}
@@ -378,10 +377,10 @@ function syncDesktopShellLayoutMode(
 	void shell.invoke('settings:set', { ui: { layoutMode: m } });
 }
 
-function readSidebarLayout(): { left: number; right: number } {
+function readSidebarLayout(storageKey: string = DEFAULT_SIDEBAR_LAYOUT_KEY): { left: number; right: number } {
 	try {
 		if (typeof window !== 'undefined') {
-			const raw = localStorage.getItem(SIDEBAR_LAYOUT_KEY);
+			const raw = localStorage.getItem(storageKey);
 			if (raw) {
 				const j = JSON.parse(raw) as { left?: unknown; right?: unknown };
 				if (
@@ -467,8 +466,12 @@ function isEditableDomTarget(target: EventTarget | null): boolean {
 	return tag === 'input' || tag === 'textarea' || target.isContentEditable;
 }
 
-export default function App() {
+export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 	const shell = useAsyncShell();
+	const layoutPinnedBySurface = appSurface !== undefined;
+	const shellLsPrefix = appSurface === 'editor' ? 'void-shell:editor:' : '';
+	const shellLayoutStorageKey = `${shellLsPrefix}${DEFAULT_SHELL_LAYOUT_MODE_KEY}`;
+	const sidebarLayoutStorageKey = `${shellLsPrefix}${DEFAULT_SIDEBAR_LAYOUT_KEY}`;
 	const [colorMode, setColorMode] = useState<AppColorMode>(() => readStoredColorMode());
 	const [appearanceSettings, setAppearanceSettings] = useState<AppAppearanceSettings>(() => defaultAppearanceSettings());
 	const { effectiveScheme, setTransitionOrigin } = useAppColorScheme({ colorMode });
@@ -823,7 +826,9 @@ export default function App() {
 	const [editorSettings, setEditorSettings] = useState<EditorSettings>(() => defaultEditorSettings());
 	const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
 	const [mcpStatuses, setMcpStatuses] = useState<McpServerStatus[]>([]);
-	const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => readStoredShellLayoutMode());
+	const [layoutMode, setLayoutMode] = useState<LayoutMode>(() =>
+		layoutPinnedBySurface && appSurface ? appSurface : readStoredShellLayoutModeFromKey(shellLayoutStorageKey)
+	);
 	const [editorLeftSidebarView, setEditorLeftSidebarView] = useState<EditorLeftSidebarView>('explorer');
 	const [editorExplorerCollapsed, setEditorExplorerCollapsed] = useState(false);
 	const [editorSidebarSearchQuery, setEditorSidebarSearchQuery] = useState('');
@@ -869,7 +874,8 @@ export default function App() {
 		monacoEditorRef,
 		editorLoadRequestRef,
 		pendingEditorHighlightRangeRef,
-	} = useEditorTabs();
+		editorTerminalHeightLsKey,
+	} = useEditorTabs({ isolatedEditorSurface: appSurface === 'editor' });
 	const monacoDiffChangeDisposableRef = useRef<{ dispose(): void } | null>(null);
 	useEffect(() => () => monacoDiffChangeDisposableRef.current?.dispose(), []);
 
@@ -898,7 +904,7 @@ export default function App() {
 	const editorMoreMenuRef = useRef<HTMLDivElement>(null);
 	const [homePath, setHomePath] = useState('');
 	const [railWidths, setRailWidths] = useState(() => {
-		const s = readSidebarLayout();
+		const s = readSidebarLayout(sidebarLayoutStorageKey);
 		return clampSidebarLayout(s.left, s.right);
 	});
 	const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
@@ -1680,23 +1686,25 @@ export default function App() {
 					const rw = clampSidebarLayout(left, right);
 					setRailWidths(rw);
 					try {
-						localStorage.setItem(SIDEBAR_LAYOUT_KEY, JSON.stringify(rw));
+						localStorage.setItem(sidebarLayoutStorageKey, JSON.stringify(rw));
 					} catch {
 						/* ignore */
 					}
 				} else {
 					/** 桌面端曾仅依赖 file:// localStorage，易丢；首次把当前布局写入 settings.json */
-					const s0 = readSidebarLayout();
+					const s0 = readSidebarLayout(sidebarLayoutStorageKey);
 					syncDesktopSidebarLayout(shell, clampSidebarLayout(s0.left, s0.right));
 				}
-				const lmRaw = st.ui?.layoutMode;
-				if (lmRaw === 'agent' || lmRaw === 'editor') {
-					setLayoutMode(lmRaw);
-					writeStoredShellLayoutMode(lmRaw);
-				} else {
-					const lm0 = readStoredShellLayoutMode();
-					setLayoutMode(lm0);
-					syncDesktopShellLayoutMode(shell, lm0);
+				if (!layoutPinnedBySurface) {
+					const lmRaw = st.ui?.layoutMode;
+					if (lmRaw === 'agent' || lmRaw === 'editor') {
+						setLayoutMode(lmRaw);
+						writeStoredShellLayoutMode(lmRaw, shellLayoutStorageKey);
+					} else {
+						const lm0 = readStoredShellLayoutModeFromKey(shellLayoutStorageKey);
+						setLayoutMode(lm0);
+						syncDesktopShellLayoutMode(shell, lm0);
+					}
 				}
 				const rawProviders = Array.isArray(st.models?.providers) ? st.models!.providers! : [];
 				setModelProviders(rawProviders);
@@ -1751,7 +1759,16 @@ export default function App() {
 				setIpcOk(String(e));
 			}
 		})();
-	}, [shell, refreshThreads, refreshGit, t, setLocale]);
+	}, [
+		shell,
+		refreshThreads,
+		refreshGit,
+		t,
+		setLocale,
+		layoutPinnedBySurface,
+		shellLayoutStorageKey,
+		sidebarLayoutStorageKey,
+	]);
 
 	useEffect(() => {
 		if (!shell?.subscribeThemeMode) {
@@ -3027,6 +3044,10 @@ export default function App() {
 	/** 仅工具栏切换时持久化；打开文件等临时切到 editor 不写偏好 */
 	const pickShellLayoutMode = useCallback(
 		(next: LayoutMode) => {
+			if (layoutPinnedBySurface) {
+				setLayoutSwitchTarget(null);
+				return;
+			}
 			if (next === layoutMode) {
 				setLayoutSwitchTarget(null);
 				return;
@@ -3034,13 +3055,13 @@ export default function App() {
 			setLayoutSwitchTarget(next);
 			startLayoutSwitchTransition(() => {
 				setLayoutMode(next);
-				writeStoredShellLayoutMode(next);
+				writeStoredShellLayoutMode(next, shellLayoutStorageKey);
 				if (shell) {
 					void shell.invoke('settings:set', { ui: { layoutMode: next } });
 				}
 			});
 		},
-		[layoutMode, shell]
+		[layoutMode, shell, layoutPinnedBySurface, shellLayoutStorageKey]
 	);
 
 	useEffect(() => {
@@ -3099,7 +3120,7 @@ export default function App() {
 				usePointerCursors: appearanceSettings.usePointerCursors,
 				uiFontSize: appearanceSettings.uiFontSize,
 				codeFontSize: appearanceSettings.codeFontSize,
-				layoutMode,
+				...(layoutPinnedBySurface ? {} : { layoutMode }),
 			},
 		});
 	}, [
@@ -3117,6 +3138,7 @@ export default function App() {
 		colorMode,
 		appearanceSettings,
 		layoutMode,
+		layoutPinnedBySurface,
 	]);
 
 	/** 离开设置页时写入磁盘（返回、点遮罩、Esc 等） */
@@ -3132,13 +3154,16 @@ export default function App() {
 
 	const switchLayoutModeFromSettings = useCallback(
 		async (next: LayoutMode) => {
+			if (layoutPinnedBySurface) {
+				return;
+			}
 			if (next === layoutMode) {
 				return;
 			}
 			await closeSettingsPage();
 			pickShellLayoutMode(next);
 		},
-		[closeSettingsPage, layoutMode, pickShellLayoutMode]
+		[closeSettingsPage, layoutMode, pickShellLayoutMode, layoutPinnedBySurface]
 	);
 
 	const startSkillCreatorFlow = useCallback(async () => {
@@ -3273,6 +3298,7 @@ export default function App() {
 		fileMenuRevertFile,
 		fileMenuCloseEditor,
 		fileMenuNewWindow,
+		fileMenuNewEditorWindow,
 		fileMenuQuit,
 		closeEditorTerminalSession,
 		spawnEditorTerminal,
@@ -5345,13 +5371,13 @@ export default function App() {
 			const c = clampSidebarLayout(next.left, next.right);
 			setRailWidths(c);
 			try {
-				localStorage.setItem(SIDEBAR_LAYOUT_KEY, JSON.stringify(c));
+				localStorage.setItem(sidebarLayoutStorageKey, JSON.stringify(c));
 			} catch {
 				/* ignore */
 			}
 			syncDesktopSidebarLayout(shell ?? undefined, c);
 		},
-		[shell]
+		[shell, sidebarLayoutStorageKey]
 	);
 
 	useEffect(() => {
@@ -5390,7 +5416,7 @@ export default function App() {
 				setRailWidths((prev) => {
 					const c = clampSidebarLayout(prev.left, prev.right);
 					try {
-						localStorage.setItem(SIDEBAR_LAYOUT_KEY, JSON.stringify(c));
+						localStorage.setItem(sidebarLayoutStorageKey, JSON.stringify(c));
 					} catch {
 						/* ignore */
 					}
@@ -5403,7 +5429,7 @@ export default function App() {
 			document.addEventListener('mousemove', onMove);
 			document.addEventListener('mouseup', onUp);
 		},
-		[railWidths.left, railWidths.right, shell]
+		[railWidths.left, railWidths.right, shell, sidebarLayoutStorageKey]
 	);
 
 	const beginResizeRight = useCallback(
@@ -5423,7 +5449,7 @@ export default function App() {
 				setRailWidths((prev) => {
 					const c = clampSidebarLayout(prev.left, prev.right);
 					try {
-						localStorage.setItem(SIDEBAR_LAYOUT_KEY, JSON.stringify(c));
+						localStorage.setItem(sidebarLayoutStorageKey, JSON.stringify(c));
 					} catch {
 						/* ignore */
 					}
@@ -5436,7 +5462,7 @@ export default function App() {
 			document.addEventListener('mousemove', onMove);
 			document.addEventListener('mouseup', onUp);
 		},
-		[railWidths.left, railWidths.right, shell]
+		[railWidths.left, railWidths.right, shell, sidebarLayoutStorageKey]
 	);
 
 	const beginResizeEditorTerminal = useCallback(
@@ -5456,7 +5482,7 @@ export default function App() {
 				setEditorTerminalHeightPx((h) => {
 					const c = clampEditorTerminalHeight(h);
 					try {
-						localStorage.setItem(EDITOR_TERMINAL_HEIGHT_KEY, String(c));
+						localStorage.setItem(editorTerminalHeightLsKey, String(c));
 					} catch {
 						/* ignore */
 					}
@@ -5468,7 +5494,7 @@ export default function App() {
 			document.addEventListener('mousemove', onMove);
 			document.addEventListener('mouseup', onUp);
 		},
-		[editorTerminalHeightPx]
+		[editorTerminalHeightPx, editorTerminalHeightLsKey]
 	);
 
 	const resetRailWidths = useCallback(() => {
@@ -6268,6 +6294,7 @@ export default function App() {
 									isDesktopShell={!!shell}
 									windowMaximized={windowMaximized}
 									onNewWindow={() => void fileMenuNewWindow()}
+									onNewEditorWindow={() => void fileMenuNewEditorWindow()}
 									onMinimize={() => void windowMenuMinimize()}
 									onToggleMaximize={() => void windowMenuToggleMaximize()}
 									onCloseWindow={() => void windowMenuCloseWindow()}
