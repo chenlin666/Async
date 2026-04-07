@@ -116,10 +116,10 @@ import {
 } from '../workspaceAgentStore.js';
 import { summarizeThreadForSidebar, isTimestampToday } from '../threadListSummary.js';
 import { registerTerminalPtyIpc } from '../terminalPty.js';
+
 import {
 	getTsLspSessionForWebContents,
 	disposeTsLspSessionForWebContents,
-	disposeAllTsLspSessions,
 } from '../lspSessionsByWebContents.js';
 import { setDelegateContext, clearDelegateContext } from '../agent/toolExecutor.js';
 import {
@@ -147,6 +147,33 @@ const execFileAsync = promisify(execFile);
 
 function senderWorkspaceRoot(event: { sender: WebContents }): string | null {
 	return getWorkspaceRootForWebContents(event.sender);
+}
+
+function workspaceRootsEqual(a: string | null | undefined, b: string | null | undefined): boolean {
+	if (!a || !b) {
+		return false;
+	}
+	const na = path.resolve(a).replace(/\\/g, '/').toLowerCase();
+	const nb = path.resolve(b).replace(/\\/g, '/').toLowerCase();
+	return na === nb;
+}
+
+/** 可选覆盖工作区根路径（须为已存在目录），否则使用当前窗口绑定的工作区 */
+function resolveWorkspaceScopeForThreads(
+	event: { sender: WebContents },
+	workspaceRootOverride?: unknown
+): string | null {
+	if (typeof workspaceRootOverride === 'string' && workspaceRootOverride.trim()) {
+		try {
+			const resolved = path.resolve(workspaceRootOverride.trim());
+			if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+				return resolved;
+			}
+		} catch {
+			/* ignore */
+		}
+	}
+	return senderWorkspaceRoot(event);
 }
 
 /**
@@ -956,9 +983,6 @@ export function registerIpc(): void {
 		if (idx?.semanticIndexEnabled === false) {
 			clearWorkspaceSemanticIndex();
 		}
-		if (idx?.tsLspEnabled === false) {
-			void disposeAllTsLspSessions();
-		}
 		const syncedColorMode = next.ui?.colorMode;
 		if (syncedColorMode === 'light' || syncedColorMode === 'dark' || syncedColorMode === 'system') {
 			for (const win of BrowserWindow.getAllWindows()) {
@@ -1178,6 +1202,55 @@ export function registerIpc(): void {
 		};
 	});
 
+	ipcMain.handle('threads:listAgentSidebar', (event, rawPaths: unknown) => {
+		const activeRoot = senderWorkspaceRoot(event);
+		const paths = Array.isArray(rawPaths)
+			? rawPaths.map((p) => String(p ?? '').trim()).filter((p) => p.length > 0)
+			: [];
+		const now = Date.now();
+		const workspaces = paths.map((dirPath) => {
+			let resolved: string;
+			try {
+				resolved = path.resolve(dirPath);
+				if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+					return {
+						requestedPath: dirPath,
+						resolvedPath: null as string | null,
+						threads: [],
+						currentId: null as string | null,
+					};
+				}
+			} catch {
+				return { requestedPath: dirPath, resolvedPath: null, threads: [], currentId: null };
+			}
+			if (activeRoot && workspaceRootsEqual(resolved, activeRoot)) {
+				ensureDefaultThread(activeRoot);
+			}
+			const threads = listThreads(resolved).map((t) => {
+				const sum = summarizeThreadForSidebar(t);
+				return {
+					id: t.id,
+					title: t.title,
+					updatedAt: t.updatedAt,
+					createdAt: t.createdAt,
+					previewCount: t.messages.filter((m) => m.role !== 'system').length,
+					hasUserMessages: threadHasUserMessages(t),
+					isToday: isTimestampToday(t.updatedAt, now),
+					tokenUsage: t.tokenUsage,
+					fileStateCount: t.fileStates ? Object.keys(t.fileStates).length : 0,
+					...sum,
+				};
+			});
+			return {
+				requestedPath: dirPath,
+				resolvedPath: resolved,
+				threads,
+				currentId: getCurrentThreadId(resolved),
+			};
+		});
+		return { workspaces };
+	});
+
 	ipcMain.handle('threads:fileStates', (_e, threadId: string) => {
 		const t = getThread(threadId);
 		if (!t) {
@@ -1225,20 +1298,22 @@ export function registerIpc(): void {
 		return { id: t.id };
 	});
 
-	ipcMain.handle('threads:select', (event, id: string) => {
-		const t = selectThread(senderWorkspaceRoot(event), id);
+	ipcMain.handle('threads:select', (event, id: string, workspaceRootOverride?: unknown) => {
+		const scope = resolveWorkspaceScopeForThreads(event, workspaceRootOverride);
+		const t = selectThread(scope, id);
 		return { ok: !!t };
 	});
 
-	ipcMain.handle('threads:delete', (event, id: string) => {
-		const scope = senderWorkspaceRoot(event);
+	ipcMain.handle('threads:delete', (event, id: string, workspaceRootOverride?: unknown) => {
+		const scope = resolveWorkspaceScopeForThreads(event, workspaceRootOverride);
 		deleteThread(scope, id);
 		ensureDefaultThread(scope);
 		return { ok: true as const, currentId: getCurrentThreadId(scope) };
 	});
 
-	ipcMain.handle('threads:rename', (event, id: string, title: string) => {
-		const ok = setThreadTitle(senderWorkspaceRoot(event), String(id ?? ''), String(title ?? ''));
+	ipcMain.handle('threads:rename', (event, id: string, title: string, workspaceRootOverride?: unknown) => {
+		const scope = resolveWorkspaceScopeForThreads(event, workspaceRootOverride);
+		const ok = setThreadTitle(scope, String(id ?? ''), String(title ?? ''));
 		return { ok };
 	});
 
@@ -2108,14 +2183,17 @@ ipcMain.handle(
 		if (!root) {
 			return { ok: false as const, error: 'No workspace' };
 		}
-		return gitService.withGitWorkspaceRootAsync(root, async () => {
+		return await gitService.withGitWorkspaceRootAsync(root, async () => {
 			try {
 				const probe = await gitService.gitProbeContext();
 				if (!probe.ok) {
 					return { ok: false as const, error: probe.message };
 				}
 				const gitTop = probe.topLevel;
-				const [porcelain, branch] = await Promise.all([gitService.gitStatusPorcelain(), gitService.gitBranch()]);
+				const [porcelain, branch] = await Promise.all([
+					gitService.gitStatusPorcelain(),
+					gitService.gitBranch(),
+				]);
 				const lines = porcelain ? porcelain.split('\n').filter(Boolean) : [];
 				const rawPathStatus = gitService.parseGitPathStatus(lines);
 				const rawOrdered = gitService.listPorcelainPaths(lines);
@@ -2136,6 +2214,60 @@ ipcMain.handle(
 					}
 				}
 				return { ok: true as const, branch, lines, pathStatus, changedPaths };
+			} catch (e) {
+				return {
+					ok: false as const,
+					error: gitService.normalizeGitFailureMessage(e, 'Failed to load changes'),
+				};
+			}
+		});
+	});
+
+	ipcMain.handle('git:fullStatus', async (event) => {
+		const root = senderWorkspaceRoot(event);
+		if (!root) {
+			return { ok: false as const, error: 'No workspace' };
+		}
+		return await gitService.withGitWorkspaceRootAsync(root, async () => {
+			try {
+				const probe = await gitService.gitProbeContext();
+				if (!probe.ok) {
+					return { ok: false as const, error: probe.message };
+				}
+				const gitTop = probe.topLevel;
+				const [porcelain, branch, branchListOut] = await Promise.all([
+					gitService.gitStatusPorcelain(),
+					gitService.gitBranch(),
+					gitService.gitListLocalBranches(),
+				]);
+				const lines = porcelain ? porcelain.split('\n').filter(Boolean) : [];
+				const rawPathStatus = gitService.parseGitPathStatus(lines);
+				const rawOrdered = gitService.listPorcelainPaths(lines);
+				const pathStatus: Record<string, gitService.PathStatusEntry> = {};
+				for (const [repoRel, entry] of Object.entries(rawPathStatus)) {
+					const wsRel = gitService.workspaceRelativeFromRepoRelative(repoRel, root, gitTop);
+					if (wsRel) {
+						pathStatus[wsRel] = entry;
+					}
+				}
+				const changedPaths: string[] = [];
+				const seen = new Set<string>();
+				for (const repoRel of rawOrdered) {
+					const wsRel = gitService.workspaceRelativeFromRepoRelative(repoRel, root, gitTop);
+					if (wsRel && !seen.has(wsRel)) {
+						seen.add(wsRel);
+						changedPaths.push(wsRel);
+					}
+				}
+				return {
+					ok: true as const,
+					branch,
+					lines,
+					pathStatus,
+					changedPaths,
+					branches: branchListOut.branches,
+					current: branchListOut.current,
+				};
 			} catch (e) {
 				return {
 					ok: false as const,
@@ -2197,17 +2329,15 @@ ipcMain.handle(
 		}
 		const list = Array.isArray(relPaths) ? relPaths : [];
 		try {
-			const entries = await Promise.all(
-				list.map(async (p): Promise<[string, gitService.DiffPreview]> => {
-					try {
-						return [p, await gitService.getDiffPreview(p, undefined, root)];
-					} catch {
-						return [p, { diff: '', isBinary: false, additions: 0, deletions: 0 }];
-					}
-				})
-			);
-			const previews: Record<string, gitService.DiffPreview> = Object.fromEntries(entries);
-			return { ok: true as const, previews };
+			return await gitService.withGitWorkspaceRootAsync(root, async () => {
+				const probe = await gitService.gitProbeContext();
+				if (!probe.ok) {
+					return { ok: false as const, error: probe.message };
+				}
+				const fullDiffRaw = await gitService.gitDiffHeadUnified(root);
+				const previews = await gitService.buildDiffPreviewsMap(list, fullDiffRaw, root, probe.topLevel);
+				return { ok: true as const, previews };
+			});
 		} catch (e) {
 			return { ok: false as const, error: String(e) };
 		}
@@ -2232,16 +2362,6 @@ ipcMain.handle(
 					},
 					root
 				);
-				console.log('[git:diffPreview]', {
-					relPath,
-					full: payload?.full === true,
-					maxChars: payload?.maxChars ?? null,
-					diffLength: String(preview.diff ?? '').length,
-					isBinary: preview.isBinary,
-					additions: preview.additions,
-					deletions: preview.deletions,
-					diffHead: String(preview.diff ?? '').replace(/\s+/g, ' ').slice(0, 160),
-				});
 				return { ok: true as const, preview };
 			} catch (e) {
 				return { ok: false as const, error: String(e) };
@@ -2254,7 +2374,7 @@ ipcMain.handle(
 		if (!root) {
 			return { ok: false as const, error: 'No workspace' };
 		}
-		return gitService.withGitWorkspaceRootAsync(root, async () => {
+		return await gitService.withGitWorkspaceRootAsync(root, async () => {
 			try {
 				const probe = await gitService.gitProbeContext();
 				if (!probe.ok) {

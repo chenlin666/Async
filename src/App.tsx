@@ -9,12 +9,17 @@ import {
 	useRef,
 	useState,
 	useTransition,
+	createContext,
+	memo,
+	useContext,
 	type ReactNode,
 	type RefObject,
 } from 'react';
 import type { editor as MonacoEditorNS } from 'monaco-editor';
-import { createTwoFilesPatch } from 'diff';
-import { DrawerPtyTerminal } from './DrawerPtyTerminal';
+
+const DrawerPtyTerminal = lazy(() =>
+	import('./DrawerPtyTerminal').then((m) => ({ default: m.DrawerPtyTerminal }))
+);
 import { ChatMarkdown } from './ChatMarkdown';
 import { OpenWorkspaceModal } from './OpenWorkspaceModal';
 import { type WorkspaceExplorerActions } from './WorkspaceExplorer';
@@ -52,7 +57,6 @@ import {
 	applyAppearanceSettingsToDom,
 	defaultAppearanceSettings,
 	nativeWindowChromeFromAppearance,
-	normalizeAppearanceSettings,
 	replaceBuiltinChromeColorsForScheme,
 	shouldMigrateChromeWhenLeavingScheme,
 	type AppAppearanceSettings,
@@ -61,9 +65,7 @@ import { useAppColorScheme } from './useAppColorScheme';
 import {
 	type AppColorMode,
 	getVoidMonacoTheme,
-	readPrefersDark,
 	readStoredColorMode,
-	resolveEffectiveScheme,
 	type ThemeTransitionOrigin,
 	writeStoredColorMode,
 } from './colorMode';
@@ -99,7 +101,6 @@ import {
 } from './agentSettingsTypes';
 import { normalizeIndexingSettings, type IndexingSettingsState } from './indexingSettingsTypes';
 import type { EditorSettings } from './EditorSettingsPanel';
-import type { McpServerConfig, McpServerStatus } from './mcpTypes';
 import { tabIdFromPath, type MarkdownTabView } from './EditorTabBar';
 import {
 	isMarkdownEditorPath,
@@ -111,8 +112,6 @@ import { isPlanMdPath, planExecutedKey } from './planExecutedKey';
 import { MenubarFileMenu } from './MenubarFileMenu';
 import { MenubarWindowMenu } from './MenubarWindowMenu';
 import { QuickOpenPalette, quickOpenPrimaryShortcutLabel, saveShortcutLabel } from './quickOpenPalette';
-import { registerTsLspMonacoOnce } from './tsLspMonaco';
-import { monacoWorkspaceRootRef } from './tsLspWorkspaceRef';
 import { workspaceRelativeFileUrl } from './workspaceUri';
 import { voidShellDebugLog } from './tabCloseDebug';
 import {
@@ -121,8 +120,8 @@ import {
 	type GitUnavailableReason,
 } from './gitAvailability';
 import {
-	IconExplorer, IconCloudOutline, IconServerOutline,
-	IconGitSCM, IconSearch, IconDoc, IconChevron,
+	IconExplorer,
+	IconGitSCM, IconSearch, IconChevron,
 	IconPlus, IconCloseSmall, IconPencil, IconTrash, IconCheckCircle, IconSettings,
 	IconHistory, IconDotsHorizontal, IconArrowUpRight,
 } from './icons';
@@ -145,63 +144,45 @@ import { useEditorMainPanelProps } from './hooks/useEditorMainPanelProps';
 import { useWorkspaceManager } from './hooks/useWorkspaceManager';
 import { useThreads } from './hooks/useThreads';
 import { type ThreadInfo } from './threadTypes';
+import { normWorkspaceRootKey } from './workspaceRootKey';
 import { useAgentFileReview, type AgentFilePreviewState } from './hooks/useAgentFileReview';
 import { useComposer } from './hooks/useComposer';
 import { useEditorTabs, type EditorInlineDiffState, clampEditorTerminalHeight } from './hooks/useEditorTabs';
 import { AgentChatPanel } from './AgentChatPanel';
 import { AgentLeftSidebar } from './AgentLeftSidebar';
 import { AgentRightSidebar } from './AgentRightSidebar';
+import { AppWorkspaceWelcome } from './app/AppWorkspaceWelcome';
+import { AgentAgentCenterColumn } from './app/AgentAgentCenterColumn';
 import type { ComposerAnchorSlot } from './ChatComposer';
 import { AppProvider } from './AppContext';
 import { ComposerActionsProvider } from './ComposerActionsContext';
 import { EditorLeftSidebar } from './EditorLeftSidebar';
+import { runDesktopShellInit } from './app/desktopShellInit';
+import {
+	DEFAULT_SHELL_LAYOUT_MODE_KEY,
+	DEFAULT_SIDEBAR_LAYOUT_KEY,
+	RESIZE_HANDLE_PX,
+	clampSidebarLayout,
+	defaultQuarterRailWidths,
+	readSidebarLayout,
+	readStoredShellLayoutModeFromKey,
+	syncDesktopSidebarLayout,
+	syncDesktopShellLayoutMode,
+	writeStoredShellLayoutMode,
+	type ShellLayoutMode,
+} from './app/shellLayoutStorage';
 
 const SettingsPage = lazy(() => import('./SettingsPage').then((m) => ({ default: m.SettingsPage })));
 const EditorMainPanel = lazy(() => import('./EditorMainPanel').then((m) => ({ default: m.EditorMainPanel })));
 
-type LayoutMode = 'agent' | 'editor';
+type LayoutMode = ShellLayoutMode;
 type AgentRightSidebarView = 'git' | 'plan' | 'file';
 type EditorLeftSidebarView = 'explorer' | 'search' | 'git';
-import {
-	useI18n,
-	normalizeLocale,
-	type AppLocale,
-	type TFunction,
-} from './i18n';
-import './monacoSetup';
-
-
-function debugDiffHead(diff: string, max = 160): string {
-	return diff.replace(/\s+/g, ' ').slice(0, max);
-}
-
-function diffCreatesNewFile(diff: string | null | undefined): boolean {
-	const text = String(diff ?? '');
-	return /^new file mode\s/m.test(text) || /^---\s+\/dev\/null$/m.test(text);
-}
+import { useI18n, type AppLocale, type TFunction } from './i18n';
+import { hideBootSplash } from './bootSplash';
+import { debugDiffHead, diffCreatesNewFile, sameStringArray } from './appDiffUtils';
 
 type DiffPreview = { diff: string; isBinary: boolean; additions: number; deletions: number };
-const DEFAULT_SIDEBAR_LAYOUT_KEY = 'async:sidebar-widths-v1';
-const DEFAULT_SHELL_LAYOUT_MODE_KEY = 'async:shell-layout-mode-v1';
-function sameStringArray(a: string[], b: string[]): boolean {
-	if (a.length !== b.length) {
-		return false;
-	}
-	for (let i = 0; i < a.length; i += 1) {
-		if (a[i] !== b[i]) {
-			return false;
-		}
-	}
-	return true;
-}
-
-
-const RESIZE_HANDLE_PX = 5;
-const LEFT_RAIL_MIN = 200;
-const LEFT_RAIL_MAX = 960;
-const RIGHT_RAIL_MIN = 260;
-const RIGHT_RAIL_MAX = 1280;
-const CENTER_MIN_PX = 320;
 
 function workspacePathDisplayName(full: string): string {
 	const norm = full.replace(/\\/g, '/');
@@ -217,96 +198,6 @@ function workspacePathParent(full: string): string {
 	}
 	return norm.slice(0, i);
 }
-
-function clampSidebarLayout(left: number, right: number): { left: number; right: number } {
-	const w = typeof window !== 'undefined' ? window.innerWidth : 1280;
-	let l = Math.min(Math.max(left, LEFT_RAIL_MIN), LEFT_RAIL_MAX);
-	let r = Math.min(Math.max(right, RIGHT_RAIL_MIN), RIGHT_RAIL_MAX);
-	const maxPair = w - 2 * RESIZE_HANDLE_PX - CENTER_MIN_PX;
-	if (l + r > maxPair) {
-		r = Math.max(RIGHT_RAIL_MIN, maxPair - l);
-		if (r < RIGHT_RAIL_MIN || l + r > maxPair) {
-			r = RIGHT_RAIL_MIN;
-			l = Math.max(LEFT_RAIL_MIN, Math.min(LEFT_RAIL_MAX, maxPair - r));
-		}
-	}
-	return { left: l, right: r };
-}
-
-/** 左、右各约 25% 视口，中间列用 1fr 占剩余约 50%（已扣除两条拖拽条宽度） */
-function defaultQuarterRailWidths(): { left: number; right: number } {
-	const w = typeof window !== 'undefined' ? window.innerWidth : 1280;
-	const usable = Math.max(0, w - 2 * RESIZE_HANDLE_PX);
-	const quarter = Math.round(usable * 0.25);
-	return clampSidebarLayout(quarter, quarter);
-}
-
-function syncDesktopSidebarLayout(
-	shell: NonNullable<Window['asyncShell']> | undefined,
-	c: { left: number; right: number }
-): void {
-	if (!shell) {
-		return;
-	}
-	void shell.invoke('settings:set', {
-		ui: { sidebarLayout: { left: c.left, right: c.right } },
-	});
-}
-
-function readStoredShellLayoutModeFromKey(storageKey: string): LayoutMode {
-	try {
-		if (typeof window !== 'undefined') {
-			const v = localStorage.getItem(storageKey);
-			if (v === 'agent' || v === 'editor') {
-				return v;
-			}
-		}
-	} catch {
-		/* ignore */
-	}
-	return 'agent';
-}
-
-function writeStoredShellLayoutMode(m: LayoutMode, storageKey: string) {
-	try {
-		localStorage.setItem(storageKey, m);
-	} catch {
-		/* ignore */
-	}
-}
-
-function syncDesktopShellLayoutMode(
-	shell: NonNullable<Window['asyncShell']> | undefined,
-	m: LayoutMode
-): void {
-	if (!shell) {
-		return;
-	}
-	void shell.invoke('settings:set', { ui: { layoutMode: m } });
-}
-
-function readSidebarLayout(storageKey: string = DEFAULT_SIDEBAR_LAYOUT_KEY): { left: number; right: number } {
-	try {
-		if (typeof window !== 'undefined') {
-			const raw = localStorage.getItem(storageKey);
-			if (raw) {
-				const j = JSON.parse(raw) as { left?: unknown; right?: unknown };
-				if (
-					typeof j.left === 'number' &&
-					typeof j.right === 'number' &&
-					Number.isFinite(j.left) &&
-					Number.isFinite(j.right)
-				) {
-					return { left: j.left, right: j.right };
-				}
-			}
-		}
-	} catch {
-		/* ignore */
-	}
-	return defaultQuarterRailWidths();
-}
-
 
 function shellCommandPermissionMode(agent: AgentCustomization | undefined): CommandPermissionMode {
 	return agent?.confirmShellCommands === false ? 'always' : 'ask';
@@ -382,6 +273,11 @@ type OnSendOptions = {
 	/** 非空时在本轮 stream 成功 done 后标记该计划文件已执行 Build */
 	planBuildPathKey?: string;
 };
+/** 与默认导出 App 中 `foundation` useMemo 的字段一致，供内层工作区壳消费 */
+type AppShellFoundation = Record<string, unknown>;
+
+const AppShellFoundationContext = createContext<AppShellFoundation | null>(null);
+
 
 export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 	const shell = useAsyncShell();
@@ -465,7 +361,6 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 	const { t, setLocale, locale } = useI18n();
 	const [ipcOk, setIpcOk] = useState<string>('…');
 
-	// indexingSettings 前置声明，供 useWorkspaceManager 的 tsLspEnabled 使用
 	// 初始值为默认值，init effect 加载完 settings:get 后会 setIndexingSettings 更新
 	const [indexingSettings, setIndexingSettings] = useState<IndexingSettingsState>(() => normalizeIndexingSettings());
 
@@ -484,8 +379,9 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 		setHiddenAgentWorkspacePaths,
 		collapsedAgentWorkspacePaths,
 		setCollapsedAgentWorkspacePaths,
-		tsLspStatus,
-	} = useWorkspaceManager(shell, indexingSettings.tsLspEnabled);
+	} = useWorkspaceManager(shell, {
+		deferWorkspaceFileList: layoutPinnedBySurface && appSurface === 'agent',
+	});
 
 	const {
 		gitBranch,
@@ -538,6 +434,273 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 		applyLoadedSettings,
 	} = useSettings(shell, workspace, t);
 
+	const foundation = useMemo(
+		() => ({
+			shell,
+			t,
+			setLocale,
+			locale,
+			ipcOk,
+			setIpcOk,
+			indexingSettings,
+			setIndexingSettings,
+			layoutPinnedBySurface,
+			appSurface,
+			shellLayoutStorageKey,
+			sidebarLayoutStorageKey,
+			colorMode,
+			setColorMode,
+			appearanceSettings,
+			setAppearanceSettings,
+			effectiveScheme,
+			setTransitionOrigin,
+			monacoChromeTheme,
+			workspace,
+			setWorkspace,
+			workspaceFileList,
+			homeRecents,
+			setHomeRecents,
+			folderRecents,
+			setFolderRecents,
+			workspaceAliases,
+			setWorkspaceAliases,
+			hiddenAgentWorkspacePaths,
+			setHiddenAgentWorkspacePaths,
+			collapsedAgentWorkspacePaths,
+			setCollapsedAgentWorkspacePaths,
+			gitBranch,
+			gitLines,
+			gitPathStatus,
+			gitChangedPaths,
+			gitStatusOk,
+			gitBranchList,
+			gitBranchListCurrent,
+			diffPreviews,
+			diffLoading,
+			gitActionError,
+			setGitActionError,
+			treeEpoch,
+			gitBranchPickerOpen,
+			setGitBranchPickerOpen,
+			diffTotals,
+			refreshGit,
+			onGitBranchListFresh,
+			modelProviders,
+			defaultModel,
+			modelEntries,
+			enabledModelIds,
+			thinkingByModelId,
+			setThinkingByModelId,
+			hasSelectedModel,
+			modelPickerItems,
+			modelPillLabel,
+			agentCustomization,
+			setAgentCustomization,
+			refreshWorkspaceDiskSkills,
+			mergedAgentCustomization,
+			onChangeMergedAgentCustomization,
+			editorSettings,
+			setEditorSettings,
+			mcpServers,
+			setMcpServers,
+			mcpStatuses,
+			setMcpStatuses,
+			settingsPageOpen,
+			setSettingsPageOpen,
+			settingsInitialNav,
+			settingsOpenPending,
+			openSettingsPageBase,
+			onPickDefaultModel,
+			onChangeModelEntries,
+			onChangeModelProviders,
+			onPersistIndexingPatch,
+			onRefreshMcpStatuses,
+			onStartMcpServer,
+			onStopMcpServer,
+			onRestartMcpServer,
+			applyLoadedSettings,
+		}),
+		[
+			shell,
+			t,
+			setLocale,
+			locale,
+			ipcOk,
+			setIpcOk,
+			indexingSettings,
+			setIndexingSettings,
+			layoutPinnedBySurface,
+			appSurface,
+			shellLayoutStorageKey,
+			sidebarLayoutStorageKey,
+			colorMode,
+			setColorMode,
+			appearanceSettings,
+			setAppearanceSettings,
+			effectiveScheme,
+			setTransitionOrigin,
+			monacoChromeTheme,
+			workspace,
+			setWorkspace,
+			workspaceFileList,
+			homeRecents,
+			setHomeRecents,
+			folderRecents,
+			setFolderRecents,
+			workspaceAliases,
+			setWorkspaceAliases,
+			hiddenAgentWorkspacePaths,
+			setHiddenAgentWorkspacePaths,
+			collapsedAgentWorkspacePaths,
+			setCollapsedAgentWorkspacePaths,
+			gitBranch,
+			gitLines,
+			gitPathStatus,
+			gitChangedPaths,
+			gitStatusOk,
+			gitBranchList,
+			gitBranchListCurrent,
+			diffPreviews,
+			diffLoading,
+			gitActionError,
+			setGitActionError,
+			treeEpoch,
+			gitBranchPickerOpen,
+			setGitBranchPickerOpen,
+			diffTotals,
+			refreshGit,
+			onGitBranchListFresh,
+			modelProviders,
+			defaultModel,
+			modelEntries,
+			enabledModelIds,
+			thinkingByModelId,
+			setThinkingByModelId,
+			hasSelectedModel,
+			modelPickerItems,
+			modelPillLabel,
+			agentCustomization,
+			setAgentCustomization,
+			refreshWorkspaceDiskSkills,
+			mergedAgentCustomization,
+			onChangeMergedAgentCustomization,
+			editorSettings,
+			setEditorSettings,
+			mcpServers,
+			setMcpServers,
+			mcpStatuses,
+			setMcpStatuses,
+			settingsPageOpen,
+			setSettingsPageOpen,
+			settingsInitialNav,
+			settingsOpenPending,
+			openSettingsPageBase,
+			onPickDefaultModel,
+			onChangeModelEntries,
+			onChangeModelProviders,
+			onPersistIndexingPatch,
+			onRefreshMcpStatuses,
+			onStartMcpServer,
+			onStopMcpServer,
+			onRestartMcpServer,
+			applyLoadedSettings,
+		]
+	);
+
+	return (
+		<AppShellFoundationContext.Provider value={foundation}>
+			<AppMainWorkspace />
+		</AppShellFoundationContext.Provider>
+	);
+}
+
+function AppMainWorkspaceInner() {
+	const {
+		shell,
+		t,
+		setLocale,
+		locale,
+		ipcOk,
+		setIpcOk,
+		indexingSettings,
+		setIndexingSettings,
+		layoutPinnedBySurface,
+		appSurface,
+		shellLayoutStorageKey,
+		sidebarLayoutStorageKey,
+		colorMode,
+		setColorMode,
+		appearanceSettings,
+		setAppearanceSettings,
+		effectiveScheme,
+		setTransitionOrigin,
+		monacoChromeTheme,
+		workspace,
+		setWorkspace,
+		workspaceFileList,
+		homeRecents,
+		setHomeRecents,
+		folderRecents,
+		setFolderRecents,
+		workspaceAliases,
+		setWorkspaceAliases,
+		hiddenAgentWorkspacePaths,
+		setHiddenAgentWorkspacePaths,
+		collapsedAgentWorkspacePaths,
+		setCollapsedAgentWorkspacePaths,
+		gitBranch,
+		gitLines,
+		gitPathStatus,
+		gitChangedPaths,
+		gitStatusOk,
+		gitBranchList,
+		gitBranchListCurrent,
+		diffPreviews,
+		diffLoading,
+		gitActionError,
+		setGitActionError,
+		treeEpoch,
+		gitBranchPickerOpen,
+		setGitBranchPickerOpen,
+		diffTotals,
+		refreshGit,
+		onGitBranchListFresh,
+		modelProviders,
+		defaultModel,
+		modelEntries,
+		enabledModelIds,
+		thinkingByModelId,
+		setThinkingByModelId,
+		hasSelectedModel,
+		modelPickerItems,
+		modelPillLabel,
+		agentCustomization,
+		setAgentCustomization,
+		refreshWorkspaceDiskSkills,
+		mergedAgentCustomization,
+		onChangeMergedAgentCustomization,
+		editorSettings,
+		setEditorSettings,
+		mcpServers,
+		setMcpServers,
+		mcpStatuses,
+		setMcpStatuses,
+		settingsPageOpen,
+		setSettingsPageOpen,
+		settingsInitialNav,
+		settingsOpenPending,
+		openSettingsPageBase,
+		onPickDefaultModel,
+		onChangeModelEntries,
+		onChangeModelProviders,
+		onPersistIndexingPatch,
+		onRefreshMcpStatuses,
+		onStartMcpServer,
+		onStopMcpServer,
+		onRestartMcpServer,
+		applyLoadedSettings,
+	} = useContext(AppShellFoundationContext)!;
+
 	const {
 		threads,
 		threadSearch,
@@ -566,9 +729,13 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 		setThreadNavigation,
 		skipThreadNavigationRecordRef,
 		refreshThreads,
+		refreshAgentSidebarThreads,
+		sidebarThreadsByPathKey,
 		loadMessages,
 		resetThreadState,
 	} = useThreads(shell);
+
+	const [editingThreadWorkspacePath, setEditingThreadWorkspacePath] = useState<string | null>(null);
 	// ─────────────────────────────────────────────────────────────────────────
 
 	const {
@@ -988,7 +1155,6 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 		() => new Set(collapsedAgentWorkspacePaths),
 		[collapsedAgentWorkspacePaths]
 	);
-	const currentWorkspaceThreadCount = todayThreads.length + archivedThreads.length;
 
 	const agentSidebarWorkspaceCandidates = useMemo(() => {
 		const seen = new Set<string>();
@@ -1019,25 +1185,77 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 		});
 	}, [agentSidebarWorkspaceCandidates]);
 
+	const agentSidebarThreadPaths = useMemo(
+		() =>
+			agentWorkspaceOrder
+				.filter((path) => !hiddenAgentWorkspacePathSet.has(path))
+				.slice(0, 8),
+		[agentWorkspaceOrder, hiddenAgentWorkspacePathSet]
+	);
+
+	useEffect(() => {
+		if (!shell) {
+			return;
+		}
+		if (layoutMode !== 'agent') {
+			void refreshAgentSidebarThreads([]);
+			return;
+		}
+		const idle = window.requestIdleCallback ?? ((cb: IdleRequestCallback) => window.setTimeout(() => cb({ didTimeout: true, timeRemaining: () => 0 } as IdleDeadline), 1));
+		const cancel = window.cancelIdleCallback ?? ((id: number) => window.clearTimeout(id));
+		const id = idle(
+			() => {
+				void refreshAgentSidebarThreads(agentSidebarThreadPaths);
+			},
+			{ timeout: 3000 }
+		);
+		return () => cancel(id);
+	}, [shell, layoutMode, agentSidebarThreadPaths, refreshAgentSidebarThreads]);
+
 	const agentSidebarWorkspaces = useMemo(() => {
-		return agentWorkspaceOrder
-			.filter((path) => !hiddenAgentWorkspacePathSet.has(path))
-			.slice(0, 8)
-			.map((path) => ({
+		const q = threadSearch.trim().toLowerCase();
+		return agentSidebarThreadPaths.map((path) => {
+			const rowsSource =
+				workspace && normWorkspaceRootKey(path) === normWorkspaceRootKey(workspace)
+					? threads
+					: (sidebarThreadsByPathKey[normWorkspaceRootKey(path)] ?? []);
+			const visible = rowsSource.filter((thread) => thread.hasUserMessages);
+			const list = q
+				? visible.filter(
+						(t) =>
+							t.title.toLowerCase().includes(q) ||
+							(t.subtitleFallback ?? '').toLowerCase().includes(q)
+					)
+				: visible;
+			const today: ThreadInfo[] = [];
+			const archived: ThreadInfo[] = [];
+			for (const t of list) {
+				if (t.isToday) {
+					today.push(t);
+				} else {
+					archived.push(t);
+				}
+			}
+			return {
 				path,
 				name: workspaceAliases[path]?.trim() || workspacePathDisplayName(path),
 				parent: workspacePathParent(path),
 				isCurrent: path === workspace,
-				isCollapsed: path === workspace ? collapsedAgentWorkspacePathSet.has(path) : !collapsedAgentWorkspacePathSet.has(path),
-				threadCount: path === workspace ? currentWorkspaceThreadCount : 0,
-			}));
+				isCollapsed:
+					path === workspace ? collapsedAgentWorkspacePathSet.has(path) : !collapsedAgentWorkspacePathSet.has(path),
+				threadCount: list.length,
+				todayThreads: today,
+				archivedThreads: archived,
+			};
+		});
 	}, [
-		agentWorkspaceOrder,
+		agentSidebarThreadPaths,
 		workspace,
-		hiddenAgentWorkspacePathSet,
+		threads,
+		sidebarThreadsByPathKey,
+		threadSearch,
 		workspaceAliases,
 		collapsedAgentWorkspacePathSet,
-		currentWorkspaceThreadCount,
 	]);
 
 	const hasConversation = messages.length > 0 || !!streaming;
@@ -1501,129 +1719,30 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 	useEffect(() => {
 		if (!shell) {
 			setIpcOk(t('app.ipcBrowserOnly'));
+			hideBootSplash();
 			return;
 		}
-		void (async () => {
-			try {
-				const _t0 = performance.now();
-				const _lap = (label: string) => console.log(`[renderer-init] ${label}: +${Math.round(performance.now() - _t0)}ms`);
-
-				// 检查是否是空白窗口（新建窗口不恢复工作区）
-				const isBlankWindow =
-					typeof window !== 'undefined' &&
-					(window.location.search.includes('blank=1') || window.location.hash.includes('blank'));
-
-				// 第一批：互不依赖的 IPC 并行发送
-				const [p, w, paths] = await Promise.all([
-					shell.invoke('async-shell:ping') as Promise<{ ok: boolean; message: string }>,
-					isBlankWindow
-						? Promise.resolve({ root: null } as { root: string | null })
-						: (shell.invoke('workspace:get') as Promise<{ root: string | null }>),
-					shell.invoke('app:getPaths') as Promise<{ home?: string }>,
-				]);
-				_lap('batch1 (ping/workspace/paths)');
-				setIpcOk(p.ok ? t('app.ipcReady', { message: p.message }) : t('app.ipcError'));
-				if (!isBlankWindow) {
-					setWorkspace(w.root);
-				}
-				if (paths.home) {
-					setHomePath(paths.home);
-				}
-
-				// 第二批：threads 与 settings 并行加载
-				_lap('batch2 start');
-				const [, st] = await Promise.all([
-					refreshThreads(),
-					shell.invoke('settings:get') as Promise<{
-						language?: string;
-						defaultModel?: string;
-						models?: {
-							providers?: UserLlmProvider[];
-							entries?: UserModelEntry[];
-							enabledIds?: string[];
-							thinkingByModelId?: Record<string, unknown>;
-						};
-						agent?: AgentCustomization;
-						editor?: Partial<EditorSettings>;
-						ui?: {
-							sidebarLayout?: { left?: unknown; right?: unknown };
-							colorMode?: string;
-							fontPreset?: unknown;
-							uiFontPreset?: unknown;
-							codeFontPreset?: unknown;
-							themePresetId?: unknown;
-							accentColor?: unknown;
-							backgroundColor?: unknown;
-							foregroundColor?: unknown;
-							translucentSidebar?: unknown;
-							contrast?: unknown;
-							usePointerCursors?: unknown;
-							uiFontSize?: unknown;
-							codeFontSize?: unknown;
-							layoutMode?: string;
-						};
-						indexing?: {
-							symbolIndexEnabled?: boolean;
-							semanticIndexEnabled?: boolean;
-							tsLspEnabled?: boolean;
-						};
-					}>,
-				]);
-
-				setLocale(normalizeLocale(st.language));
-				const sl = st.ui?.sidebarLayout;
-				const left = typeof sl?.left === 'number' && Number.isFinite(sl.left) ? sl.left : null;
-				const right = typeof sl?.right === 'number' && Number.isFinite(sl.right) ? sl.right : null;
-				if (left !== null && right !== null) {
-					const rw = clampSidebarLayout(left, right);
-					setRailWidths(rw);
-					try {
-						localStorage.setItem(sidebarLayoutStorageKey, JSON.stringify(rw));
-					} catch {
-						/* ignore */
-					}
-				} else {
-					/** 桌面端曾仅依赖 file:// localStorage，易丢；首次把当前布局写入 settings.json */
-					const s0 = readSidebarLayout(sidebarLayoutStorageKey);
-					syncDesktopSidebarLayout(shell, clampSidebarLayout(s0.left, s0.right));
-				}
-				if (!layoutPinnedBySurface) {
-					const lmRaw = st.ui?.layoutMode;
-					if (lmRaw === 'agent' || lmRaw === 'editor') {
-						setLayoutMode(lmRaw);
-						writeStoredShellLayoutMode(lmRaw, shellLayoutStorageKey);
-					} else {
-						const lm0 = readStoredShellLayoutModeFromKey(shellLayoutStorageKey);
-						setLayoutMode(lm0);
-						syncDesktopShellLayoutMode(shell, lm0);
-					}
-				}
-				applyLoadedSettings(st);
-				setIndexingSettings(normalizeIndexingSettings(st.indexing));
-				const cmRaw = st.ui?.colorMode;
-				const nextColorMode: AppColorMode =
-					cmRaw === 'light' || cmRaw === 'dark' || cmRaw === 'system' ? cmRaw : readStoredColorMode();
-				setColorMode(nextColorMode);
-				writeStoredColorMode(nextColorMode);
-				const appearanceScheme = resolveEffectiveScheme(nextColorMode, readPrefersDark());
-				setAppearanceSettings(normalizeAppearanceSettings(st.ui, appearanceScheme));
-				_lap('batch2 (threads/settings + state apply)');
-
-				// 第三批：MCP 服务器状态与 Git 状态并行加载
-				const [mcpSt, mcpStatusRes] = await Promise.all([
-					shell.invoke('mcp:getServers') as Promise<{ servers?: McpServerConfig[] } | undefined>,
-					shell.invoke('mcp:getStatuses') as Promise<{ statuses?: McpServerStatus[] } | undefined>,
-				]);
-				setMcpServers(mcpSt?.servers ?? []);
-				setMcpStatuses(mcpStatusRes?.statuses ?? []);
-				_lap('batch3 (mcp)');
-				// refreshGit 不阻塞 UI 渲染，fire-and-forget
-				void refreshGit();
-				_lap('init complete');
-			} catch (e) {
-				setIpcOk(String(e));
-			}
-		})();
+		void runDesktopShellInit({
+			shell,
+			t,
+			layoutPinnedBySurface,
+			shellLayoutStorageKey,
+			sidebarLayoutStorageKey,
+			refreshThreads,
+			refreshGit,
+			setLocale,
+			setIpcOk,
+			setWorkspace,
+			setHomePath,
+			setRailWidths,
+			setLayoutMode,
+			applyLoadedSettings,
+			setIndexingSettings,
+			setColorMode,
+			setAppearanceSettings,
+			setMcpServers,
+			setMcpStatuses,
+		});
 	}, [
 		shell,
 		refreshThreads,
@@ -1633,6 +1752,16 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 		layoutPinnedBySurface,
 		shellLayoutStorageKey,
 		sidebarLayoutStorageKey,
+		setWorkspace,
+		setHomePath,
+		setRailWidths,
+		setLayoutMode,
+		applyLoadedSettings,
+		setIndexingSettings,
+		setColorMode,
+		setAppearanceSettings,
+		setMcpServers,
+		setMcpStatuses,
 	]);
 
 	useEffect(() => {
@@ -1676,25 +1805,41 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 		void loadMessages(currentId);
 	}, [shell, currentId, loadMessages]);
 
-	useEffect(() => {
-		monacoWorkspaceRootRef.current = workspace;
-	}, [workspace]);
-
+	const workspaceSwitchSeqRef = useRef(0);
 	const applyWorkspacePath = useCallback(
 		async (next: string) => {
+			const seq = ++workspaceSwitchSeqRef.current;
+			const mark = (suffix: string) => {
+				try {
+					performance.mark(`void-ws-${seq}-${suffix}`);
+				} catch {
+					/* ignore */
+				}
+			};
+			const measure = (name: string, startSuffix: string, endSuffix: string) => {
+				try {
+					performance.measure(name, `void-ws-${seq}-${startSuffix}`, `void-ws-${seq}-${endSuffix}`);
+				} catch {
+					/* ignore */
+				}
+			};
+			mark('start');
 			clearWorkspaceConversationState();
 			setWorkspace(next);
+			mark('workspace-set');
 			// 并行而非串行，且 refreshGit 由 workspace 变化的 effect 触发，此处不重复调用
 			await refreshThreads();
+			mark('threads-done');
+			measure('void-ws:apply-path:threads', 'start', 'threads-done');
 		},
 		[clearWorkspaceConversationState, refreshThreads]
 	);
 
 	const openWorkspaceByPath = useCallback(
-		async (path: string) => {
+		async (path: string): Promise<boolean> => {
 			if (!shell) {
 				setWorkspacePickerOpen(true);
-				return;
+				return false;
 			}
 			const r = (await shell.invoke('workspace:openPath', path)) as {
 				ok: boolean;
@@ -1703,9 +1848,10 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 			};
 			if (r.ok && r.path) {
 				await applyWorkspacePath(r.path);
-			} else {
-				setWorkspacePickerOpen(true);
+				return true;
 			}
+			setWorkspacePickerOpen(true);
+			return false;
 		},
 		[shell, applyWorkspacePath]
 	);
@@ -1737,42 +1883,27 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 
 	const runMonacoEditCommand = useCallback(
 		async (kind: 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'selectAll') => {
+			/* 主编辑区为只读预览器：仅允许复制与全选 */
+			if (kind === 'undo' || kind === 'redo' || kind === 'cut' || kind === 'paste') {
+				return false;
+			}
 			const ed = monacoEditorRef.current;
 			if (!ed || !(ed.hasTextFocus?.() || ed.hasWidgetFocus?.())) {
 				return false;
 			}
 			ed.focus();
-			if (kind === 'undo' || kind === 'redo' || kind === 'selectAll') {
+			if (kind === 'selectAll') {
 				ed.trigger('menu', kind, null);
 				return true;
 			}
-			if (kind === 'copy' || kind === 'cut') {
-				const actionId = kind === 'copy' ? 'editor.action.clipboardCopyAction' : 'editor.action.clipboardCutAction';
-				const action = ed.getAction(actionId);
-				if (action) {
-					await action.run();
-					return true;
-				}
-				return false;
+			const action = ed.getAction('editor.action.clipboardCopyAction');
+			if (action) {
+				await action.run();
+				return true;
 			}
-			const text = await readClipboardText();
-			const sels = ed.getSelections();
-			if (!sels || sels.length === 0) {
-				return false;
-			}
-			ed.pushUndoStop();
-			ed.executeEdits(
-				'menu-paste',
-				sels.map((sel) => ({
-					range: sel,
-					text,
-					forceMoveMarkers: true,
-				}))
-			);
-			ed.pushUndoStop();
-			return true;
+			return false;
 		},
-		[readClipboardText]
+		[]
 	);
 
 	const runDomEditCommand = useCallback(
@@ -1868,7 +1999,10 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 			}
 			if (workspacePath !== workspace) {
 				setHiddenAgentWorkspacePaths((prev) => prev.filter((item) => item !== workspacePath));
-				await openWorkspaceByPath(workspacePath);
+				const opened = await openWorkspaceByPath(workspacePath);
+				if (!opened) {
+					return;
+				}
 			}
 			await onNewThreadRef.current();
 		},
@@ -1887,10 +2021,17 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 	}, []);
 
 	const onSelectThread = useCallback(
-		async (id: string) => {
+		async (id: string, threadWorkspaceRoot?: string | null) => {
 			setEditorThreadHistoryOpen(false);
 			if (!shell) {
 				return;
+			}
+			const tw = threadWorkspaceRoot?.trim();
+			if (tw && (!workspace || normWorkspaceRootKey(tw) !== normWorkspaceRootKey(workspace))) {
+				const opened = await openWorkspaceByPath(tw);
+				if (!opened) {
+					return;
+				}
 			}
 			await shell.invoke('threads:select', id);
 			setCurrentId(id);
@@ -1909,7 +2050,7 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 			setInlineResendSegments([]);
 			await loadMessages(id);
 		},
-		[shell, loadMessages, clearStreamingToolPreviewNow, resetLiveAgentBlocks]
+		[shell, workspace, openWorkspaceByPath, loadMessages, clearStreamingToolPreviewNow, resetLiveAgentBlocks]
 	);
 
 	const selectThreadByHistoryIndex = useCallback(
@@ -2026,41 +2167,63 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 		}
 		if (!shell) {
 			setEditingThreadId(null);
+			setEditingThreadWorkspacePath(null);
 			setEditingThreadTitleDraft('');
 			return;
 		}
 		const id = editingThreadId;
+		const scopePath = editingThreadWorkspacePath;
 		const draft = threadTitleDraftRef.current.trim();
-		const prev = threads.find((x) => x.id === id)?.title ?? '';
+		const scopeKey = normWorkspaceRootKey(scopePath ?? workspace ?? '');
+		const sameBucketAsPrimary =
+			!!workspace && !!scopePath && normWorkspaceRootKey(workspace) === normWorkspaceRootKey(scopePath);
+		const prev = sameBucketAsPrimary
+			? threads.find((x) => x.id === id)?.title ?? ''
+			: (sidebarThreadsByPathKey[scopeKey] ?? []).find((x) => x.id === id)?.title ?? '';
 		setEditingThreadId(null);
+		setEditingThreadWorkspacePath(null);
 		setEditingThreadTitleDraft('');
 		if (!draft || draft === prev) {
 			return;
 		}
-		const r = (await shell.invoke('threads:rename', id, draft)) as { ok?: boolean };
+		const r = (await shell.invoke('threads:rename', id, draft, scopePath ?? undefined)) as { ok?: boolean };
 		if (r?.ok) {
 			await refreshThreads();
 		}
-	}, [shell, editingThreadId, threads, refreshThreads]);
+	}, [
+		shell,
+		editingThreadId,
+		editingThreadWorkspacePath,
+		workspace,
+		threads,
+		sidebarThreadsByPathKey,
+		refreshThreads,
+	]);
 
 	const cancelThreadTitleEdit = useCallback(() => {
 		setEditingThreadId(null);
+		setEditingThreadWorkspacePath(null);
 		setEditingThreadTitleDraft('');
 	}, []);
 
-	const beginThreadTitleEdit = useCallback((t: ThreadInfo) => {
+	const beginThreadTitleEdit = useCallback((t: ThreadInfo, threadListWorkspace?: string | null) => {
 		setEditingThreadId(t.id);
+		setEditingThreadWorkspacePath(threadListWorkspace ?? workspace);
 		setEditingThreadTitleDraft(t.title);
 		threadTitleDraftRef.current = t.title;
-	}, []);
+	}, [workspace]);
 
 	const performThreadDelete = useCallback(
-		async (id: string) => {
+		async (id: string, threadWorkspaceRoot?: string | null) => {
 			if (!shell) {
 				return;
 			}
 			voidShellDebugLog('thread-delete:perform', { threadId: id });
-			const wasCurrent = id === currentId;
+			const wasCurrent =
+				id === currentId &&
+				(!threadWorkspaceRoot ||
+					!workspace ||
+					normWorkspaceRootKey(threadWorkspaceRoot) === normWorkspaceRootKey(workspace));
 			if (wasCurrent && awaitingReply) {
 				await shell.invoke('chat:abort', id);
 				setAwaitingReply(false);
@@ -2071,7 +2234,11 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 				streamStartedAtRef.current = null;
 				firstTokenAtRef.current = null;
 			}
+			const wasEditingTitle = editingThreadId === id;
 			setEditingThreadId((ed) => (ed === id ? null : ed));
+			if (wasEditingTitle) {
+				setEditingThreadWorkspacePath(null);
+			}
 			if (wasCurrent) {
 				setMessages([]);
 				setMessagesThreadId(null);
@@ -2081,16 +2248,25 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 				setInlineResendSegments([]);
 				setResendFromUserIndex(null);
 			}
-			await shell.invoke('threads:delete', id);
+			await shell.invoke('threads:delete', id, threadWorkspaceRoot ?? undefined);
 			clearPersistedAgentFileChanges(id);
 			planQuestionDismissedByThreadRef.current.delete(id);
 			await refreshThreads();
 		},
-		[shell, currentId, awaitingReply, refreshThreads, clearStreamingToolPreviewNow, resetLiveAgentBlocks]
+		[
+			shell,
+			currentId,
+			editingThreadId,
+			awaitingReply,
+			refreshThreads,
+			workspace,
+			clearStreamingToolPreviewNow,
+			resetLiveAgentBlocks,
+		]
 	);
 
 	const onDeleteThread = useCallback(
-		async (e: React.MouseEvent, id: string) => {
+		async (e: React.MouseEvent, id: string, threadWorkspaceRoot?: string | null) => {
 			e.preventDefault();
 			e.stopPropagation();
 			voidShellDebugLog('thread-delete:left-list-click', { threadId: id, step: confirmDeleteId === id ? 'confirm' : 'arm' });
@@ -2113,7 +2289,7 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 				clearTimeout(confirmDeleteTimerRef.current);
 				confirmDeleteTimerRef.current = null;
 			}
-			await performThreadDelete(id);
+			await performThreadDelete(id, threadWorkspaceRoot);
 		},
 		[shell, confirmDeleteId, performThreadDelete]
 	);
@@ -2425,7 +2601,6 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 			indexing: {
 				symbolIndexEnabled: indexingSettings.symbolIndexEnabled,
 				semanticIndexEnabled: indexingSettings.semanticIndexEnabled,
-				tsLspEnabled: indexingSettings.tsLspEnabled,
 			},
 			mcp: { servers: mcpServers },
 			ui: {
@@ -2670,6 +2845,7 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 						| { ok?: false };
 					if (snapshotResult?.ok && snapshotResult.hasSnapshot) {
 						const previousContent = snapshotResult.previousContent ?? '';
+						const { createTwoFilesPatch } = await import('diff');
 						previewDiff = createTwoFilesPatch(
 							`a/${normalizedRel}`,
 							`b/${normalizedRel}`,
@@ -2971,18 +3147,6 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 			return false;
 		}
 	}, [shell]);
-
-	// Cmd+S / Ctrl+S keyboard shortcut
-	useEffect(() => {
-		const handler = (e: KeyboardEvent) => {
-			if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-				e.preventDefault();
-				void onSaveFile();
-			}
-		};
-		window.addEventListener('keydown', handler);
-		return () => window.removeEventListener('keydown', handler);
-	});
 
 	const onAgentConversationOpenFile = useCallback(
 		async (
@@ -3328,38 +3492,17 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 			setAgentRightSidebarView(hasAgentPlanSidebarContent ? 'plan' : 'git');
 		}
 	}, [agentFilePreview, agentRightSidebarView, hasAgentPlanSidebarContent, workspace]);
-	const onMonacoMount = useCallback(
-		(ed: MonacoEditorNS.IStandaloneCodeEditor, monaco: typeof import('monaco-editor')) => {
-			monacoDiffChangeDisposableRef.current?.dispose();
-			monacoDiffChangeDisposableRef.current = null;
-			monacoEditorRef.current = ed;
-			if (shell) {
-				registerTsLspMonacoOnce(monaco, shell, workspace);
-			}
-		},
-		[shell, workspace]
-	);
+	const onMonacoMount = useCallback((ed: MonacoEditorNS.IStandaloneCodeEditor) => {
+		monacoDiffChangeDisposableRef.current?.dispose();
+		monacoDiffChangeDisposableRef.current = null;
+		monacoEditorRef.current = ed;
+	}, []);
 
-	const onMonacoDiffMount = useCallback(
-		(diffEditor: MonacoEditorNS.IStandaloneDiffEditor, monaco: typeof import('monaco-editor')) => {
-			const modifiedEditor = diffEditor.getModifiedEditor();
-			const modifiedModel = modifiedEditor.getModel();
-			monacoDiffChangeDisposableRef.current?.dispose();
-			monacoDiffChangeDisposableRef.current =
-				modifiedModel?.onDidChangeContent(() => {
-					const nextValue = modifiedEditor.getValue();
-					setEditorValue(nextValue);
-					setOpenTabs((prev) =>
-						prev.map((tab) => (tab.filePath === filePath.trim() ? { ...tab, dirty: true } : tab))
-					);
-				}) ?? null;
-			monacoEditorRef.current = modifiedEditor;
-			if (shell) {
-				registerTsLspMonacoOnce(monaco, shell, workspace);
-			}
-		},
-		[filePath, setEditorValue, setOpenTabs, shell, workspace]
-	);
+	const onMonacoDiffMount = useCallback((diffEditor: MonacoEditorNS.IStandaloneDiffEditor) => {
+		monacoDiffChangeDisposableRef.current?.dispose();
+		monacoDiffChangeDisposableRef.current = null;
+		monacoEditorRef.current = diffEditor.getModifiedEditor();
+	}, []);
 
 	const searchWorkspaceSymbolsFn = useCallback(
 		async (query: string) => {
@@ -3374,31 +3517,6 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 		},
 		[shell]
 	);
-
-	const tsLspPillTitle = useMemo(() => {
-		if (!workspace) {
-			return t('app.lspSoon');
-		}
-		if (tsLspStatus === 'starting') {
-			return t('app.lspStarting');
-		}
-		if (tsLspStatus === 'ready') {
-			return t('app.lspReady');
-		}
-		if (tsLspStatus === 'error') {
-			return t('app.lspUnavailable');
-		}
-		return t('app.lspSoon');
-	}, [workspace, tsLspStatus, t]);
-
-	const tsLspPillClassName =
-		tsLspStatus === 'ready'
-			? 'ref-lsp-pill ref-lsp-pill--ready'
-			: tsLspStatus === 'starting'
-				? 'ref-lsp-pill ref-lsp-pill--starting'
-				: tsLspStatus === 'error'
-					? 'ref-lsp-pill ref-lsp-pill--error'
-					: 'ref-lsp-pill';
 
 	const openQuickOpen = useCallback((seed = '') => {
 		setQuickOpenSeed(seed);
@@ -4763,8 +4881,11 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 				: modelPillInlineRef;
 
 	const renderThreadItem = useCallback(
-		(th: ThreadInfo) => {
-			const isActive = th.id === currentId;
+		(th: ThreadInfo, threadListWorkspace?: string | null) => {
+			const owningWs = threadListWorkspace ?? workspace;
+			const isActive =
+				th.id === currentId &&
+				(!workspace || !owningWs || normWorkspaceRootKey(owningWs) === normWorkspaceRootKey(workspace));
 			return (
 				<div
 					key={th.id}
@@ -4801,10 +4922,10 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 						<button
 							type="button"
 							className="ref-thread-row ref-thread-row--rich"
-							onClick={() => void onSelectThread(th.id)}
+							onClick={() => void onSelectThread(th.id, threadListWorkspace)}
 							onDoubleClick={(e) => {
 								e.preventDefault();
-								beginThreadTitleEdit(th);
+								beginThreadTitleEdit(th, threadListWorkspace);
 							}}
 						>
 							<span className="ref-thread-row-lead" aria-hidden>
@@ -4877,7 +4998,7 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 							onMouseDown={(e) => e.preventDefault()}
 							onClick={(e) => {
 								e.stopPropagation();
-								beginThreadTitleEdit(th);
+								beginThreadTitleEdit(th, threadListWorkspace);
 							}}
 						>
 							<IconPencil className="ref-thread-action-svg" />
@@ -4890,7 +5011,7 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 							title={confirmDeleteId === th.id ? t('common.confirmDelete') : t('common.delete')}
 							aria-label={confirmDeleteId === th.id ? t('common.confirmDelete') : t('common.deleteThread')}
 							onMouseDown={(e) => e.preventDefault()}
-							onClick={(e) => void onDeleteThread(e, th.id)}
+							onClick={(e) => void onDeleteThread(e, th.id, threadListWorkspace)}
 						>
 							{confirmDeleteId === th.id ? (
 								<span className="ref-thread-action-confirm-label">{t('common.confirm')}</span>
@@ -4916,14 +5037,13 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 			onSelectThread,
 			confirmDeleteId,
 			onDeleteThread,
+			workspace,
 		]
 	);
 
 	const agentLeftSidebarProps = useAgentLeftSidebarProps({
 		t,
 		agentSidebarWorkspaces,
-		todayThreads,
-		archivedThreads,
 		renderThreadItem,
 		editingWorkspacePath,
 		editingWorkspaceNameDraft,
@@ -5157,8 +5277,6 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 		filePath: filePath.trim(),
 		markdownPaneMode,
 		setMarkdownPaneMode,
-		tsLspPillClassName,
-		tsLspPillTitle,
 		showPlanFileEditorChrome,
 		editorPlanFileIsBuilt,
 		onExecutePlanFromEditor,
@@ -5227,7 +5345,7 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 									isDesktopShell={!!shell}
 									hasWorkspace={!!workspace}
 									folderRecents={folderRecents}
-									canSave={!!shell && !!workspace && !!filePath.trim()}
+									canSave={false}
 									canEditorClose={!!activeTabId}
 									canCloseFolder={!!shell && !!workspace}
 									shortcutSave={saveShortcutLabel()}
@@ -5605,110 +5723,12 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 			</header>
 
 			{isEditorHomeMode ? (
-				<div
-					className="ref-body ref-body--editor-home"
-					style={{ gridTemplateColumns: 'minmax(0, 1fr)' }}
-				>
-					<main className="ref-editor-welcome" aria-label={t('app.editorWelcomeAria')}>
-						<div className="ref-editor-welcome-inner">
-							<section className="ref-editor-launchpad">
-								<div className="ref-editor-welcome-brand">
-									<BrandLogo className="ref-editor-welcome-logo" size={44} />
-									<div className="ref-editor-welcome-brand-text">
-										<span className="ref-editor-welcome-wordmark">Async</span>
-										<span className="ref-editor-welcome-tagline">{t('app.editorWelcomeTagline')}</span>
-									</div>
-								</div>
-								<div
-									className="ref-editor-welcome-actions"
-									role="group"
-									aria-label={t('app.editorWelcomeActionsAria')}
-								>
-									<button
-										type="button"
-										className="ref-welcome-action-card ref-welcome-action-card--primary"
-										onClick={() => setWorkspacePickerOpen(true)}
-									>
-										<span className="ref-welcome-action-icon" aria-hidden>
-											<IconExplorer />
-										</span>
-										<span className="ref-welcome-action-copy">
-											<span className="ref-welcome-action-label">{t('app.welcomeOpenProject')}</span>
-											<span className="ref-welcome-action-subtitle">{t('app.welcomeOpenProjectHint')}</span>
-										</span>
-									</button>
-									<button
-										type="button"
-										className="ref-welcome-action-card ref-welcome-action-card--soon"
-										disabled
-										title={t('app.comingSoon')}
-									>
-										<span className="ref-welcome-action-icon" aria-hidden>
-											<IconCloudOutline />
-										</span>
-										<span className="ref-welcome-action-copy">
-											<span className="ref-welcome-action-label">{t('app.welcomeCloneRepo')}</span>
-											<span className="ref-welcome-action-subtitle">{t('app.welcomeCloneRepoHint')}</span>
-										</span>
-									</button>
-									<button
-										type="button"
-										className="ref-welcome-action-card ref-welcome-action-card--soon"
-										disabled
-										title={t('app.comingSoon')}
-									>
-										<span className="ref-welcome-action-icon" aria-hidden>
-											<IconServerOutline />
-										</span>
-										<span className="ref-welcome-action-copy">
-											<span className="ref-welcome-action-label">{t('app.welcomeConnectSsh')}</span>
-											<span className="ref-welcome-action-subtitle">{t('app.welcomeConnectSshHint')}</span>
-										</span>
-									</button>
-								</div>
-							</section>
-							<section
-								className="ref-editor-welcome-recents ref-editor-welcome-panel"
-								aria-labelledby="ref-welcome-recents-title"
-							>
-								<div className="ref-editor-welcome-recents-head">
-									<h2 id="ref-welcome-recents-title" className="ref-editor-welcome-recents-title">
-										{t('app.recentProjects')}
-									</h2>
-									<button type="button" className="ref-welcome-view-all" onClick={() => setWorkspacePickerOpen(true)}>
-										{t('app.viewAllRecents', { count: String(homeRecents.length) })}
-									</button>
-								</div>
-								{homeRecents.length === 0 ? (
-									<p className="ref-editor-welcome-recents-empty muted">{t('app.noRecentsYet')}</p>
-								) : (
-									<div className="ref-editor-welcome-recents-list" role="list">
-										{homeRecents.slice(0, 6).map((p) => (
-											<button
-												key={p}
-												type="button"
-												className="ref-welcome-recent-card"
-												role="listitem"
-												title={p}
-												onClick={() => void openWorkspaceByPath(p)}
-											>
-												<span className="ref-welcome-recent-card-icon" aria-hidden>
-													<IconExplorer />
-												</span>
-												<span className="ref-welcome-recent-card-copy">
-													<span className="ref-welcome-recent-card-name">{workspacePathDisplayName(p)}</span>
-													<span className="ref-welcome-recent-card-path muted">
-														{workspacePathParent(p) || '—'}
-													</span>
-												</span>
-											</button>
-										))}
-									</div>
-								)}
-							</section>
-						</div>
-					</main>
-				</div>
+				<AppWorkspaceWelcome
+					t={t}
+					homeRecents={homeRecents}
+					onOpenWorkspacePicker={() => setWorkspacePickerOpen(true)}
+					onOpenWorkspacePath={(p) => void openWorkspaceByPath(p)}
+				/>
 			) : (
 				<div
 					className={`ref-body ${
@@ -5777,58 +5797,19 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 				/>
 
 				{layoutMode === 'agent' ? (
-				<main
-					className={`ref-center ref-center--agent-layout ${hasConversation ? 'ref-center--chat' : 'ref-center--empty-agent'}`}
-					aria-label={t('app.commandCenter')}
-					onKeyDown={onPlanNewIdea}
-				>
-					<div className="ref-context-block ref-context-block--agent">
-						<div className="ref-context-line">
-							<span className="ref-agent-context-pill">
-								<IconDoc className="ref-context-icon" />
-								<span className="ref-context-title">{workspace ? workspaceBasename : t('app.noWorkspace')}</span>
-							</span>
-						</div>
-						{hasConversation ? (
-							<div className="ref-context-sub ref-context-sub--agent" title={currentThreadTitle}>
-								{currentThreadTitle}
-							</div>
-						) : null}
-					</div>
-
-					<div className="ref-agent-rail-toggle-group" aria-label={t('app.rightSidebarViews')}>
-						{hasAgentPlanSidebarContent ? (
-							<button
-								type="button"
-								className={`ref-agent-rail-toggle ${
-									agentRightSidebarOpen && agentRightSidebarView === 'plan' ? 'is-open' : ''
-								}`}
-								onClick={() => toggleAgentRightSidebarView('plan')}
-								title={t('app.tabPlan')}
-								aria-label={t('app.tabPlan')}
-								aria-pressed={agentRightSidebarOpen && agentRightSidebarView === 'plan'}
-								aria-controls="agent-right-sidebar"
-							>
-								<IconDoc />
-							</button>
-						) : null}
-						<button
-							type="button"
-							className={`ref-agent-rail-toggle ${
-								agentRightSidebarOpen && agentRightSidebarView === 'git' ? 'is-open' : ''
-							}`}
-							onClick={() => toggleAgentRightSidebarView('git')}
-							title={t('app.tabGit')}
-							aria-label={t('app.tabGit')}
-							aria-pressed={agentRightSidebarOpen && agentRightSidebarView === 'git'}
-							aria-controls="agent-right-sidebar"
-						>
-							<IconGitSCM />
-						</button>
-					</div>
-
-					<AgentChatPanel layout="agent-center" {...agentChatPanelProps} />
-				</main>
+					<AgentAgentCenterColumn
+						t={t}
+						hasConversation={hasConversation}
+						workspace={workspace}
+						workspaceBasename={workspaceBasename}
+						currentThreadTitle={currentThreadTitle}
+						onPlanNewIdea={onPlanNewIdea}
+						hasAgentPlanSidebarContent={hasAgentPlanSidebarContent}
+						agentRightSidebarOpen={agentRightSidebarOpen}
+						agentRightSidebarView={agentRightSidebarView}
+						toggleAgentRightSidebarView={toggleAgentRightSidebarView}
+						chatPanelProps={agentChatPanelProps}
+					/>
 				) : (
 				<Suspense
 					fallback={
@@ -6098,7 +6079,9 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 						</button>
 					</div>
 					<div className="ref-drawer-terminal">
-						<DrawerPtyTerminal placeholder={t('app.terminalStarting')} />
+						<Suspense fallback={<div className="ref-drawer-terminal-loading" />}>
+							<DrawerPtyTerminal placeholder={t('app.terminalStarting')} />
+						</Suspense>
 					</div>
 				</section>
 			) : null}
@@ -6280,3 +6263,6 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 		</AppProvider>
 	);
 }
+
+const AppMainWorkspace = memo(AppMainWorkspaceInner);
+

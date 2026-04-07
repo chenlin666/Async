@@ -1,8 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GitPathStatusMap } from '../WorkspaceExplorer';
 
 type Shell = NonNullable<Window['asyncShell']>;
 type DiffPreview = { diff: string; isBinary: boolean; additions: number; deletions: number };
+
+type FullStatusOk = {
+	ok: true;
+	branch: string;
+	lines: string[];
+	pathStatus: GitPathStatusMap;
+	changedPaths: string[];
+	branches: string[];
+	current: string;
+};
+
+type FullStatusFail = { ok: false; error?: string };
 
 /**
  * 管理所有 Git 相关状态：分支、状态、diff 预览、分支列表。
@@ -25,28 +37,18 @@ export function useGitIntegration(shell: Shell | undefined, workspace: string | 
 	const [gitBranchPickerOpen, setGitBranchPickerOpen] = useState(false);
 
 	const refreshGit = useCallback(async () => {
-		if (!shell) return;
-		type StatusR =
-			| { ok: true; branch: string; lines: string[]; pathStatus?: GitPathStatusMap; changedPaths?: string[] }
-			| { ok: false; error?: string };
-		type ListR = { ok: true; branches: string[]; current: string } | { ok: false; error?: string };
-		const [r, lb] = (await Promise.all([
-			shell.invoke('git:status'),
-			shell.invoke('git:listBranches'),
-		])) as [StatusR, ListR];
+		if (!shell) {
+			return;
+		}
+		const r = (await shell.invoke('git:fullStatus')) as FullStatusOk | FullStatusFail;
 		if (r.ok) {
 			setGitStatusOk(true);
 			setGitBranch(r.branch || 'master');
 			setGitLines(r.lines);
 			setGitPathStatus(r.pathStatus ?? {});
 			setGitChangedPaths(r.changedPaths ?? []);
-			if (lb.ok) {
-				setGitBranchList(Array.isArray(lb.branches) ? lb.branches : []);
-				setGitBranchListCurrent(typeof lb.current === 'string' ? lb.current : '');
-			} else {
-				setGitBranchList([]);
-				setGitBranchListCurrent('');
-			}
+			setGitBranchList(Array.isArray(r.branches) ? r.branches : []);
+			setGitBranchListCurrent(typeof r.current === 'string' ? r.current : '');
 		} else {
 			setGitStatusOk(false);
 			setGitBranch('—');
@@ -55,6 +57,7 @@ export function useGitIntegration(shell: Shell | undefined, workspace: string | 
 			setGitChangedPaths([]);
 			setGitBranchList([]);
 			setGitBranchListCurrent('');
+			setDiffPreviews({});
 		}
 		setTreeEpoch((n) => n + 1);
 	}, [shell]);
@@ -66,41 +69,55 @@ export function useGitIntegration(shell: Shell | undefined, workspace: string | 
 
 	// workspace 变化时刷新 git 状态
 	useEffect(() => {
-		if (!workspace || !shell) return;
+		if (!workspace || !shell) {
+			return;
+		}
 		void refreshGit();
 	}, [workspace, shell, refreshGit]);
 
 	// 文件系统变化时刷新 git 状态
 	useEffect(() => {
 		const sub = shell?.subscribeWorkspaceFsTouched;
-		if (!shell || !sub) return;
+		if (!shell || !sub) {
+			return;
+		}
 		const unsub = sub(() => {
 			void refreshGit();
 		});
 		return unsub;
 	}, [shell, refreshGit]);
 
-	// gitChangedPaths → 加载 diff 预览
+	// diffPreviews 懒加载：在 gitChangedPaths 稳定后异步拉取，不阻塞 refreshGit 关键路径
+	const diffPreviewsGenRef = useRef(0);
 	const gitPathsKey = useMemo(() => gitChangedPaths.join('\n'), [gitChangedPaths]);
-
 	useEffect(() => {
 		if (!shell || gitChangedPaths.length === 0) {
 			setDiffPreviews({});
 			setDiffLoading(false);
 			return;
 		}
+		const gen = ++diffPreviewsGenRef.current;
 		setDiffLoading(true);
 		let cancelled = false;
 		void (async () => {
-			const r = (await shell.invoke('git:diffPreviews', gitChangedPaths)) as
-				| { ok: true; previews: Record<string, DiffPreview> }
-				| { ok: false };
-			if (!cancelled && r.ok) setDiffPreviews(r.previews);
-			if (!cancelled) setDiffLoading(false);
+			try {
+				const r = (await shell.invoke('git:diffPreviews', gitChangedPaths)) as
+					| { ok: true; previews: Record<string, DiffPreview> }
+					| { ok: false };
+				if (!cancelled && gen === diffPreviewsGenRef.current && r.ok) {
+					setDiffPreviews(r.previews);
+				}
+			} finally {
+				if (!cancelled && gen === diffPreviewsGenRef.current) {
+					setDiffLoading(false);
+				}
+			}
 		})();
 		return () => {
 			cancelled = true;
 		};
+	// treeEpoch 确保文件系统变化后也重新拉取
+	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [shell, treeEpoch, gitPathsKey]);
 
 	const diffTotals = useMemo(() => {
@@ -131,7 +148,6 @@ export function useGitIntegration(shell: Shell | undefined, workspace: string | 
 		treeEpoch,
 		gitBranchPickerOpen,
 		setGitBranchPickerOpen,
-		gitPathsKey,
 		diffTotals,
 		refreshGit,
 		onGitBranchListFresh,
