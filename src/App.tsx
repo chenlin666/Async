@@ -431,6 +431,7 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 		setGitBranchPickerOpen,
 		diffTotals,
 		refreshGit,
+		loadGitDiffPreviews,
 		onGitBranchListFresh,
 	} = useGitIntegration(shell, workspace);
 
@@ -515,6 +516,7 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 			setGitBranchPickerOpen,
 			diffTotals,
 			refreshGit,
+			loadGitDiffPreviews,
 			onGitBranchListFresh,
 			modelProviders,
 			defaultModel,
@@ -600,6 +602,7 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 			setGitBranchPickerOpen,
 			diffTotals,
 			refreshGit,
+			loadGitDiffPreviews,
 			onGitBranchListFresh,
 			modelProviders,
 			defaultModel,
@@ -695,6 +698,7 @@ function AppMainWorkspaceInner() {
 		setGitBranchPickerOpen,
 		diffTotals,
 		refreshGit,
+		loadGitDiffPreviews,
 		onGitBranchListFresh,
 		modelProviders,
 		defaultModel,
@@ -766,13 +770,41 @@ function AppMainWorkspaceInner() {
 		resetThreadState,
 	} = useThreads(shell);
 
+	// 开发环境：记录阻塞主线程 ≥50ms 的任务（与窗口拖动卡顿强相关）
+	useEffect(() => {
+		if (!import.meta.env.DEV || typeof PerformanceObserver === 'undefined') {
+			return;
+		}
+		try {
+			const obs = new PerformanceObserver((list) => {
+				for (const entry of list.getEntries()) {
+					if (entry.duration < 50) {
+						continue;
+					}
+					const lt = entry as PerformanceEntry & {
+						attribution?: ReadonlyArray<{ name?: string; containerType?: string }>;
+					};
+					const attr = lt.attribution?.[0];
+					console.warn(
+						`[perf] longtask ${entry.duration.toFixed(0)}ms name=${entry.name}` +
+							(attr?.name ? ` src=${attr.name}` : '')
+					);
+				}
+			});
+			obs.observe({ type: 'longtask', buffered: true } as PerformanceObserverInit);
+			return () => obs.disconnect();
+		} catch {
+			/* Long Task API 不可用 */
+		}
+	}, []);
+
 	const [editingThreadWorkspacePath, setEditingThreadWorkspacePath] = useState<string | null>(null);
 	// ─────────────────────────────────────────────────────────────────────────
 
 	const {
 		streaming,
 		awaitingReply,
-		thinkingTick,
+		thinkingTickRef,
 		thoughtSecondsByThread,
 		subAgentBgToast,
 		showTransientToast,
@@ -1044,6 +1076,8 @@ function AppMainWorkspaceInner() {
 	const composerRichHeroRef = useRef<HTMLDivElement>(null);
 	const composerRichBottomRef = useRef<HTMLDivElement>(null);
 	const composerRichInlineRef = useRef<HTMLDivElement>(null);
+	/** 底部 composer 测高延后到 rAF，避免与虚拟列表等同步读布局挤在同一任务里触发 forced reflow */
+	const composerRichAutoHeightRafRef = useRef<number | null>(null);
 	const inlineResendRootRef = useRef<HTMLDivElement | null>(null);
 	/** 对话消息滚动容器：新消息 / 流式输出时自动滚到底（用户上移阅读时暂停跟随） */
 	const messagesViewportRef = useRef<HTMLDivElement>(null);
@@ -2088,6 +2122,11 @@ function AppMainWorkspaceInner() {
 
 	const onSelectThread = useCallback(
 		async (id: string, threadWorkspaceRoot?: string | null) => {
+			const dev = import.meta.env.DEV;
+			const t0 = dev ? performance.now() : 0;
+			if (dev) {
+				console.log(`[perf] onSelectThread called: id=${id}`);
+			}
 			setEditorThreadHistoryOpen(false);
 			if (!shell) {
 				return;
@@ -2099,7 +2138,19 @@ function AppMainWorkspaceInner() {
 					return;
 				}
 			}
+			const tSelectIpcStart = dev ? performance.now() : 0;
 			await shell.invoke('threads:select', id);
+			const tAfterSelectIpc = dev ? performance.now() : 0;
+			if (dev) {
+				console.log(
+					`[perf] onSelectThread: threads:select ipc=${(tAfterSelectIpc - tSelectIpcStart).toFixed(1)}ms`
+				);
+			}
+
+			// 批量重置所有状态，避免多次渲染
+			if (dev) {
+				console.log(`[perf] onSelectThread: setting states for ${id}`);
+			}
 			setCurrentId(id);
 			setAwaitingReply(false);
 			setStreaming('');
@@ -2115,7 +2166,31 @@ function AppMainWorkspaceInner() {
 			setComposerSegments([]);
 			setInlineResendSegments([]);
 			setAgentFilePreview(null);
+			const tAfterResetStates = dev ? performance.now() : 0;
+			if (dev) {
+				console.log(
+					`[perf] onSelectThread: resetStates sync=${(tAfterResetStates - tAfterSelectIpc).toFixed(1)}ms after select-ipc`
+				);
+			}
+
+			if (dev) {
+				console.log(`[perf] onSelectThread: calling loadMessages for ${id}`);
+			}
 			await loadMessages(id);
+			if (dev) {
+				const tAfterLoad = performance.now();
+				console.log(
+					`[perf] onSelectThread: after loadMessages await Δ=${(tAfterLoad - tAfterResetStates).toFixed(1)}ms (from post-reset)`
+				);
+				console.log(`[perf] onSelectThread: completed for ${id} in ${(tAfterLoad - t0).toFixed(1)}ms total`);
+				requestAnimationFrame(() => {
+					requestAnimationFrame(() => {
+						console.log(
+							`[perf] onSelectThread: toPaint Δ=${(performance.now() - t0).toFixed(1)}ms from handler start (≈after frame)`
+						);
+					});
+				});
+			}
 		},
 		[shell, workspace, openWorkspaceByPath, loadMessages, clearStreamingToolPreviewNow, resetLiveAgentBlocks, setAgentFilePreview]
 	);
@@ -4514,7 +4589,7 @@ function AppMainWorkspaceInner() {
 			return;
 		}
 		scheduleMessagesScrollToBottom();
-	}, [hasConversation, displayMessages, streaming, thinkingTick, currentId, scheduleMessagesScrollToBottom]);
+	}, [hasConversation, displayMessages, streaming, currentId, scheduleMessagesScrollToBottom]);
 
 	useLayoutEffect(() => {
 		if (!hasConversation) {
@@ -4525,7 +4600,7 @@ function AppMainWorkspaceInner() {
 			syncMessagesScrollIndicators();
 		});
 		return () => cancelAnimationFrame(rafId);
-	}, [hasConversation, displayMessages, streaming, thinkingTick, currentId, syncMessagesScrollIndicators]);
+	}, [hasConversation, displayMessages, streaming, currentId, syncMessagesScrollIndicators]);
 
 	/** 内容高度异步变化（Markdown、diff 卡片等）时仍保持粘底 */
 	useEffect(() => {
@@ -4579,28 +4654,44 @@ function AppMainWorkspaceInner() {
 	}, [hasConversation, currentId, scheduleMessagesScrollToBottom, syncMessagesScrollIndicators]);
 
 	useEffect(() => {
+		if (composerRichAutoHeightRafRef.current !== null) {
+			cancelAnimationFrame(composerRichAutoHeightRafRef.current);
+			composerRichAutoHeightRafRef.current = null;
+		}
 		const applyFollowupHeight = (el: HTMLDivElement | null) => {
 			if (!el) {
 				return;
 			}
-			el.style.height = '0';
-			el.style.height = `${Math.min(140, Math.max(38, el.scrollHeight))}px`;
+			el.style.height = '0px';
+			const next = Math.min(140, Math.max(38, el.scrollHeight));
+			el.style.height = `${next}px`;
 		};
 		const applyInlineEditHeight = (el: HTMLDivElement | null) => {
 			if (!el) {
 				return;
 			}
-			el.style.height = '0';
-			el.style.height = `${Math.min(200, Math.max(72, el.scrollHeight))}px`;
+			el.style.height = '0px';
+			const next = Math.min(200, Math.max(72, el.scrollHeight));
+			el.style.height = `${next}px`;
 		};
-		if (!hasConversation) {
-			const h = composerRichHeroRef.current;
-			if (h) {
-				h.style.height = '';
+		const run = () => {
+			composerRichAutoHeightRafRef.current = null;
+			if (!hasConversation) {
+				const h = composerRichHeroRef.current;
+				if (h) {
+					h.style.height = '';
+				}
 			}
-		}
-		applyFollowupHeight(composerRichBottomRef.current);
-		applyInlineEditHeight(composerRichInlineRef.current);
+			applyFollowupHeight(composerRichBottomRef.current);
+			applyInlineEditHeight(composerRichInlineRef.current);
+		};
+		composerRichAutoHeightRafRef.current = requestAnimationFrame(run);
+		return () => {
+			if (composerRichAutoHeightRafRef.current !== null) {
+				cancelAnimationFrame(composerRichAutoHeightRafRef.current);
+				composerRichAutoHeightRafRef.current = null;
+			}
+		};
 	}, [hasConversation, composerSegments, inlineResendSegments, resendFromUserIndex]);
 
 	useEffect(() => {
@@ -5216,7 +5307,7 @@ function AppMainWorkspaceInner() {
 		inlineResendRootRef,
 		onMessagesScroll,
 		awaitingReply,
-		thinkingTick,
+		thinkingTickRef,
 		streamStartedAtRef,
 		firstTokenAtRef,
 		thoughtSecondsByThread,
@@ -5317,10 +5408,12 @@ function AppMainWorkspaceInner() {
 		onAcceptAgentFilePreviewHunk,
 		onRevertAgentFilePreviewHunk,
 		agentFilePreviewBusyPatch,
+		workspace,
 		changeCount,
 		gitUnavailableReason,
 		gitLines,
 		refreshGit,
+		loadGitDiffPreviews,
 		gitBranch,
 		diffTotals,
 		gitChangedPaths,
@@ -5392,6 +5485,43 @@ function AppMainWorkspaceInner() {
 		}),
 		[composerInvokeSend, onAbort, composerInvokeNewThread, composerExplorerOpenRel]
 	);
+
+	// 开发环境下追踪切换后的渲染情况
+	const appRenderCountRef = useRef(0);
+	const lastThreadIdRef = useRef<string | null>(null);
+	const threadSwitchTimeRef = useRef<number>(0);
+	const appRenderStartRef = useRef<number>(0);
+	if (import.meta.env.DEV && currentId !== lastThreadIdRef.current) {
+		appRenderCountRef.current = 0;
+		lastThreadIdRef.current = currentId;
+		threadSwitchTimeRef.current = Date.now();
+		console.log(`[perf] ===== Thread changed to ${currentId}, starting render counter =====`);
+	}
+	if (import.meta.env.DEV) {
+		appRenderStartRef.current = performance.now();
+		appRenderCountRef.current += 1;
+		const elapsed = Date.now() - threadSwitchTimeRef.current;
+		if (appRenderCountRef.current <= 5 || appRenderCountRef.current % 10 === 0) {
+			console.log(`[perf] App render #${appRenderCountRef.current} at +${elapsed}ms for thread ${currentId}`);
+		}
+	}
+
+	// 渲染完成后记录耗时并追踪触发源
+	if (import.meta.env.DEV) {
+		// eslint-disable-next-line react-hooks/rules-of-hooks
+		useEffect(() => {
+			const renderTime = performance.now() - appRenderStartRef.current;
+			if (renderTime > 10) {
+				// 检查哪些关键 state 发生了变化
+				const triggers = [];
+				if (messagesThreadId) triggers.push(`thread=${messagesThreadId}`);
+				if (messages.length > 0) triggers.push(`msgs=${messages.length}`);
+				if (streaming) triggers.push('streaming');
+				if (awaitingReply) triggers.push('awaiting');
+				console.log(`[perf] App render completed in ${renderTime.toFixed(1)}ms, count=${appRenderCountRef.current}, triggers: ${triggers.join(', ') || 'none'}`);
+			}
+		});
+	}
 
 	return (
 		<AppProvider shell={shell} workspace={workspace} t={t}>
@@ -5850,7 +5980,8 @@ function AppMainWorkspaceInner() {
 					gitChangedPaths={gitChangedPaths}
 					fileMenuNewFile={() => void fileMenuNewFile()}
 					revealWorkspaceInOs={(p) => void revealWorkspaceInOs(p)}
-					refreshGit={() => void refreshGit()}
+					refreshGit={refreshGit}
+					loadGitDiffPreviews={loadGitDiffPreviews}
 					onExplorerOpenFile={(rel) => void onExplorerOpenFile(rel)}
 					setWorkspacePickerOpen={setWorkspacePickerOpen}
 					openSettingsPage={openSettingsPage}
