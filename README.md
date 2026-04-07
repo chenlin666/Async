@@ -1,21 +1,34 @@
 # Async IDE
 
+<p align="center">
+  <img src="docs/assets/async-logo-desktop.svg" width="120" height="120" alt="Async Logo" />
+</p>
 
+<p align="center">
+  <strong>An open-source AI IDE Shell — Cursor alternative: Agent, Editor, Git, Terminal, all in one place.</strong><br/>
+  Bring the Cursor workflow to your own machine with a fully open-source tech stack.
+</p>
 
-**An open-source desktop shell for AI coding: agent workflow, editor, Git, and terminal in one place.**  
-Built for people who like the Cursor-style workflow, but want something they can actually inspect, modify, and run with their own keys.
+<p align="center">
+  <img src="https://img.shields.io/badge/Cursor%20Alternative-Open%20Source-818cf8?style=flat-square" alt="Cursor Alternative & Open Source" />
+  <img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="License" />
+  <img src="https://img.shields.io/badge/Electron-41-47848F?style=flat-square&logo=electron&logoColor=white" alt="Electron" />
+  <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React" />
+  <img src="https://img.shields.io/badge/Monaco-0.52-0078D4?style=flat-square" alt="Monaco Editor" />
+</p>
 
-
-
-[English](README.md) | [简体中文](README.zh-CN.md)
+<p align="center">
+  <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a>
+</p>
 
 ---
 
-## Why this project exists
+## Cursor Alternative, Open Source
 
-Async IDE is an attempt to build a **Cursor-like coding workflow in the open**. The idea is simple: put the agent, Monaco editor, Git, diff/review flow, and terminal in one desktop app, but keep the stack transparent and hackable.
+The goal is simple: **match [Cursor](https://cursor.com) in features and experience** — the AI-native IDE shell with Agent, Monaco editor, workspace tools, diff review, and terminal all integrated — **but delivered as open source**: **Apache 2.0** license, **BYOK** model access, and **local-first** conversations and configuration.
 
-The project is released under **Apache 2.0**, uses **BYOK** model access, and keeps threads, settings, and plans **local-first** by default.
+You can think of it as an AI-native desktop workspace: Agent, Monaco editor, Git, diff/review flow, and terminal are all in one place, but the stack underneath is transparent and hackable. The project uses **Apache 2.0** license, **BYOK** for model access, and keeps threads, settings, and plans **local-first** by default.
 
 
 | Aspect                 | **Cursor**                              | **Async IDE**                                                           |
@@ -30,26 +43,16 @@ The project is released under **Apache 2.0**, uses **BYOK** model access, and ke
 
 ## What is Async IDE?
 
-Async IDE is an open-source desktop app for working with coding agents. Instead of treating AI as a sidebar chat, it is built around an **Agent Loop**: thinking, planning, tool execution, code edits, and review all happen in the same workspace.
+Async IDE is an open-source AI-native desktop application designed as your command center for working with coding agents. Rather than being a chat plugin bolted onto the side of an editor, it starts from the **Agent Loop** and brings multi-model conversations, autonomous tool execution, and review workflows into a single workspace.
 
 ### Why use Async?
 
-- **Agent-first workflow**: the agent can work with your files, tools, and terminal through a visible **Think -> Plan -> Execute -> Observe** loop.
-- **Visible tool execution**: live tool-input streaming and trajectory cards show what happened for `read_file`, `write_to_file`, `str_replace`, `search_files`, and shell steps.
-- **Your keys, your machine**: bring your own providers and keep conversation history plus repo state local.
-- **Git built in**: inspect status, diffs, and agent-driven changes against the real repository you are editing.
-- **Multiple working modes**: switch between **Agent**, **Plan**, **Ask**, and **Debug** depending on how much autonomy you want.
-- **Lean desktop stack**: Electron + React, Monaco, embedded terminal, and a codebase that is much easier to read than a giant IDE.
-
-## Recent Progress
-
-Recent commits have mostly focused on making the agent path feel more robust and more transparent:
-
-- **Claude Code-style sub-agents** with nested activity UI, background execution, and better stream handling.
-- **Structured assistant messages** stored as JSON, then expanded into native tool-call formats for OpenAI and Anthropic.
-- **Message normalization and API repair** before tool pairing, to reduce malformed histories and orphan tool blocks.
-- **Disk skills and workspace config improvements**, so local agent behavior is easier to manage.
-- **Chat UI polish**, including cleaner composer visuals and more stable streaming presentation.
+- **Agent-first** — The agent can directly access your workspace, tools, and terminal through a clear **Think → Plan → Execute → Observe** loop.
+- **Transparent process** — Streaming tool parameters (JSON rendered as it generates) + **tool trajectory** cards (`read_file`, `write_to_file`, `str_replace`, `search_files`, Shell, etc.), so every step is visible.
+- **Full control** — Use your own API keys, keep conversation history and repo state entirely local, with no dependency on cloud services.
+- **Git-native** — Status, diffs, and agent-driven changes stay in sync with your actual repository.
+- **Four Composer modes** — **Agent** (autonomous execution), **Plan** (review first, then run), **Ask** (read-only Q&A), and **Debug** (systematic troubleshooting), covering various development scenarios.
+- **Lean shell** — Electron + React with **Agent / Editor** dual layout, Monaco + embedded terminal, following the same philosophy as Cursor but with a more focused codebase.
 
 ---
 
@@ -57,26 +60,25 @@ Recent commits have mostly focused on making the agent path feel more robust and
 
 ### Agent Layout
 <p align="center">
-  <img src="docs/assets/workspace_1.png" width="3062" alt="Async Agent 布局" />
+  <img src="docs/assets/workspace_1.png" width="3062" alt="Async Agent Layout" />
 </p>
-
 
 ### Model Settings
-<p align="center">
-  <img src="docs/assets/setting_1.png" width="1824" alt="Async 模型设置" />
-</p>
 
+<p align="center">
+  <img src="docs/assets/setting_1.png" width="1824" alt="Async Model Settings" />
+</p>
 
 ### Appearance Color Palette
 
 <p align="center">
-  <img src="docs/assets/setting_2.png" width="1829" alt="Async 模型设置" />
+  <img src="docs/assets/setting_2.png" width="1829" alt="Async Appearance Color Palette" />
 </p>
 
 #### Cursor Theme
 
 <p align="center">
-  <img src="docs/assets/setting_3.png" width="1829" alt="Async 模型设置" />
+  <img src="docs/assets/setting_3.png" width="1829" alt="Async Cursor Theme" />
 </p>
 
 
@@ -86,28 +88,28 @@ Recent commits have mostly focused on making the agent path feel more robust and
 
 ### Autonomous Agent Loop
 
-- Live tool parameter streaming and trajectory cards.
-- **Plan** vs **Agent** mode: review a structured plan first, or run the tool loop directly.
-- Tool approval gates for shell commands and file writes.
-- Editor context sync so agent edits can focus the relevant file and line range.
-- Nested sub-agent updates, background execution, and timeline-style activity rendering.
+- Streaming tool parameters with trajectory cards for clear execution visibility.
+- **Plan** and **Agent** dual modes: review the plan first, or let the agent run directly.
+- Approval gates for shell commands and file writes.
+- Editor context sync so agent edits can focus on the relevant file and line range.
+- Support for nested sub-agents, background execution, and timeline-style activity rendering.
 
 ### Multi-Model Support
 
-- Adapters for **Anthropic** (including extended thinking), **OpenAI**, and **Gemini**.
-- Support for OpenAI-compatible APIs such as Ollama, vLLM, aggregators, or custom endpoints.
-- Streaming reasoning / "thinking" blocks where supported.
-- **Auto** mode to pick the best available model.
+- Built-in adapters for **Anthropic**, **OpenAI**, and **Gemini**.
+- Support for OpenAI-compatible endpoints like Ollama, vLLM, aggregators, or self-hosted services.
+- Streaming thinking blocks on supported models.
+- **Auto** mode to automatically pick the best available model.
 
 ### Developer Experience
 
-- **Monaco** editor with tabs, syntax highlighting, and diff review flows.
-- **Git** integration for status, diff, staging, commit, and push from the UI.
-- **xterm.js** terminal for both user commands and agent shell output.
+- **Monaco** editor with multi-tab support, syntax highlighting, and diff review flows.
+- **Git** integration: status, diff, staging, commit, and push all available from the UI.
+- **xterm.js** terminal: for both user commands and observing agent shell operations.
 - **Composer** with `@` file mentions, rich segments, and persistent threads.
 - **Quick Open** palette (`Ctrl/Cmd+P`) and keyboard-first navigation.
-- Built-in **i18n** support for English and Simplified Chinese.
-- Local disk skills, workspace config merge, and tool approval controls for safer agent use.
+- Built-in i18n support for English and Simplified Chinese.
+- Support for local disk skills, workspace config merge, and tool approval controls.
 
 ---
 
@@ -128,6 +130,22 @@ Recent commits have mostly focused on making the agent path feel more robust and
 └─────────────────────────────────────────────────────────┘
 ```
 
+### Tech Stack
+
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| **React** | ^19.2.4 | UI framework |
+| **Electron** | 41.1.0 | Desktop app shell |
+| **Vite** | ^6.0.3 | Build tool & dev server |
+| **TypeScript** | ^5.9.3 | Type-safe development |
+| **Monaco Editor** | ^0.52.0 | Code editor component |
+| **xterm.js** | ^5.5.0 | Terminal emulator |
+| **OpenAI SDK** | ^4.96.0 | OpenAI API client |
+| **Anthropic SDK** | ^0.39.0 | Claude API client |
+| **Google Generative AI** | ^0.21.0 | Gemini API client |
+| **MCP SDK** | ^1.29.0 | Model Context Protocol |
+| **node-pty** | ^1.1.0 | PTY terminal support |
+
 - **Main / renderer IPC** via Electron `contextBridge` and `ipcMain`.
 - `**agentLoop.ts`** handles multi-round tool calls, partial JSON streaming, tool repair, and aborts.
 - **Structured assistant messages** are persisted locally and expanded to provider-native tool formats when needed.
@@ -144,16 +162,29 @@ Async/
 │   ├── agent/                 # agentLoop.ts, toolExecutor.ts, agentTools.ts, toolApprovalGate.ts
 │   ├── llm/                   # OpenAI / Anthropic / Gemini adapters & streaming
 │   ├── lsp/                   # TypeScript LSP session
+│   ├── mcp/                   # Model Context Protocol integration
+│   ├── memdir/                # Memory directory management
 │   ├── ipc/register.ts        # ipcMain handlers (chat, threads, git, fs, agent, ...)
+│   ├── shell/                 # Shell command execution
 │   ├── threadStore.ts         # Persistent threads + messages (JSON)
 │   ├── settingsStore.ts       # settings.json
 │   ├── gitService.ts          # Porcelain status, diff previews, commit/push
-│   └── workspace.ts           # Open-folder root & safe path resolution
+│   ├── workspace.ts           # Open-folder root & safe path resolution
+│   ├── workspaceFileIndex.ts  # File indexing for workspace
+│   ├── workspaceSemanticIndex.ts  # Semantic search indexing
+│   ├── workspaceSymbolIndex.ts    # Symbol indexing
+│   └── workspaceUsageStats.ts     # Workspace usage statistics
 ├── src/                       # Vite + React renderer
 │   ├── App.tsx                # Shell layout, chat, composer modes, Git / explorer
+│   ├── AgentChatPanel.tsx     # Agent chat interface
+│   ├── AgentLeftSidebar.tsx   # Agent activity sidebar
+│   ├── AgentRightSidebar.tsx  # Agent tools and results
+│   ├── ChatComposer.tsx       # Message composer component
+│   ├── EditorMainPanel.tsx    # Monaco editor panel
+│   ├── SettingsPage.tsx       # Settings UI
+│   ├── WorkspaceExplorer.tsx  # File explorer
+│   ├── hooks/                 # Custom React hooks (19 files)
 │   ├── i18n/                  # Locale messages (en / zh-CN)
-│   ├── AgentActivityGroup.tsx # Collapsible "Explored N files" activity group
-│   ├── AgentResultCard.tsx    # Tool result display cards
 │   └── ...                    # Agent UI, Plan review, Monaco, terminal, ...
 ├── electron/
 │   ├── main.bundle.cjs        # esbuild output (do not edit by hand)
@@ -166,15 +197,15 @@ Async/
 └── package.json
 ```
 
-## Local Persistence
+## Data Storage
 
-Default layout under Electron `**userData**`:
+Default location under Electron's **`userData`** directory:
 
-- `**async/threads.json**`: threads and messages.
-- `**async/settings.json**`: models, keys, layout, and agent options.
-- `**.async/plans/**`: saved Plan documents (Markdown).
+- **`async/threads.json`**: threads and chat messages.
+- **`async/settings.json`**: model configuration, API keys, layout, and agent options.
+- **`.async/plans/`**: Markdown plan documents generated in Plan mode.
 
-The renderer may use **localStorage** for small UI flags, but `**threads.json`** is the source of truth for conversations.
+The renderer may use **localStorage** for lightweight UI state, but the authoritative data source for conversations is **`threads.json`**.
 
 ---
 
@@ -184,24 +215,37 @@ The renderer may use **localStorage** for small UI flags, but `**threads.json`**
 
 - **Node.js** >= 18
 - **npm** >= 9
-- **Git** (optional but recommended)
+- **Git** (recommended)
 
 ### Install and Run
 
-1. **Clone**:
-  ```bash
+1. **Clone the repository**:
+
+   ```bash
    git clone https://github.com/ZYKJShadow/Async.git
    cd Async
-  ```
-2. **Install**:
-  ```bash
+   ```
+
+   If you prefer Gitee, you can also use:
+
+   ```bash
+   git clone https://gitee.com/shadowsocks_z/Async.git
+   cd Async
+   ```
+
+2. **Install dependencies**:
+
+   ```bash
    npm install
-  ```
+   ```
+
 3. **Build and launch the desktop app**:
-  ```bash
+
+   ```bash
    npm run desktop
-  ```
-   This builds the main and renderer bundles, then opens Electron with `dist/index.html`.
+   ```
+
+   This will build both the main and renderer processes, then open the app with Electron.
 
 ### Development
 
@@ -221,36 +265,24 @@ npm run dev:debug
 npm run icons
 ```
 
-This rasterizes `docs/assets/async-logo.svg` into `resources/icons/icon.png` and `public/favicon.png`.
+This will rasterize `docs/assets/async-logo.svg` into `resources/icons/icon.png` and `public/favicon.png`.
 
 ---
 
 ## Acknowledgements
 
-Async IDE is obviously shaped by workflows popularized by Cursor and by the broader coding-agent ecosystem.
-
-And yes, special thanks to Claude Code for its accidental source-map-powered "open-source release". That unplanned peek behind the curtain made a lot of ideas easier to study, compare, and rebuild properly in the open.
-
----
-
-## Roadmap
-
-- Full **PTY** terminal support for a better interactive shell experience.
-- Deeper **LSP** integration: go-to-definition, diagnostics, and hover.
-- A **plugin / tool** extension API.
-- Better large-workspace context through indexing and retrieval.
-- **MCP** (Model Context Protocol) tool integration.
+We genuinely need to thank Claude Code for its "open-source moment" — Async IDE as an open-source alternative is, in a way, an indirect beneficiary of that.
 
 ---
 
 ## Community
 
-Questions, ideas, and feedback are welcome.
+Have questions, ideas, or just want to chat with a community of developers?
 
-- **Forum**: [linux.do](https://linux.do/) - join the discussion, share your setup, or report issues.
+- **Forum**: [linux.do](https://linux.do/) — Join the discussion, share your setup, report issues, and stick around.
 
 ---
 
 ## License
 
-Licensed under the [Apache License 2.0](./LICENSE).
+This project is open-sourced under the [Apache License 2.0](./LICENSE).
