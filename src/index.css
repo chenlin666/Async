@@ -13360,7 +13360,53 @@ select.ref-settings-native-select:focus {
 }
 
 .ref-agent-todo-panel {
+	margin-top: 0;
 	margin-bottom: 4px;
+	border: 1px solid var(--void-border-soft);
+	border-top: 1px solid color-mix(in srgb, var(--void-border-soft) 60%, transparent);
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+	border-bottom-left-radius: 18px;
+	border-bottom-right-radius: 18px;
+	background: var(--void-bg-3);
+	overflow: hidden;
+}
+
+/* ── Seamless bubble + TODO panel ── */
+
+/* Unified container: border + radius + clip so bubble & todo look like one card */
+.ref-msg-slot--user.has-todo-panel {
+	border: 1px solid var(--void-border-soft);
+	border-radius: 18px;
+	overflow: hidden;
+	background: var(--void-bg-3);
+	transition: border-color 0.12s ease;
+}
+
+/* Bubble inside unified container: strip own border / radius / shadow */
+.ref-msg-slot--user.has-todo-panel .ref-msg-user {
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+}
+
+/* TODO panel inside unified container: strip own border / radius / margin */
+.ref-msg-slot--user.has-todo-panel .ref-agent-todo-panel {
+	border: none;
+	border-top: 1px solid color-mix(in srgb, var(--void-border-soft) 30%, transparent);
+	border-radius: 0;
+	margin-bottom: 0;
+}
+
+/* Hover on bubble still lifts the whole card border */
+.ref-msg-slot--user.has-todo-panel:has(.ref-msg-user:hover:not(:disabled)) {
+	border-color: var(--void-border);
+}
+
+/* Sticky wrap: keep its existing radius so the outer shadow rounds correctly */
+.ref-msg-sticky-user-wrap:has(.has-todo-panel) {
+	border-bottom-left-radius: 18px;
+	border-bottom-right-radius: 18px;
 }
 
 .ref-plan-review-todos-head {
@@ -13369,16 +13415,25 @@ select.ref-settings-native-select:focus {
 	justify-content: space-between;
 	width: 100%;
 	padding: 8px 12px;
-	background: #222;
+	background: transparent;
 	border: none;
-	color: #aaa;
+	color: var(--void-fg-2);
 	font-size: 12px;
 	font-weight: 600;
 	cursor: pointer;
 }
 
 .ref-plan-review-todos-head:hover {
-	background: #282828;
+	background: color-mix(in srgb, var(--void-bg-2) 50%, transparent);
+}
+
+/* Agent todo panel overrides for todo items */
+.ref-agent-todo-panel .ref-plan-todo {
+	border-top-color: color-mix(in srgb, var(--void-border-soft) 60%, transparent);
+}
+
+.ref-agent-todo-panel .ref-plan-todo:hover {
+	background: color-mix(in srgb, var(--void-bg-2) 50%, transparent);
 }
 
 .ref-plan-review-chev {
@@ -13430,7 +13485,7 @@ select.ref-settings-native-select:focus {
 }
 
 .ref-plan-todo.is-active {
-	color: var(--accent, #6ea8fe);
+	color: var(--void-accent, #6ea8fe);
 }
 
 .ref-plan-todo.is-active .ref-plan-todo-text {
@@ -13442,11 +13497,28 @@ select.ref-settings-native-select:focus {
 	width: 16px;
 	height: 16px;
 	border: 2px solid transparent;
-	border-top-color: var(--accent, #6ea8fe);
-	border-left-color: var(--accent, #6ea8fe);
+	border-top-color: var(--void-accent, #6ea8fe);
+	border-left-color: var(--void-accent, #6ea8fe);
 	border-radius: 50%;
 	animation: ref-plan-todo-spin 0.8s linear infinite;
 	flex-shrink: 0;
+}
+
+/* Agent todo panel: done items use theme accent color */
+.ref-agent-todo-panel .ref-plan-todo.is-done {
+	color: var(--void-fg-3);
+}
+
+.ref-agent-todo-panel .ref-plan-todo .ref-plan-todo-check {
+	color: var(--void-fg-3);
+}
+
+.ref-agent-todo-panel .ref-plan-todo.is-done .ref-plan-todo-check {
+	color: var(--void-accent, #818cf8);
+}
+
+.ref-agent-todo-panel .ref-plan-todo.is-active .ref-plan-todo-check {
+	color: var(--void-accent, #6ea8fe);
 }
 
 @keyframes ref-plan-todo-spin {

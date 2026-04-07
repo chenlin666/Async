@@ -369,8 +369,19 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 
 			if (m.role === 'user') {
 				const userSegs = userMessageToSegments(m.content, workspaceFileList);
+
+				// Look ahead: does the next assistant message contain TodoWrite?
+				const nextMsg = displayMessages[i + 1];
+				const isNextAssistantStreaming = nextMsg?.role === 'assistant' && (i + 1) === displayMessages.length - 1 && awaitingReply;
+				const userTodos = nextMsg?.role === 'assistant'
+					? (isNextAssistantStreaming && liveAssistantBlocks
+						? extractTodosFromLiveBlocks(liveAssistantBlocks.blocks)
+						: (typeof nextMsg.content === 'string' ? extractLastTodosFromContent(nextMsg.content) : null))
+					: null;
+				const hasTodoPanel = userTodos != null && userTodos.length > 0;
+
 				const inner = (
-					<div className="ref-msg-slot ref-msg-slot--user">
+					<div className={`ref-msg-slot ref-msg-slot--user${hasTodoPanel ? ' has-todo-panel' : ''}`}>
 						<button
 							type="button"
 							className="ref-msg-user"
@@ -385,6 +396,41 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 						>
 							<UserMessageRich segments={userSegs} onFileClick={onOpenWorkspaceFile} />
 						</button>
+						{hasTodoPanel && (
+							<div className="ref-plan-review-todos ref-agent-todo-panel">
+								<div className="ref-plan-review-todos-head">
+									<span>{t('plan.review.todo', { done: userTodos!.filter(td => td.status === 'completed').length, total: userTodos!.length })}</span>
+								</div>
+								<div className="ref-plan-review-todos-list">
+									{userTodos!.map((todo) => {
+										const done = todo.status === 'completed';
+										const active = todo.status === 'in_progress';
+										return (
+											<div key={todo.id} className={`ref-plan-todo ${done ? 'is-done' : ''} ${active ? 'is-active' : ''}`}>
+												{active ? (
+													<span className="ref-plan-todo-spinner" aria-hidden />
+												) : (
+													<svg className="ref-plan-todo-check" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+														<rect
+															x="1" y="1" width="14" height="14" rx="3"
+															stroke="currentColor"
+															strokeWidth="1.5"
+															fill={done ? 'currentColor' : 'none'}
+														/>
+														{done ? (
+															<path d="M4.5 8l2.5 2.5 4.5-5" stroke="var(--void-bg-3, #1a1a1a)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+														) : null}
+													</svg>
+												)}
+												<span className="ref-plan-todo-text">
+													{active && todo.activeForm ? todo.activeForm : todo.content}
+												</span>
+											</div>
+										);
+									})}
+								</div>
+							</div>
+						)}
 					</div>
 				);
 				return i === lastUserMessageIndex ? (
@@ -399,49 +445,7 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 			return (
 				<div key={`a-${convoKey}-${i}`} className="ref-msg-slot ref-msg-slot--assistant">
 					{thoughtBlock && !thoughtAfterBody ? thoughtBlock : null}
-					{(() => {
-						// Extract todos: live blocks for streaming, content parsing for history
-						const todos = (isLast && agentOrPlanStreaming && liveAssistantBlocks)
-							? extractTodosFromLiveBlocks(liveAssistantBlocks.blocks)
-							: (typeof m.content === 'string' ? extractLastTodosFromContent(m.content) : null);
-						if (!todos || todos.length === 0) return null;
-						const doneCount = todos.filter(td => td.status === 'completed').length;
-						return (
-							<div className="ref-plan-review-todos ref-agent-todo-panel">
-								<div className="ref-plan-review-todos-head">
-									<span>{t('plan.review.todo', { done: doneCount, total: todos.length })}</span>
-								</div>
-								<div className="ref-plan-review-todos-list">
-									{todos.map((todo) => {
-										const done = todo.status === 'completed';
-										const active = todo.status === 'in_progress';
-										return (
-											<div key={todo.id} className={`ref-plan-todo ${done ? 'is-done' : ''} ${active ? 'is-active' : ''}`}>
-												{active ? (
-													<span className="ref-plan-todo-spinner" aria-hidden />
-												) : (
-													<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-														<rect
-															x="1" y="1" width="14" height="14" rx="3"
-															stroke={done ? '#e8a848' : '#555'}
-															strokeWidth="1.5"
-															fill={done ? '#e8a848' : 'none'}
-														/>
-														{done ? (
-															<path d="M4.5 8l2.5 2.5 4.5-5" stroke="#1a1a1a" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-														) : null}
-													</svg>
-												)}
-												<span className="ref-plan-todo-text">
-													{active && todo.activeForm ? todo.activeForm : todo.content}
-												</span>
-											</div>
-										);
-									})}
-								</div>
-							</div>
-						);
-					})()}
+					{/* TODO panel moved to user message bubble */}
 					<div className="ref-msg-assistant-body">
 						{pendingEmptyAssistant ? (
 							<span className="ref-bubble-pending" aria-hidden>
