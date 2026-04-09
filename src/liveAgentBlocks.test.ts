@@ -69,6 +69,80 @@ describe('liveAgentBlocks', () => {
 		expect(done).toHaveLength(1);
 	});
 
+	it('deduplicates duplicate tool_call after tool_result and preserves done order', () => {
+		let st = createEmptyLiveAgentBlocks();
+		st = applyLiveAgentChatPayload(st, {
+			type: 'tool_call',
+			name: 'execute_command',
+			args: '{"command":"npm test"}',
+			toolCallId: 'call-cmd-1',
+		});
+		st = applyLiveAgentChatPayload(st, {
+			type: 'tool_result',
+			name: 'execute_command',
+			result: 'ok',
+			success: true,
+			toolCallId: 'call-cmd-1',
+		});
+		st = applyLiveAgentChatPayload(st, {
+			type: 'tool_call',
+			name: 'execute_command',
+			args: '{"command":"npm test"}',
+			toolCallId: 'call-cmd-1',
+		});
+		const tools = st.blocks.filter((b) => b.type === 'tool');
+		expect(tools).toHaveLength(1);
+		expect(tools[0] && tools[0].type === 'tool' && tools[0].phase).toBe('done');
+	});
+
+	it('reconciles late tool_call into an orphan result by toolCallId', () => {
+		let st = createEmptyLiveAgentBlocks();
+		st = applyLiveAgentChatPayload(st, {
+			type: 'tool_result',
+			name: 'execute_command',
+			result: 'ok',
+			success: true,
+			toolCallId: 'call-cmd-2',
+		});
+		st = applyLiveAgentChatPayload(st, {
+			type: 'tool_call',
+			name: 'execute_command',
+			args: '{"command":"npm test"}',
+			toolCallId: 'call-cmd-2',
+		});
+		const tools = st.blocks.filter((b) => b.type === 'tool');
+		expect(tools).toHaveLength(1);
+		expect(tools[0] && tools[0].type === 'tool' && tools[0].phase).toBe('done');
+		expect(tools[0] && tools[0].type === 'tool' && tools[0].argsJson).toBe('{"command":"npm test"}');
+	});
+
+	it('deduplicates duplicate tool_result by toolCallId', () => {
+		let st = createEmptyLiveAgentBlocks();
+		st = applyLiveAgentChatPayload(st, {
+			type: 'tool_call',
+			name: 'read_file',
+			args: '{"path":"p"}',
+			toolCallId: 'call-read-1',
+		});
+		st = applyLiveAgentChatPayload(st, {
+			type: 'tool_result',
+			name: 'read_file',
+			result: 'ok',
+			success: true,
+			toolCallId: 'call-read-1',
+		});
+		st = applyLiveAgentChatPayload(st, {
+			type: 'tool_result',
+			name: 'read_file',
+			result: 'ok',
+			success: true,
+			toolCallId: 'call-read-1',
+		});
+		const tools = st.blocks.filter((b) => b.type === 'tool');
+		expect(tools).toHaveLength(1);
+		expect(tools[0] && tools[0].type === 'tool' && tools[0].phase).toBe('done');
+	});
+
 	it('keeps root thinking inline in the live segment order', () => {
 		let st = createEmptyLiveAgentBlocks();
 		st = applyLiveAgentChatPayload(st, { type: 'thinking_delta', text: 'Planning edits' });

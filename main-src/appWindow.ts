@@ -3,7 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { THEME_CHROME } from './themeChrome.js';
 import { bindWorkspaceRootToWebContents, onWebContentsDestroyed } from './workspace.js';
-import { acquireWorkspaceFileIndexRef, ensureWorkspaceFileIndex, releaseWorkspaceFileIndexRef } from './workspaceFileIndex.js';
+import { acquireWorkspaceFileIndexRef, releaseWorkspaceFileIndexRef } from './workspaceFileIndex.js';
 
 const isDev = !app.isPackaged;
 const devUrl = process.env.VITE_DEV_SERVER_URL ?? 'http://127.0.0.1:5173';
@@ -71,7 +71,6 @@ export function createAppWindow(opts?: {
 		const resolvedInitial = path.resolve(initial);
 		bindWorkspaceRootToWebContents(win.webContents, resolvedInitial);
 		acquireWorkspaceFileIndexRef(resolvedInitial);
-		void ensureWorkspaceFileIndex(resolvedInitial).catch(() => {});
 	}
 
 	onWebContentsDestroyed(win.webContents, (releasedRoot) => {

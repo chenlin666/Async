@@ -7,6 +7,12 @@ import {
 	type AgentFilePreviewHunk,
 	type AgentFilePreviewRow,
 } from './agentFilePreviewDiff';
+import {
+	agentFilePreviewPathToLang,
+	computeAgentFilePreviewLineHtmls,
+	ensureAgentFilePreviewLang,
+	getAgentFilePreviewHighlighter,
+} from './agentFilePreviewShiki';
 import { useI18n } from './i18n';
 import { voidShellDebugLog } from './tabCloseDebug';
 
@@ -104,6 +110,7 @@ export function AgentFilePreviewPanel({
 		String(diff ?? '').trim() ? [] : buildPlainAgentFilePreviewRows(content)
 	);
 	const [hunks, setHunks] = useState<AgentFilePreviewHunk[]>([]);
+	const [shikiHtmlByRow, setShikiHtmlByRow] = useState<string[] | null>(null);
 	useEffect(() => {
 		let cancelled = false;
 		const raw = String(diff ?? '').trim();
@@ -126,6 +133,41 @@ export function AgentFilePreviewPanel({
 			cancelled = true;
 		};
 	}, [content, diff]);
+
+	useEffect(() => {
+		if (loading || readError || isBinary) {
+			setShikiHtmlByRow(null);
+			return;
+		}
+		if (rows.length === 0) {
+			setShikiHtmlByRow(null);
+			return;
+		}
+		let cancelled = false;
+		void (async () => {
+			try {
+				const langGuess = agentFilePreviewPathToLang(filePath);
+				const h = await getAgentFilePreviewHighlighter();
+				const lang = await ensureAgentFilePreviewLang(langGuess);
+				if (cancelled) {
+					return;
+				}
+				const next = computeAgentFilePreviewLineHtmls(h, lang, rows);
+				if (!cancelled) {
+					setShikiHtmlByRow(next);
+				}
+			} catch (e) {
+				console.warn('[AgentFilePreviewPanel] Shiki 高亮失败', e);
+				if (!cancelled) {
+					setShikiHtmlByRow(null);
+				}
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [filePath, rows, loading, readError, isBinary]);
+
 	const hunkMap = useMemo(() => new Map(hunks.map((hunk) => [hunk.id, hunk])), [hunks]);
 	const blocks = useMemo(() => buildPreviewBlocks(rows, hunks), [rows, hunks]);
 	const name = basename(filePath);
@@ -198,6 +240,8 @@ export function AgentFilePreviewPanel({
 			targeted ? 'is-target' : '',
 		].filter(Boolean).join(' ');
 		const sign = row.kind === 'add' ? '+' : row.kind === 'del' ? '-' : ' ';
+		const shikiReady = shikiHtmlByRow != null && shikiHtmlByRow.length === rows.length;
+		const lineHtml = shikiReady ? shikiHtmlByRow[index] : null;
 
 		return (
 			<div
@@ -218,18 +262,25 @@ export function AgentFilePreviewPanel({
 						{sign || ' '}
 					</span>
 				)}
-				<code className="ref-agent-file-preview-line">
-					{row.tokens.length > 0
-						? row.tokens.map((token, tokenIndex) => (
-								<span
-									key={`${token.kind}-${tokenIndex}`}
-									className={`ref-agent-file-preview-token ref-agent-file-preview-token--${token.kind}`}
-								>
-									{token.text || ' '}
-								</span>
-							))
-						: ' '}
-				</code>
+				{lineHtml != null ? (
+					<code
+						className="ref-agent-file-preview-line ref-agent-file-preview-line--shiki"
+						dangerouslySetInnerHTML={{ __html: lineHtml || '\u00a0' }}
+					/>
+				) : (
+					<code className="ref-agent-file-preview-line">
+						{row.tokens.length > 0
+							? row.tokens.map((token, tokenIndex) => (
+									<span
+										key={`${token.kind}-${tokenIndex}`}
+										className={`ref-agent-file-preview-token ref-agent-file-preview-token--${token.kind}`}
+									>
+										{token.text || ' '}
+									</span>
+								))
+							: ' '}
+					</code>
+				)}
 			</div>
 		);
 	};

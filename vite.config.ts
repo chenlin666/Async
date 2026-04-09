@@ -21,7 +21,7 @@ export default defineConfig({
 		},
 	},
 	optimizeDeps: {
-		include: ['monaco-editor', 'react', 'react-dom'],
+		include: ['monaco-editor', 'react', 'react-dom', 'shiki', '@shikijs/engine-javascript'],
 	},
 	server: {
 		host: '127.0.0.1',

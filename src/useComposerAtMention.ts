@@ -3,9 +3,9 @@ import {
 	buildStaticAtMenuItems,
 	filterAtMenuItems,
 	getAtMentionRange,
-	workspacePathsToMenuItems,
 	type AtMenuItem,
 } from './composerAtMention';
+import type { WorkspaceFileSearchItem } from './hooks/useWorkspaceManager';
 import { newSegmentId, type ComposerSegment } from './composerSegments';
 import { snapshotDomRect, type CaretRectSnapshot } from './caretRectSnapshot';
 import {
@@ -18,6 +18,10 @@ import {
 } from './composerRichDom';
 
 export type AtComposerSlot = 'hero' | 'bottom' | 'inline';
+
+/** 与 claude-code 统一建议量级接近：控制菜单高度与主进程 top-K */
+const AT_MENU_FILE_RESULTS_LIMIT = 15;
+const AT_MENU_SEARCH_DEBOUNCE_MS = 50;
 
 type RichRefs = {
 	hero: React.RefObject<HTMLDivElement | null>;
@@ -32,8 +36,11 @@ export function useComposerAtMention(
 		gitChangedPaths: string[];
 		currentThreadTitle: string;
 		workspaceOpen: boolean;
-		workspaceFiles: string[];
+		/** 按需搜索工作区文件（IPC，主进程侧过滤） */
+		searchFiles: (query: string, gitChangedPaths: string[], limit?: number) => Promise<WorkspaceFileSearchItem[]>;
 		onFileChipPreview: (relPath: string) => void;
+		/** 主进程首次索引扫描完成时递增，用于菜单打开期间重跑当前 query */
+		fileIndexReadyTick?: number;
 	}
 ) {
 	const atSlotRef = useRef<AtComposerSlot>('bottom');
@@ -53,18 +60,64 @@ export function useComposerAtMention(
 		[opts.currentThreadTitle, opts.workspaceOpen]
 	);
 
-	const fileItems = useMemo(
-		() =>
-			workspacePathsToMenuItems(opts.workspaceFiles, atQuery, opts.gitChangedPaths, 60),
-		[opts.workspaceFiles, atQuery, opts.gitChangedPaths]
-	);
+	// ── 文件搜索（按需 IPC，不依赖预加载的全量文件列表）──────────────────────
+	const [fileItems, setFileItems] = useState<AtMenuItem[]>([]);
+	const [atFileSearchLoading, setAtFileSearchLoading] = useState(false);
+	const searchSeqRef = useRef(0);
+
+	useEffect(() => {
+		if (!atOpen) {
+			setFileItems([]);
+			setAtFileSearchLoading(false);
+			return;
+		}
+		const seq = ++searchSeqRef.current;
+		const delay = atQuery ? AT_MENU_SEARCH_DEBOUNCE_MS : 0;
+		setAtFileSearchLoading(true);
+		const timer = window.setTimeout(() => {
+			void (async () => {
+				try {
+					const items = await opts.searchFiles(
+						atQuery,
+						opts.gitChangedPaths,
+						AT_MENU_FILE_RESULTS_LIMIT
+					);
+					if (seq !== searchSeqRef.current) {
+						return;
+					}
+					setFileItems(
+						items.map((it) => ({
+							id: `ws:${it.path}`,
+							label: it.label,
+							subtitle: it.description,
+							insertText: `@${it.path}`,
+							icon: 'file' as const,
+						}))
+					);
+				} catch {
+					/* ignore */
+				} finally {
+					if (seq === searchSeqRef.current) {
+						setAtFileSearchLoading(false);
+					}
+				}
+			})();
+		}, delay);
+		return () => {
+			window.clearTimeout(timer);
+		};
+	}, [atOpen, atQuery, opts.searchFiles, opts.gitChangedPaths, opts.fileIndexReadyTick ?? 0]);
 
 	const filteredStatic = useMemo(
 		() => filterAtMenuItems(staticItems, atQuery),
 		[staticItems, atQuery]
 	);
 
-	const filtered = useMemo(() => [...fileItems, ...filteredStatic], [fileItems, filteredStatic]);
+	/** 文件命中优先，静态项殿后；文件条数已由 IPC limit 收紧 */
+	const filtered = useMemo(
+		() => [...fileItems, ...filteredStatic],
+		[fileItems, filteredStatic]
+	);
 
 	const filteredRef = useRef(filtered);
 	const highlightRef = useRef(atHighlight);
@@ -233,6 +286,10 @@ export function useComposerAtMention(
 		[closeAtMenu, getRich, makeDomHandlers]
 	);
 
+	/** 避免 applyAtSelection 随 onFileChipPreview 等抖动 → handleAtKeyDown 重建 → sharedComposerProps 连带失效 */
+	const applyAtSelectionRef = useRef(applyAtSelection);
+	applyAtSelectionRef.current = applyAtSelection;
+
 	const handleAtKeyDown = useCallback(
 		(e: React.KeyboardEvent): boolean => {
 			if (!atOpen) {
@@ -267,7 +324,7 @@ export function useComposerAtMention(
 				const hi = highlightRef.current;
 				const it = list[Math.min(hi, list.length - 1)];
 				if (it) {
-					applyAtSelection(it);
+					applyAtSelectionRef.current(it);
 				}
 				return true;
 			}
@@ -279,13 +336,14 @@ export function useComposerAtMention(
 			}
 			return false;
 		},
-		[atOpen, applyAtSelection, closeAtMenu]
+		[atOpen, closeAtMenu]
 	);
 
 	return {
 		atMenuOpen: atOpen,
 		atMenuItems: filtered,
 		atMenuHighlight: atHighlight,
+		atMenuFileSearchLoading: atFileSearchLoading,
 		atCaretRect,
 		syncAtFromRich,
 		setAtMenuHighlight: setAtHighlight,

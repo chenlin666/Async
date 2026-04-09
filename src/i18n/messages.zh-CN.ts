@@ -687,7 +687,7 @@ export const messagesZhCN: Record<string, string> = {
 		'请执行已保存的计划文档：严格按其中步骤顺序完成实现并修改代码。完整计划已在本轮系统上下文中提供。',
 
 	// thought block
-	'thought.thinking': '思考中… {{sec}}s',
+	'thought.thinking': '思考中…',
 	'thought.for': '思考用时 {{sec}}s',
 	'thought.mode.ask': '当前为问答模式：侧重解释与只读分析。',
 	'thought.mode.plan': '当前为规划模式：侧重结构化计划与风险说明。',

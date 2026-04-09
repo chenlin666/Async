@@ -1,11 +1,11 @@
 import {
 	type Dispatch,
 	type KeyboardEvent,
-	type ReactNode,
 	type RefObject,
 	type SetStateAction,
 	useContext,
 } from 'react';
+import { ComposerGitBranchRow } from './ComposerGitBranchRow';
 import { ComposerActionsContext } from './ComposerActionsContext';
 import { ComposerModeIcon, composerModeLabel, type ComposerMode } from './ComposerPlusMenu';
 import { ComposerRichInput } from './ComposerRichInput';
@@ -50,7 +50,9 @@ interface ChatComposerProps {
 	modelPillLabel: string;
 	awaitingReply: boolean;
 	resendFromUserIndex: number | null;
-	composerGitBranchRowEl: ReactNode;
+	composerGitBranchAnchorRef: RefObject<HTMLButtonElement | null>;
+	/** 打开 Git 分支菜单前关闭 + / 模型选择（稳定回调，避免 git 更新带动 composer props 失效） */
+	onBeforeToggleGitBranchPicker?: () => void;
 	setPlusMenuAnchorSlot: (slot: ComposerAnchorSlot) => void;
 	setModelPickerOpen: Dispatch<SetStateAction<boolean>>;
 	setPlusMenuOpen: Dispatch<SetStateAction<boolean>>;
@@ -94,7 +96,8 @@ export function ChatComposer({
 	modelPillLabel,
 	awaitingReply,
 	resendFromUserIndex,
-	composerGitBranchRowEl,
+	composerGitBranchAnchorRef,
+	onBeforeToggleGitBranchPicker,
 	setPlusMenuAnchorSlot,
 	setModelPickerOpen,
 	setPlusMenuOpen,
@@ -268,7 +271,10 @@ export function ChatComposer({
 	return (
 		<div className="ref-composer-stack-with-branch">
 			{capsule}
-			{composerGitBranchRowEl}
+			<ComposerGitBranchRow
+				ref={composerGitBranchAnchorRef}
+				onBeforeToggleGitBranchPicker={onBeforeToggleGitBranchPicker}
+			/>
 		</div>
 	);
 }

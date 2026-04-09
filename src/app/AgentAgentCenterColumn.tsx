@@ -33,13 +33,24 @@ export const AgentAgentCenterColumn = memo(function AgentAgentCenterColumn({
 	toggleAgentRightSidebarView,
 	chatPanelProps,
 }: AgentAgentCenterColumnProps) {
+	const threadMessagesPending =
+		chatPanelProps.currentId != null &&
+		chatPanelProps.messagesThreadId !== chatPanelProps.currentId;
+	const showThreadSubtitle =
+		hasConversation ||
+		(threadMessagesPending && currentThreadTitle.trim().length > 0);
+
 	if (import.meta.env.DEV) {
-		console.log(`[perf] AgentAgentCenterColumn render: thread=${chatPanelProps.messagesThreadId}, hasConv=${hasConversation}`);
+		console.log(
+			`[perf] AgentAgentCenterColumn render: currentId=${chatPanelProps.currentId ?? 'null'} msgsThread=${chatPanelProps.messagesThreadId ?? 'null'}, hasConv=${hasConversation}`
+		);
 	}
-	
+
 	return (
 		<main
-			className={`ref-center ref-center--agent-layout ${hasConversation ? 'ref-center--chat' : 'ref-center--empty-agent'}`}
+			className={`ref-center ref-center--agent-layout ${
+				hasConversation || threadMessagesPending ? 'ref-center--chat' : 'ref-center--empty-agent'
+			}`}
 			aria-label={t('app.commandCenter')}
 			onKeyDown={onPlanNewIdea}
 		>
@@ -50,7 +61,7 @@ export const AgentAgentCenterColumn = memo(function AgentAgentCenterColumn({
 						<span className="ref-context-title">{workspace ? workspaceBasename : t('app.noWorkspace')}</span>
 					</span>
 				</div>
-				{hasConversation ? (
+				{showThreadSubtitle ? (
 					<div className="ref-context-sub ref-context-sub--agent" title={currentThreadTitle}>
 						{currentThreadTitle}
 					</div>

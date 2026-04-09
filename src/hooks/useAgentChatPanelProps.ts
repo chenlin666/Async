@@ -1,13 +1,18 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef, type MutableRefObject } from 'react';
 import type { AgentChatPanelProps } from '../AgentChatPanel';
+
+type OpenAgentConversationFile = AgentChatPanelProps['onOpenAgentConversationFile'];
 
 export type UseAgentChatPanelPropsParams = Omit<
 	AgentChatPanelProps,
-	'layout' | 'onOpenWorkspaceFile' | 'onRunCommand' | 'onOpenAgentConversationFile'
+	'layout' | 'onOpenWorkspaceFile' | 'onRunCommand' | 'onOpenAgentConversationFile' | 'workspaceFileList'
 > & {
 	shell: Window['asyncShell'] | undefined;
 	onExplorerOpenFile: (rel: string) => void | Promise<void>;
 	onAgentConversationOpenFile: AgentChatPanelProps['onOpenAgentConversationFile'];
+	workspaceFileListRef: MutableRefObject<string[]>;
+	/** 与 ref 同步递增，使 stable 分组在按需加载全量路径后重建 */
+	workspaceFileListVersion: number;
 };
 
 export function useAgentChatPanelProps({
@@ -16,18 +21,26 @@ export function useAgentChatPanelProps({
 	onAgentConversationOpenFile,
 	...rest
 }: UseAgentChatPanelPropsParams): Omit<AgentChatPanelProps, 'layout'> {
-	const onOpenWorkspaceFile = useCallback(
-		(rel: string) => {
-			void onExplorerOpenFile(rel);
-		},
-		[onExplorerOpenFile]
-	);
+	const onExplorerOpenFileRef = useRef(onExplorerOpenFile);
+	onExplorerOpenFileRef.current = onExplorerOpenFile;
+	const onAgentConversationOpenFileRef = useRef(onAgentConversationOpenFile);
+	onAgentConversationOpenFileRef.current = onAgentConversationOpenFile;
+	const shellRef = useRef(shell);
+	shellRef.current = shell;
 
-	const onRunCommand = useCallback(
-		(cmd: string) => {
-			shell?.invoke('terminal:execLine', cmd).catch(console.error);
+	const onOpenWorkspaceFile = useCallback((rel: string) => {
+		void onExplorerOpenFileRef.current(rel);
+	}, []);
+
+	const onRunCommand = useCallback((cmd: string) => {
+		shellRef.current?.invoke('terminal:execLine', cmd).catch(console.error);
+	}, []);
+
+	const stableOnOpenAgentConversationFile = useCallback(
+		async (...args: Parameters<OpenAgentConversationFile>) => {
+			await onAgentConversationOpenFileRef.current(...args);
 		},
-		[shell]
+		[]
 	);
 
 	// Group 1: Message/Thread state (changes on thread switch or new messages)
@@ -45,7 +58,6 @@ export function useAgentChatPanelProps({
 		streamingToolPreview: rest.streamingToolPreview,
 		liveAssistantBlocks: rest.liveAssistantBlocks,
 		lastTurnUsage: rest.lastTurnUsage,
-		agentFileChanges: rest.agentFileChanges,
 		fileChangesDismissed: rest.fileChangesDismissed,
 		agentPlanSummaryCard: rest.agentPlanSummaryCard,
 		showScrollToBottomButton: rest.showScrollToBottomButton,
@@ -55,7 +67,7 @@ export function useAgentChatPanelProps({
 		rest.currentId, rest.lastAssistantMessageIndex, rest.lastUserMessageIndex,
 		rest.hasConversation, rest.awaitingReply, rest.streaming,
 		rest.streamingThinking, rest.streamingToolPreview, rest.liveAssistantBlocks,
-		rest.lastTurnUsage, rest.agentFileChanges, rest.fileChangesDismissed,
+		rest.lastTurnUsage, rest.fileChangesDismissed,
 		rest.agentPlanSummaryCard, rest.showScrollToBottomButton, rest.scrollMessagesToBottom,
 	]);
 
@@ -132,7 +144,8 @@ export function useAgentChatPanelProps({
 		t: rest.t,
 		workspace: rest.workspace,
 		workspaceBasename: rest.workspaceBasename,
-		workspaceFileList: rest.workspaceFileList,
+		workspaceFileList: rest.workspaceFileListRef.current,
+		dismissedFiles: rest.dismissedFiles,
 		revertedFiles: rest.revertedFiles,
 		revertedChangeKeys: rest.revertedChangeKeys,
 		messagesViewportRef: rest.messagesViewportRef,
@@ -143,7 +156,9 @@ export function useAgentChatPanelProps({
 		firstTokenAtRef: rest.firstTokenAtRef,
 		thoughtSecondsByThread: rest.thoughtSecondsByThread,
 	}), [
-		rest.t, rest.workspace, rest.workspaceBasename, rest.workspaceFileList,
+		rest.t, rest.workspace, rest.workspaceBasename, rest.workspaceFileListVersion,
+		rest.workspaceFileListRef,
+		rest.dismissedFiles,
 		rest.revertedFiles, rest.revertedChangeKeys,
 		rest.messagesViewportRef, rest.messagesTrackRef, rest.onMessagesScroll,
 		rest.thinkingTickRef, rest.streamStartedAtRef, rest.firstTokenAtRef,
@@ -151,10 +166,32 @@ export function useAgentChatPanelProps({
 	]);
 
 	// Final combined memo — only recomputes when a group-level reference changes
+	const prevGroupsRef = useRef<{
+		m: typeof messageGroup;
+		c: typeof composerGroup;
+		a: typeof actionGroup;
+		s: typeof stableGroup;
+	} | null>(null);
 	const result = useMemo(
 		() => {
 			if (import.meta.env.DEV) {
-				console.log(`[perf] useAgentChatPanelProps memo recomputed: messages=${messageGroup.displayMessages.length}, thread=${messageGroup.messagesThreadId}`);
+				const p = prevGroupsRef.current;
+				if (p) {
+					const reasons: string[] = [];
+					if (p.m !== messageGroup) reasons.push('message');
+					if (p.c !== composerGroup) reasons.push('composer');
+					if (p.a !== actionGroup) reasons.push('action');
+					if (p.s !== stableGroup) reasons.push('stable');
+					console.log(
+						`[perf] useAgentChatPanelProps memo recomputed: messages=${messageGroup.displayMessages.length}, thread=${messageGroup.messagesThreadId}` +
+							(reasons.length ? ` (groups: ${reasons.join(', ')})` : '')
+					);
+				} else {
+					console.log(
+						`[perf] useAgentChatPanelProps memo recomputed: messages=${messageGroup.displayMessages.length}, thread=${messageGroup.messagesThreadId}`
+					);
+				}
+				prevGroupsRef.current = { m: messageGroup, c: composerGroup, a: actionGroup, s: stableGroup };
 			}
 			return {
 				...messageGroup,
@@ -162,11 +199,11 @@ export function useAgentChatPanelProps({
 				...actionGroup,
 				...stableGroup,
 				onOpenWorkspaceFile,
-				onOpenAgentConversationFile: onAgentConversationOpenFile,
+				onOpenAgentConversationFile: stableOnOpenAgentConversationFile,
 				onRunCommand,
 			};
 		},
-		[messageGroup, composerGroup, actionGroup, stableGroup, onOpenWorkspaceFile, onAgentConversationOpenFile, onRunCommand]
+		[messageGroup, composerGroup, actionGroup, stableGroup, onOpenWorkspaceFile, stableOnOpenAgentConversationFile, onRunCommand]
 	);
 
 	return result;

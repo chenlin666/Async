@@ -3083,6 +3083,8 @@ html[data-theme-switching='true'] .ref-editor-welcome-panel {
 	max-height: none;
 	/* 缩短对话末尾与底部输入区之间的留白，但仍保留一点呼吸感 */
 	padding-bottom: calc(12px + var(--ref-chat-tail-space));
+	/* 消息高度在 Markdown/虚拟测量后会继续变化，关闭浏览器 scroll anchoring，避免把视口拉回中段。 */
+	overflow-anchor: none;
 	/* Firefox???????????????????????? */
 	scrollbar-color: rgba(58, 58, 66, 0) transparent;
 	transition: scrollbar-color 0.35s var(--void-ease-out-expo);
@@ -3255,9 +3257,14 @@ html[data-theme-switching='true'] .ref-editor-welcome-panel {
 	width: 100%;
 }
 
-/* 虚拟行内为绝对定位子树；避免误拦滚动 */
+/* 虚拟行内为绝对定位子树；与 .ref-messages-track 的 flex+align-items:center 一致，否则气泡贴左不居中 */
 .ref-msg-virtual-row {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
 	min-height: 0;
+	width: 100%;
+	box-sizing: border-box;
 }
 
 /* transform 排布下列内 sticky 无效，降级为普通块避免错误粘附 */
@@ -6426,6 +6433,14 @@ html[data-theme-switching='true'] .ref-editor-welcome-panel {
 	text-align: center;
 }
 
+.ref-at-menu-loading-hint {
+	font-size: 11px;
+	color: var(--void-fg-3);
+	padding: 6px 10px 8px;
+	margin: -2px 0 2px;
+	border-bottom: 1px solid var(--void-border-soft);
+}
+
 .ref-at-menu-row {
 	display: flex;
 	align-items: flex-start;
@@ -7812,6 +7827,11 @@ html[data-theme-switching='true'] .ref-editor-welcome-panel {
 	font: inherit;
 }
 
+/* Shiki 行内 HTML：子 span 自带 style.color，父级不设死前景以免盖掉 */
+.ref-agent-file-preview-line.ref-agent-file-preview-line--shiki {
+	color: unset;
+}
+
 .ref-agent-file-preview-row--del .ref-agent-file-preview-line {
 	color: color-mix(in srgb, var(--void-fg-1) 76%, #fca5a5 24%);
 	opacity: 0.9;
@@ -8968,6 +8988,30 @@ html[data-theme-switching='true'] .ref-editor-welcome-panel {
 .ref-git-diff-line.is-meta {
 	color: var(--void-fg-3);
 	opacity: 0.85;
+}
+
+.ref-git-diff-line--shiki {
+	display: grid;
+	grid-template-columns: 1ch minmax(0, 1fr);
+	gap: 4px;
+	align-items: baseline;
+}
+
+.ref-git-diff-line-prefix {
+	font-weight: 700;
+	user-select: none;
+}
+
+.ref-git-diff-line-code {
+	margin: 0;
+	padding: 0;
+	font: inherit;
+	background: transparent;
+	border: none;
+	min-width: 0;
+	white-space: pre-wrap;
+	word-break: break-all;
+	color: unset;
 }
 
 .ref-git-card-skel,

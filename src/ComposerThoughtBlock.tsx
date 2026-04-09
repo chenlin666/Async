@@ -86,8 +86,9 @@ export function ComposerThoughtBlock({
 	const sec = Math.max(0, elapsedSeconds);
 	const secLabel = sec < 10 ? sec.toFixed(1) : String(Math.round(sec));
 
+	/** 思考阶段（首 token 前）不展示秒数，避免长时间停在「0.0s」；有输出后沿用原有用时展示。 */
 	const headline =
-		phase === 'thinking' ? t('thought.thinking', { sec: secLabel }) : t('thought.for', { sec: secLabel });
+		phase === 'thinking' ? t('thought.thinking') : t('thought.for', { sec: secLabel });
 
 	const onToggle = useCallback(() => setOpen((o) => !o), []);
 

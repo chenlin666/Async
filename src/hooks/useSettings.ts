@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import type { SettingsNavId } from '../SettingsPage';
 import type { EditorSettings } from '../EditorSettingsPanel';
 import { defaultEditorSettings } from '../EditorSettingsPanel';
@@ -265,10 +265,12 @@ export function useSettings(
 			};
 			if (cancelled) return;
 			const slice = r?.slice;
-			setProjectAgentSlice({
-				rules: tagProjectOrigin(slice?.rules),
-				skills: tagProjectOrigin(slice?.skills),
-				subagents: tagProjectOrigin(slice?.subagents),
+			startTransition(() => {
+				setProjectAgentSlice({
+					rules: tagProjectOrigin(slice?.rules),
+					skills: tagProjectOrigin(slice?.skills),
+					subagents: tagProjectOrigin(slice?.subagents),
+				});
 			});
 		})();
 		return () => {
@@ -286,7 +288,9 @@ export function useSettings(
 			try {
 				const r = (await shell.invoke('workspace:listDiskSkills')) as { ok?: boolean; skills?: AgentSkill[] };
 				if (cancelled) return;
-				setWorkspaceDiskSkills(Array.isArray(r?.skills) ? r.skills : []);
+				startTransition(() => {
+					setWorkspaceDiskSkills(Array.isArray(r?.skills) ? r.skills : []);
+				});
 			} catch {
 				if (!cancelled) {
 					setWorkspaceDiskSkills([]);

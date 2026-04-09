@@ -1,10 +1,17 @@
-import { memo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { changeBadgeLabel, changeBadgeVariant } from './gitBadge';
 import { FileTypeIcon } from './fileTypeIcons';
 import type { TFunction } from './i18n';
 import { IconEye } from './icons';
 import type { GitPathStatusMap } from './WorkspaceExplorer';
+import {
+	agentFilePreviewPathToLang,
+	buildGitSidebarDiffLineRender,
+	ensureAgentFilePreviewLang,
+	getAgentFilePreviewHighlighter,
+	type GitSidebarDiffLineRender,
+} from './agentFilePreviewShiki';
 
 /** 达到条数后 Agent 侧栏 Git 卡片使用虚拟列表（卡片含 diff，高度由 measureElement 测量） */
 export const AGENT_GIT_SCM_VIRTUAL_THRESHOLD = 8;
@@ -41,26 +48,82 @@ function gitSidebarDiffLineClass(line: string): string {
 		line.startsWith('--- ') ||
 		line.startsWith('+++ ') ||
 		line.startsWith('Binary files ') ||
-		line.startsWith('GIT binary patch')
+		line.startsWith('GIT binary patch') ||
+		line.startsWith('\\')
 	) {
 		return `${base} is-meta`;
 	}
 	return base;
 }
 
-const GitDiffLines = memo(function GitDiffLines({ diff, t }: { diff: string; t: TFunction }) {
-	const trimmed = trimGitDiffForSidebarCard(diff);
-	const lines = trimmed.split('\n').slice(0, 120);
+const GitDiffLines = memo(function GitDiffLines({
+	diff,
+	relPath,
+	t,
+}: {
+	diff: string;
+	/** 用于按扩展名选 Shiki 语言 */
+	relPath: string;
+	t: TFunction;
+}) {
+	const trimmed = useMemo(() => trimGitDiffForSidebarCard(diff), [diff]);
+	const lines = useMemo(() => trimmed.split('\n').slice(0, 120), [trimmed]);
+	const [views, setViews] = useState<GitSidebarDiffLineRender[] | null>(null);
+
+	useEffect(() => {
+		if (lines.length === 0) {
+			setViews([]);
+			return;
+		}
+		let cancelled = false;
+		void (async () => {
+			try {
+				const h = await getAgentFilePreviewHighlighter();
+				const lang = await ensureAgentFilePreviewLang(agentFilePreviewPathToLang(relPath));
+				if (cancelled) {
+					return;
+				}
+				const next = lines.map((line) =>
+					buildGitSidebarDiffLineRender(h, lang, line, gitSidebarDiffLineClass(line))
+				);
+				if (!cancelled) {
+					setViews(next);
+				}
+			} catch (e) {
+				console.warn('[GitDiffLines] Shiki 高亮失败', e);
+				if (!cancelled) {
+					setViews(null);
+				}
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [lines, relPath]);
+
 	return (
 		<div className="ref-git-card-diff" role="region" aria-label={t('git.diffPreview')}>
-			{lines.map((line, i) => {
-				const mod = gitSidebarDiffLineClass(line);
-				return (
-					<div key={i} className={mod}>
-						{line || '\u00a0'}
-					</div>
-				);
-			})}
+			{views === null
+				? lines.map((line, i) => (
+						<div key={i} className={gitSidebarDiffLineClass(line)}>
+							{line || '\u00a0'}
+						</div>
+					))
+				: views.map((v, i) =>
+						v.mode === 'raw' ? (
+							<div key={i} className={v.className} dangerouslySetInnerHTML={{ __html: v.html }} />
+						) : (
+							<div key={i} className={`${v.className} ref-git-diff-line--shiki`}>
+								<span className="ref-git-diff-line-prefix" aria-hidden>
+									{v.prefix === ' ' ? '\u00a0' : v.prefix}
+								</span>
+								<code
+									className="ref-git-diff-line-code"
+									dangerouslySetInnerHTML={{ __html: v.bodyHtml || '\u00a0' }}
+								/>
+							</div>
+						)
+					)}
 		</div>
 	);
 });
@@ -72,6 +135,7 @@ const AgentGitChangeCard = memo(function AgentGitChangeCard({
 	diffLoading,
 	t,
 	onOpenGitDiff,
+	onEnsurePreview,
 	defaultCollapsed,
 }: {
 	rel: string;
@@ -80,15 +144,30 @@ const AgentGitChangeCard = memo(function AgentGitChangeCard({
 	diffLoading: boolean;
 	t: TFunction;
 	onOpenGitDiff: (rel: string, diff: string | null) => void;
+	/** 仅在卡片展开（或默认展开）时请求该路径的 sidebar diff 预览 */
+	onEnsurePreview?: (rel: string) => void;
 	defaultCollapsed?: boolean;
 }) {
 	const [collapsed, setCollapsed] = useState(defaultCollapsed ?? false);
 	const badge = st ? changeBadgeLabel(st.label, t) : t('app.gitChangedFallback');
+
+	useEffect(() => {
+		if (collapsed || !onEnsurePreview) {
+			return;
+		}
+		onEnsurePreview(rel);
+	}, [collapsed, rel, onEnsurePreview]);
+
 	return (
 		<div className={`ref-git-card ${collapsed ? 'is-collapsed' : ''}`}>
 			<div
 				className="ref-git-card-head"
-				onClick={() => defaultCollapsed !== undefined && setCollapsed((c) => !c)}
+				onClick={() => {
+					if (defaultCollapsed === undefined) {
+						return;
+					}
+					setCollapsed((c) => !c);
+				}}
 				style={defaultCollapsed !== undefined ? { cursor: 'pointer' } : undefined}
 			>
 				<span className="ref-git-card-name" title={rel}>
@@ -102,6 +181,9 @@ const AgentGitChangeCard = memo(function AgentGitChangeCard({
 					title={t('app.gitPreviewTitle')}
 					onClick={(e) => {
 						e.stopPropagation();
+						if (!pr) {
+							onEnsurePreview?.(rel);
+						}
 						onOpenGitDiff(rel, pr?.diff ?? null);
 					}}
 				>
@@ -112,8 +194,11 @@ const AgentGitChangeCard = memo(function AgentGitChangeCard({
 				<div className="ref-git-card-body">
 					{diffLoading && !pr ? <div className="ref-git-card-skel">{t('app.gitDiffLoading')}</div> : null}
 					{pr?.isBinary ? <div className="ref-git-binary-msg">{pr.diff || t('app.gitBinary')}</div> : null}
-					{pr && !pr.isBinary && pr.diff ? <GitDiffLines diff={pr.diff} t={t} /> : null}
+					{pr && !pr.isBinary && pr.diff ? <GitDiffLines diff={pr.diff} relPath={rel} t={t} /> : null}
 					{pr && !pr.isBinary && !pr.diff ? (
+						<div className="ref-git-binary-msg">{t('app.gitNoPreview')}</div>
+					) : null}
+					{!diffLoading && !pr ? (
 						<div className="ref-git-binary-msg">{t('app.gitNoPreview')}</div>
 					) : null}
 				</div>
@@ -129,6 +214,7 @@ const AgentGitScmVirtualCards = memo(function AgentGitScmVirtualCards({
 	diffLoading,
 	t,
 	onOpenGitDiff,
+	onEnsurePreviews,
 }: {
 	paths: string[];
 	diffPreviews: Record<string, DiffPreview>;
@@ -136,6 +222,7 @@ const AgentGitScmVirtualCards = memo(function AgentGitScmVirtualCards({
 	diffLoading: boolean;
 	t: TFunction;
 	onOpenGitDiff: (rel: string, diff: string | null) => void;
+	onEnsurePreviews?: (paths: readonly string[]) => void;
 }) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const collapseDiffs = paths.length >= AGENT_GIT_COLLAPSE_THRESHOLD;
@@ -180,6 +267,7 @@ const AgentGitScmVirtualCards = memo(function AgentGitScmVirtualCards({
 								diffLoading={diffLoading}
 								t={t}
 								onOpenGitDiff={onOpenGitDiff}
+								onEnsurePreview={onEnsurePreviews ? (r) => onEnsurePreviews([r]) : undefined}
 								defaultCollapsed={collapseDiffs ? true : undefined}
 							/>
 						</div>
@@ -190,13 +278,14 @@ const AgentGitScmVirtualCards = memo(function AgentGitScmVirtualCards({
 	);
 });
 
-export const AgentGitScmChangedCards = memo(function AgentGitScmChangedCards({
+const AgentGitScmStaticCards = memo(function AgentGitScmStaticCards({
 	paths,
 	diffPreviews,
 	gitPathStatus,
 	diffLoading,
 	t,
 	onOpenGitDiff,
+	onEnsurePreviews,
 }: {
 	paths: string[];
 	diffPreviews: Record<string, DiffPreview>;
@@ -204,19 +293,8 @@ export const AgentGitScmChangedCards = memo(function AgentGitScmChangedCards({
 	diffLoading: boolean;
 	t: TFunction;
 	onOpenGitDiff: (rel: string, diff: string | null) => void;
+	onEnsurePreviews?: (paths: readonly string[]) => void;
 }) {
-	if (paths.length >= AGENT_GIT_SCM_VIRTUAL_THRESHOLD) {
-		return (
-			<AgentGitScmVirtualCards
-				paths={paths}
-				diffPreviews={diffPreviews}
-				gitPathStatus={gitPathStatus}
-				diffLoading={diffLoading}
-				t={t}
-				onOpenGitDiff={onOpenGitDiff}
-			/>
-		);
-	}
 	const collapseDiffs = paths.length >= AGENT_GIT_COLLAPSE_THRESHOLD;
 	return (
 		<div className="ref-git-changed-scroll">
@@ -230,11 +308,55 @@ export const AgentGitScmChangedCards = memo(function AgentGitScmChangedCards({
 						diffLoading={diffLoading}
 						t={t}
 						onOpenGitDiff={onOpenGitDiff}
+						onEnsurePreview={onEnsurePreviews ? (r) => onEnsurePreviews([r]) : undefined}
 						defaultCollapsed={collapseDiffs ? true : undefined}
 					/>
 				))}
 			</div>
 		</div>
+	);
+});
+
+export const AgentGitScmChangedCards = memo(function AgentGitScmChangedCards({
+	paths,
+	diffPreviews,
+	gitPathStatus,
+	diffLoading,
+	t,
+	onOpenGitDiff,
+	onEnsurePreviews,
+}: {
+	paths: string[];
+	diffPreviews: Record<string, DiffPreview>;
+	gitPathStatus: GitPathStatusMap;
+	diffLoading: boolean;
+	t: TFunction;
+	onOpenGitDiff: (rel: string, diff: string | null) => void;
+	onEnsurePreviews?: (paths: readonly string[]) => void;
+}) {
+	if (paths.length >= AGENT_GIT_SCM_VIRTUAL_THRESHOLD) {
+		return (
+			<AgentGitScmVirtualCards
+				paths={paths}
+				diffPreviews={diffPreviews}
+				gitPathStatus={gitPathStatus}
+				diffLoading={diffLoading}
+				t={t}
+				onOpenGitDiff={onOpenGitDiff}
+				onEnsurePreviews={onEnsurePreviews}
+			/>
+		);
+	}
+	return (
+		<AgentGitScmStaticCards
+			paths={paths}
+			diffPreviews={diffPreviews}
+			gitPathStatus={gitPathStatus}
+			diffLoading={diffLoading}
+			t={t}
+			onOpenGitDiff={onOpenGitDiff}
+			onEnsurePreviews={onEnsurePreviews}
+		/>
 	);
 });
 

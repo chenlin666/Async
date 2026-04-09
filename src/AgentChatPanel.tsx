@@ -2,6 +2,11 @@ import {
 	Fragment,
 	memo,
 	useCallback,
+	useDeferredValue,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
 	useState,
 	type ComponentProps,
 	type Dispatch,
@@ -10,6 +15,7 @@ import {
 	type SetStateAction,
 } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import type { VirtualItem, Virtualizer } from '@tanstack/virtual-core';
 import { ChatMarkdown } from './ChatMarkdown';
 import { AgentReviewPanel } from './AgentReviewPanel';
 import { AgentFileChangesPanel } from './AgentFileChanges';
@@ -23,7 +29,13 @@ import { AgentMistakeLimitDialog, type MistakeLimitPayload } from './AgentMistak
 import { PlanReviewPanel } from './PlanReviewPanel';
 import { ComposerThoughtBlock } from './ComposerThoughtBlock';
 import { UserMessageRich } from './UserMessageRich';
-import { assistantMessageUsesAgentToolProtocol, extractLastTodosFromContent, type FileChangeSummary } from './agentChatSegments';
+import {
+	assistantMessageUsesAgentToolProtocol,
+	extractLastTodosFromContent,
+	segmentAssistantContentUnified,
+} from './agentChatSegments';
+import { computeMergedAgentFileChanges } from './agentFileChangesCompute';
+import { useAppShellGitFiles, useAppShellGitMeta } from './app/appShellContexts';
 import { userMessageToSegments, type ComposerSegment } from './composerSegments';
 import type { WizardPending } from './hooks/useWizardPending';
 import type { TFunction } from './i18n';
@@ -117,7 +129,8 @@ export type AgentChatPanelProps = {
 	onPlanTodoToggle: (id: string) => void;
 	toolApprovalRequest: ToolApprovalPayload | null;
 	respondToolApproval: (allow: boolean) => void;
-	agentFileChanges: FileChangeSummary[];
+	/** 逐文件忽略改动条；与 Git 合并后的列表在面板内计算，避免 Git fullStatus 拖垮 useAgentChatPanelProps */
+	dismissedFiles: ReadonlySet<string>;
 	fileChangesDismissed: boolean;
 	onKeepAllEdits: () => void;
 	onRevertAllEdits: () => void;
@@ -128,8 +141,36 @@ export type AgentChatPanelProps = {
 	agentPlanSummaryCard: ReactNode;
 };
 
-/** 达到条数后启用虚拟列表（与 .ref-messages-track 的 gap 对齐，减轻长对话 DOM 压力） */
-const MESSAGE_LIST_VIRTUAL_THRESHOLD = 48;
+/**
+ * 虚拟列表启停阈值做成滞后区间，避免消息数在边界附近时发送一条消息就立刻从平面轨道切到虚拟轨道，
+ * 导致 sticky 行为、测量与滚动位置在同一帧内一起变化。
+ */
+/**
+ * 主聊天转录区优先保证滚动稳定性。
+ * 长消息、流式块与工作区切换下，虚拟列表容易带来底部距离误差和锚点抖动，
+ * 因此把启用阈值抬高到几乎不会命中，保留实现仅作极端超长会话的兜底。
+ */
+const MESSAGE_LIST_VIRTUAL_ENABLE_THRESHOLD = 9999;
+const MESSAGE_LIST_VIRTUAL_DISABLE_THRESHOLD = 9990;
+const MESSAGE_LIST_VIRTUAL_ESTIMATE_SIZE = 160;
+
+type MessageVirtualHeightCache = Map<number, number>;
+
+/**
+ * 按会话缓存已测得的消息高度。
+ * 这样重新进入工作区 / 线程，或在平面列表与虚拟列表之间切换时，
+ * 虚拟列表可以直接带着更接近真实值的 estimate 启动，减少滚动条跳动。
+ */
+const messageVirtualHeightsByConversation = new Map<string, MessageVirtualHeightCache>();
+
+function getMessageVirtualHeightCache(conversationKey: string): MessageVirtualHeightCache {
+	let bucket = messageVirtualHeightsByConversation.get(conversationKey);
+	if (!bucket) {
+		bucket = new Map<number, number>();
+		messageVirtualHeightsByConversation.set(conversationKey, bucket);
+	}
+	return bucket;
+}
 
 /** 仅长列表挂载：短对话不调用 useVirtualizer，避免与 composer 测高等同步布局挤在同一任务 */
 const AgentMessagesVirtualizedTrack = memo(function AgentMessagesVirtualizedTrack({
@@ -138,6 +179,7 @@ const AgentMessagesVirtualizedTrack = memo(function AgentMessagesVirtualizedTrac
 	conversationRenderKey,
 	messageTrackGap,
 	count,
+	heightCache,
 	renderRow,
 }: {
 	viewportRef: RefObject<HTMLDivElement | null>;
@@ -145,16 +187,70 @@ const AgentMessagesVirtualizedTrack = memo(function AgentMessagesVirtualizedTrac
 	conversationRenderKey: string;
 	messageTrackGap: number;
 	count: number;
+	heightCache: MessageVirtualHeightCache;
 	renderRow: (index: number) => ReactNode;
 }) {
+	/** 条数不多时 overscan 过大等于整表挂载（如 count=20, overscan=12 → 常渲染全部行） */
+	const overscan = count <= 24 ? 3 : count <= 60 ? 5 : 10;
+	/** virtual-core 运行时支持该选项，当前 @tanstack/react-virtual 的 PartialKeys 类型未收录 */
 	const virtualizer = useVirtualizer({
 		count,
 		getScrollElement: () => viewportRef.current,
-		estimateSize: () => 140,
-		overscan: 12,
+		estimateSize: (index) => heightCache.get(index) ?? MESSAGE_LIST_VIRTUAL_ESTIMATE_SIZE,
+		overscan,
 		gap: messageTrackGap,
 		getItemKey: (index) => `${conversationRenderKey}-${index}`,
+		/**
+		 * 动态测高导致上方项尺寸修正时，保持当前视口锚点不被往回拽到中段。
+		 * 这对“从会话中间继续滚动”“返回旧工作区后继续浏览”两类场景最关键。
+		 */
+		shouldAdjustScrollPositionOnItemSizeChange: (
+			item: VirtualItem,
+			delta: number,
+			instance: Virtualizer<HTMLDivElement, Element>
+		) => {
+			if (Math.abs(delta) < 1) {
+				return false;
+			}
+			const off = instance.scrollOffset;
+			return off != null && item.start < off;
+		},
+	} as Parameters<typeof useVirtualizer<HTMLDivElement, Element>>[0]);
+
+	useEffect(() => {
+		for (const index of [...heightCache.keys()]) {
+			if (index >= count) {
+				heightCache.delete(index);
+			}
+		}
+	}, [count, heightCache]);
+
+	useLayoutEffect(() => {
+		const track = trackRef.current;
+		if (!track) {
+			return;
+		}
+		const rows = track.querySelectorAll<HTMLElement>('.ref-msg-virtual-row[data-index]');
+		for (const row of rows) {
+			const raw = row.dataset.index;
+			if (!raw) {
+				continue;
+			}
+			const index = Number(raw);
+			if (!Number.isFinite(index)) {
+				continue;
+			}
+			const next = Math.ceil(row.getBoundingClientRect().height);
+			if (next > 0) {
+				heightCache.set(index, next);
+			}
+		}
 	});
+
+	useEffect(() => {
+		virtualizer.measure();
+	}, [virtualizer, conversationRenderKey, count]);
+
 	return (
 		<div
 			key={`messages-track-${conversationRenderKey}`}
@@ -256,7 +352,7 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 	onPlanTodoToggle,
 	toolApprovalRequest,
 	respondToolApproval,
-	agentFileChanges,
+	dismissedFiles,
 	fileChangesDismissed,
 	onKeepAllEdits,
 	onRevertAllEdits,
@@ -269,6 +365,29 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 	if (import.meta.env.DEV) {
 		console.log(`[perf] AgentChatPanel render: thread=${messagesThreadId}, messages=${displayMessages.length}, hasConv=${hasConversation}`);
 	}
+	const { gitStatusOk } = useAppShellGitMeta();
+	const { gitChangedPaths: _gitChangedPaths, diffPreviews: _diffPreviews } = useAppShellGitFiles();
+	// useDeferredValue：git 状态/diff 批量更新时，React 优先处理用户输入（打字、拖窗），
+	// 推迟 agentFileChanges 重算，避免切换工作区后的卡顿。
+	const gitChangedPaths = useDeferredValue(_gitChangedPaths);
+	const diffPreviews = useDeferredValue(_diffPreviews);
+	const segmentCacheRef = useRef<{
+		content: string;
+		result: ReturnType<typeof segmentAssistantContentUnified>;
+	} | null>(null);
+	const agentFileChanges = useMemo(
+		() =>
+			computeMergedAgentFileChanges(
+				displayMessages,
+				composerMode,
+				t,
+				dismissedFiles,
+				{ gitStatusOk, gitChangedPaths, diffPreviews },
+				segmentCacheRef
+			),
+		[displayMessages, composerMode, t, dismissedFiles, gitStatusOk, gitChangedPaths, diffPreviews]
+	);
+
 	const isEditorRail = layout === 'editor-rail';
 	const [collapsedTodos, setCollapsedTodos] = useState<Set<number>>(new Set());
 	const toggleTodoCollapse = useCallback((msgIndex: number) => {
@@ -281,8 +400,61 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 	}, []);
 	const conversationRenderKey = messagesThreadId ?? 'no-thread';
 	const messageTrackGap = isEditorRail ? 20 : 22;
-	const virtualListEnabled =
-		hasConversation && displayMessages.length >= MESSAGE_LIST_VIRTUAL_THRESHOLD;
+	const virtualHeightCache = useMemo(
+		() => getMessageVirtualHeightCache(conversationRenderKey),
+		[conversationRenderKey]
+	);
+	const [virtualListEnabled, setVirtualListEnabled] = useState(
+		() => hasConversation && displayMessages.length >= MESSAGE_LIST_VIRTUAL_ENABLE_THRESHOLD
+	);
+
+	const captureFlatTrackMessageHeights = useCallback(() => {
+		const track = messagesTrackRef.current;
+		if (!track || virtualListEnabled) {
+			return;
+		}
+		const rows = Array.from(track.children) as HTMLElement[];
+		rows.forEach((row, index) => {
+			const next = Math.ceil(row.getBoundingClientRect().height);
+			if (next > 0) {
+				virtualHeightCache.set(index, next);
+			}
+		});
+	}, [messagesTrackRef, virtualHeightCache, virtualListEnabled]);
+
+	useLayoutEffect(() => {
+		if (!hasConversation || virtualListEnabled) {
+			return;
+		}
+		captureFlatTrackMessageHeights();
+	}, [
+		hasConversation,
+		virtualListEnabled,
+		displayMessages,
+		captureFlatTrackMessageHeights,
+	]);
+
+	useEffect(() => {
+		// 线程切换时按新会话长度重新决定起始模式，避免沿用上一线程的虚拟化状态。
+		setVirtualListEnabled(
+			hasConversation && displayMessages.length >= MESSAGE_LIST_VIRTUAL_ENABLE_THRESHOLD
+		);
+	}, [conversationRenderKey]);
+
+	useEffect(() => {
+		setVirtualListEnabled((prev) => {
+			if (!hasConversation) {
+				return false;
+			}
+			if (displayMessages.length >= MESSAGE_LIST_VIRTUAL_ENABLE_THRESHOLD) {
+				return true;
+			}
+			if (displayMessages.length <= MESSAGE_LIST_VIRTUAL_DISABLE_THRESHOLD) {
+				return false;
+			}
+			return prev;
+		});
+	}, [hasConversation, displayMessages.length]);
 
 	const messageNodeAtIndex = (i: number): ReactNode => {
 			const m = displayMessages[i];
@@ -541,6 +713,7 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 					conversationRenderKey={conversationRenderKey}
 					messageTrackGap={messageTrackGap}
 					count={displayMessages.length}
+					heightCache={virtualHeightCache}
 					renderRow={messageNodeAtIndex}
 				/>
 			) : (

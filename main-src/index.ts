@@ -40,13 +40,24 @@ app.on('before-quit', (e) => {
 });
 
 app.whenReady().then(() => {
+	// 仅在显式 debug 开关下安装 React DevTools，保持 dev / dev:debug 语义与现有脚本一致。
+	const installReactDevTools =
+		process.env.ASYNC_SHELL_DEVTOOLS === '1' || process.env.VOID_SHELL_DEVTOOLS === '1';
+	if (installReactDevTools) {
+		const { default: installExtension, REACT_DEVELOPER_TOOLS } = require('electron-devtools-installer');
+
+		installExtension(REACT_DEVELOPER_TOOLS, { loadExtension: true })
+			.then(() => console.log('✅ React DevTools 已安装'))
+			.catch((err: unknown) => console.log('安装失败:', err));
+	}
+
 	const t0 = Date.now();
 	const lap = (label: string) => console.log(`[startup] ${label}: +${Date.now() - t0}ms`);
 
 	const appIconPath = resolveAppIconPath();
 	configureAppWindowIcon(appIconPath);
 	if (process.platform === 'darwin' && appIconPath) {
-		app.dock.setIcon(appIconPath);
+		app.dock?.setIcon(appIconPath);
 	}
 	lap('icon configured');
 

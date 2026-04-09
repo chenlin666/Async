@@ -32,7 +32,8 @@ type ChangeLine = {
 	lineNo: number | null;
 };
 
-function splitPreviewLines(content: string): string[] {
+/** 与 Shiki 批量按行高亮共用同一套拆行规则 */
+export function splitPreviewLines(content: string): string[] {
 	const normalized = content.replace(/\r\n?/g, '\n');
 	if (normalized === '') {
 		return [''];

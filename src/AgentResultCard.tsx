@@ -104,7 +104,7 @@ export function AgentResultCard({
 	kind,
 	readSourcePath,
 	onOpenFile,
-	animateLineReveal = false,
+	animateLineReveal: _animateLineReveal = false,
 }: Props) {
 	/** 所有结果类型都不使用逐行动画，直接显示全文 */
 	const enableLineRevealAnim = false;

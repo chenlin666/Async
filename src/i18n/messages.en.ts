@@ -684,7 +684,7 @@ export const messagesEn: Record<string, string> = {
 	'plan.review.executeUserBubble':
 		'Execute the saved plan document: follow every step in order and apply the necessary code changes. The full plan is attached in the system context for this turn.',
 
-	'thought.thinking': 'Thinking… {{sec}}s',
+	'thought.thinking': 'Thinking…',
 	'thought.for': 'Thought for {{sec}}s',
 	'thought.mode.ask': 'Ask mode: explanations and read-only analysis.',
 	'thought.mode.plan': 'Plan mode: structured plans and risks.',

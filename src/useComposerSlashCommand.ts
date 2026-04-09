@@ -200,6 +200,10 @@ export function useComposerSlashCommand(
 		[closeSlashMenu, getRich, getSegmentsSetter]
 	);
 
+	/** 避免 applySlashSelection 抖动 → handleSlashKeyDown 重建 → sharedComposerProps 连带失效 */
+	const applySlashSelectionRef = useRef(applySlashSelection);
+	applySlashSelectionRef.current = applySlashSelection;
+
 	const handleSlashKeyDown = useCallback(
 		(e: React.KeyboardEvent): boolean => {
 			if (!slashOpen) {
@@ -234,7 +238,7 @@ export function useComposerSlashCommand(
 				const hi = hiRef.current;
 				const it = list[Math.min(hi, list.length - 1)];
 				if (it) {
-					applySlashSelection(it);
+					applySlashSelectionRef.current(it);
 				}
 				return true;
 			}
@@ -249,13 +253,13 @@ export function useComposerSlashCommand(
 				const hi = hiRef.current;
 				const it = list[Math.min(hi, list.length - 1)];
 				if (it) {
-					applySlashSelection(it);
+					applySlashSelectionRef.current(it);
 				}
 				return true;
 			}
 			return false;
 		},
-		[slashOpen, applySlashSelection, closeSlashMenu]
+		[slashOpen, closeSlashMenu]
 	);
 
 	return {

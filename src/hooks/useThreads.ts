@@ -1,8 +1,48 @@
 import { useCallback, useLayoutEffect, useRef, useState, startTransition } from 'react';
-import { type ChatMessage, type ThreadInfo, normalizeThreadRow } from '../threadTypes';
+import {
+	type ChatMessage,
+	type ThreadInfo,
+	chatMessagesListEqual,
+	normalizeThreadRow,
+	threadInfoListEqual,
+} from '../threadTypes';
 import { normWorkspaceRootKey } from '../workspaceRootKey';
 
 type Shell = NonNullable<Window['asyncShell']>;
+
+/** 仅在侧栏真实展示字段均相同时复用旧引用，避免标题/摘要/diff 统计更新被吞掉。 */
+function sameSidebarThreadsByPath(
+	prev: Record<string, ThreadInfo[]>,
+	next: Record<string, ThreadInfo[]>
+): boolean {
+	const nk = Object.keys(next);
+	if (Object.keys(prev).length !== nk.length) {
+		return false;
+	}
+	for (const k of nk) {
+		const a = prev[k];
+		const b = next[k];
+		if (!a || !threadInfoListEqual(a, b)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * startTransition 里 setMsgState 只完成调度时，若 loadMessages 的 Promise 立刻 resolve，
+ * 外层 await 返回后 messagesRef / messagesThreadIdRef 仍是上一帧——onSelectThread 会误判需重复拉消息。
+ * microtask + 双 rAF 与现有 toPaint 日志对齐，让 transition 有机会先提交再结束 await。
+ */
+function awaitTransitionPaintCommitted(): Promise<void> {
+	return new Promise((resolve) => {
+		queueMicrotask(() => {
+			requestAnimationFrame(() => {
+				requestAnimationFrame(() => resolve());
+			});
+		});
+	});
+}
 
 /**
  * 管理线程列表、当前线程、消息及导航历史。
@@ -89,7 +129,9 @@ export function useThreads(shell: Shell | undefined) {
 			}
 			const gen = ++sidebarFetchGenRef.current;
 			if (paths.length === 0) {
-				setSidebarThreadsByPathKey({});
+				startTransition(() =>
+					setSidebarThreadsByPathKey((prev) => (Object.keys(prev).length === 0 ? prev : {}))
+				);
 				return;
 			}
 			const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
@@ -110,83 +152,94 @@ export function useThreads(shell: Shell | undefined) {
 				}
 				next[normWorkspaceRootKey(keySource)] = (w.threads ?? []).map(normalizeThreadRow);
 			}
-			// sidebar 线程列表是非紧急更新，用 startTransition 避免 IPC 返回后的 132ms 渲染阻塞主线程。
-			startTransition(() => setSidebarThreadsByPathKey(next));
+			// sidebar 线程列表是非紧急更新；内容未变时保留 state 引用，避免左侧栏 + agentChatPanelProps 链式失效
+			startTransition(() =>
+				setSidebarThreadsByPathKey((prev) => (sameSidebarThreadsByPath(prev, next) ? prev : next))
+			);
 		},
 		[shell]
 	);
 
 	/**
-	 * 避免同一线程 ID 的并发 IPC 请求（applyWorkspacePath 直接调用 + effect 间接触发时去重）。
+	 * 同一线程并发 loadMessages 时复用同一 Promise（避免早退导致 await 在 IPC 完成前结束）。
 	 */
-	const loadingIdRef = useRef<string | null>(null);
+	const loadMessagesInflightByIdRef = useRef<Map<string, Promise<void>>>(new Map());
 
 	const loadMessages = useCallback(
 		async (id: string, onLoad?: (msgs: ChatMessage[], threadId: string) => void) => {
 			if (!shell) return;
-			// 去重：如果已经在加载同一线程，跳过
-			if (loadingIdRef.current === id) return;
-			loadingIdRef.current = id;
-			const dev = import.meta.env.DEV;
-			const tIpcStart = dev && typeof performance !== 'undefined' ? performance.now() : 0;
-			try {
-				const r = (await shell.invoke('threads:messages', id)) as {
-					ok: boolean;
-					messages?: ChatMessage[];
-				};
-				const tIpcEnd = dev && typeof performance !== 'undefined' ? performance.now() : 0;
-				if (dev && tIpcStart) {
-					console.log(`[perf] loadMessages: ipc=${(tIpcEnd - tIpcStart).toFixed(1)}ms`);
-				}
-				if (r.ok && r.messages) {
-					if (currentIdRef.current !== id) {
-						if (dev) {
-							console.log(
-								`[perf] loadMessages: stale ignored (wanted ${id}, currentId=${currentIdRef.current})`
-							);
+			let inflight = loadMessagesInflightByIdRef.current.get(id);
+			if (!inflight) {
+				inflight = (async () => {
+					const dev = import.meta.env.DEV;
+					const tIpcStart = dev && typeof performance !== 'undefined' ? performance.now() : 0;
+					try {
+						const r = (await shell.invoke('threads:messages', id)) as {
+							ok: boolean;
+							messages?: ChatMessage[];
+						};
+						const tIpcEnd = dev && typeof performance !== 'undefined' ? performance.now() : 0;
+						if (dev && tIpcStart) {
+							console.log(`[perf] loadMessages: ipc=${(tIpcEnd - tIpcStart).toFixed(1)}ms`);
 						}
-						return;
-					}
-					if (dev && typeof performance !== 'undefined') {
-						let approxContentChars = 0;
-						for (const m of r.messages) {
-							if (typeof m.content === 'string') {
-								approxContentChars += m.content.length;
+						if (r.ok && r.messages) {
+							if (currentIdRef.current !== id) {
+								if (dev) {
+									console.log(
+										`[perf] loadMessages: stale ignored (wanted ${id}, currentId=${currentIdRef.current})`
+									);
+								}
+								return;
+							}
+							if (dev && typeof performance !== 'undefined') {
+								let approxContentChars = 0;
+								for (const m of r.messages) {
+									if (typeof m.content === 'string') {
+										approxContentChars += m.content.length;
+									}
+								}
+								console.log(
+									`[perf] loadMessages: payload messages=${r.messages.length}, approxContentChars=${approxContentChars}`
+								);
+							}
+							// startTransition：消息渲染是非紧急更新，React 可在渲染期间让出主线程给输入事件。
+							// 实测 76KB 内容 4 条消息渲染耗时 117ms，不用 transition 会触发 longtask 阻塞窗口拖动。
+							// onLoad 在同一 transition 内调用，使 fileChanges / planQuestion 等
+							// 状态与 messages 在同一批次渲染，消除 useLayoutEffect 级联的额外 render 轮次。
+							startTransition(() => {
+								const incoming = r.messages!;
+								setMsgState((prev) => {
+									if (prev.threadId === id && chatMessagesListEqual(prev.messages, incoming)) {
+										return prev;
+									}
+									return { messages: incoming, threadId: id };
+								});
+								onLoad?.(incoming, id);
+							});
+							await awaitTransitionPaintCommitted();
+							if (dev && typeof performance !== 'undefined') {
+								const ipcEnd = tIpcEnd;
+								queueMicrotask(() => {
+									console.log(
+										`[perf] loadMessages: microtask Δ=${(performance.now() - ipcEnd).toFixed(1)}ms after ipc (before paint)`
+									);
+								});
+								requestAnimationFrame(() => {
+									requestAnimationFrame(() => {
+										console.log(
+											`[perf] loadMessages: toPaint Δ=${(performance.now() - ipcEnd).toFixed(1)}ms after ipc (≈after frame)`
+										);
+									});
+								});
 							}
 						}
-						console.log(
-							`[perf] loadMessages: payload messages=${r.messages.length}, approxContentChars=${approxContentChars}`
-						);
+					} finally {
+						loadMessagesInflightByIdRef.current.delete(id);
 					}
-					// startTransition：消息渲染是非紧急更新，React 可在渲染期间让出主线程给输入事件。
-					// 实测 76KB 内容 4 条消息渲染耗时 117ms，不用 transition 会触发 longtask 阻塞窗口拖动。
-					// onLoad 在同一 transition 内调用，使 fileChanges / planQuestion 等
-					// 状态与 messages 在同一批次渲染，消除 useLayoutEffect 级联的额外 render 轮次。
-					startTransition(() => {
-						setMsgState({ messages: r.messages!, threadId: id });
-						onLoad?.(r.messages!, id);
-					});
-					if (dev && typeof performance !== 'undefined') {
-						const ipcEnd = tIpcEnd;
-						queueMicrotask(() => {
-							console.log(
-								`[perf] loadMessages: microtask Δ=${(performance.now() - ipcEnd).toFixed(1)}ms after ipc (before paint)`
-							);
-						});
-						requestAnimationFrame(() => {
-							requestAnimationFrame(() => {
-								console.log(
-									`[perf] loadMessages: toPaint Δ=${(performance.now() - ipcEnd).toFixed(1)}ms after ipc (≈after frame)`
-								);
-							});
-						});
-					}
-				}
-			} finally {
-				if (loadingIdRef.current === id) {
-					loadingIdRef.current = null;
-				}
+				})();
+				loadMessagesInflightByIdRef.current.set(id, inflight);
 			}
+			await inflight;
 		},
 		[shell]
 	);
@@ -205,6 +258,7 @@ export function useThreads(shell: Shell | undefined) {
 		setThreadNavigation({ history: [], index: -1 });
 		sidebarFetchGenRef.current++;
 		setSidebarThreadsByPathKey({});
+		loadMessagesInflightByIdRef.current.clear();
 	}, []);
 
 	return {

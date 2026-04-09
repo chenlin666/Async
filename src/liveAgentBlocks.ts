@@ -224,12 +224,34 @@ function upsertToolStreaming(blocks: LiveAgentBlock[], index: number, name: stri
 	];
 }
 
+function findToolBlockIndexByUseId(blocks: LiveAgentBlock[], toolUseId: string): number {
+	if (!toolUseId) {
+		return -1;
+	}
+	return blocks.findIndex((b): b is LiveToolBlock => b.type === 'tool' && b.toolUseId === toolUseId);
+}
+
 function applyToolCallRoot(
 	blocks: LiveAgentBlock[],
 	name: string,
 	argsJson: string,
 	toolUseId: string
 ): LiveAgentBlock[] {
+	const existingIdx = findToolBlockIndexByUseId(blocks, toolUseId);
+	if (existingIdx >= 0) {
+		const copy = blocks.slice();
+		const cur = copy[existingIdx] as LiveToolBlock;
+		copy[existingIdx] = {
+			...cur,
+			name,
+			argsJson,
+			partialJson: argsJson,
+			toolUseId: toolUseId || cur.toolUseId,
+			phase: cur.phase === 'done' ? 'done' : 'running',
+		};
+		return copy;
+	}
+
 	let idx = -1;
 	for (let j = blocks.length - 1; j >= 0; j--) {
 		const b = blocks[j];
@@ -274,13 +296,7 @@ function applyToolResultRoot(
 	success: boolean
 ): LiveAgentBlock[] {
 	const copy = blocks.slice();
-	let j = -1;
-	if (toolUseId) {
-		j = copy.findIndex(
-			(b): b is LiveToolBlock =>
-				b.type === 'tool' && b.toolUseId === toolUseId && b.phase === 'running'
-		);
-	}
+	let j = findToolBlockIndexByUseId(copy, toolUseId);
 	if (j < 0) {
 		j = copy.findIndex(
 			(b): b is LiveToolBlock => b.type === 'tool' && b.phase === 'running' && b.name === name

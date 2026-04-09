@@ -40,7 +40,7 @@ type StreamingSendRuntime = {
 	refreshThreads: () => Promise<unknown> | void;
 	defaultModel: string;
 	composerMode: ComposerMode;
-	workspaceFileList: string[];
+	ensureWorkspaceFileListLoaded: () => Promise<string[]>;
 	resendFromUserIndex: number | null;
 	setResendFromUserIndex: Dispatch<SetStateAction<number | null>>;
 	setInlineResendSegments: Dispatch<SetStateAction<ComposerSegment[]>>;
@@ -289,7 +289,8 @@ export function useStreamingChatControls(runtime: StreamingSendRuntime) {
 				rt.setAwaitingReply(false);
 				rt.streamStartedAtRef.current = null;
 				rt.setResendFromUserIndex(resendIdx);
-				rt.setInlineResendSegments(userMessageToSegments(text, rt.workspaceFileList));
+				const paths = await rt.ensureWorkspaceFileListLoaded();
+				rt.setInlineResendSegments(userMessageToSegments(text, paths));
 				void rt.loadMessages(targetThreadId);
 			} else {
 				void rt.refreshThreads();
