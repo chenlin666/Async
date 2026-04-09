@@ -4547,11 +4547,10 @@ function AppMainWorkspaceInner() {
 		});
 	}, [syncMessagesScrollIndicators]);
 
-	/** 切换线程：恢复「粘底」，等 messages / 流式更新后再滚（避免旧列表闪滚） */
+	/** 切换线程：始终从底部开始，等 messages / 流式更新后再滚（避免旧列表闪滚） */
 	useLayoutEffect(() => {
 		pendingMessagesScrollRestoreRef.current = currentId;
-		const saved = currentId ? messagesScrollSnapshotByThreadRef.current.get(currentId) : null;
-		pinMessagesToBottomRef.current = saved?.pinned ?? true;
+		pinMessagesToBottomRef.current = true;
 		suppressScrollToBottomButtonRef.current = false;
 		setShowScrollToBottomButton(false);
 		if (suppressScrollToBottomButtonTimerRef.current !== null) {
@@ -4565,7 +4564,7 @@ function AppMainWorkspaceInner() {
 		}
 	}, [currentId]);
 
-	/** 线程 / 工作区切回后恢复各自滚动位置；若之前处于底部则继续粘底，否则回到离开时的位置 */
+	/** 线程 / 工作区切回后始终滚到消息列表最底部（与渐进渲染窗口配合） */
 	useLayoutEffect(() => {
 		if (!hasConversation || !currentId || messagesThreadId !== currentId) {
 			return;
@@ -4581,15 +4580,9 @@ function AppMainWorkspaceInner() {
 			if (!el) {
 				return;
 			}
-			const saved = messagesScrollSnapshotByThreadRef.current.get(currentId);
 			const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
-			if (!saved || saved.pinned) {
-				pinMessagesToBottomRef.current = true;
-				el.scrollTop = maxScroll;
-			} else {
-				pinMessagesToBottomRef.current = false;
-				el.scrollTop = Math.min(saved.scrollTop, maxScroll);
-			}
+			pinMessagesToBottomRef.current = true;
+			el.scrollTop = maxScroll;
 			pendingMessagesScrollRestoreRef.current = null;
 			syncMessagesScrollIndicators();
 		});

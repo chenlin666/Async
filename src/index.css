@@ -3248,29 +3248,24 @@ html[data-theme-switching='true'] .ref-editor-welcome-panel {
 	gap: 22px;
 }
 
-.ref-messages-track--virtual {
-	display: block;
-	position: relative;
-	gap: 0;
-	align-items: stretch;
-	min-width: 0;
+/* 向上懒加载触发器：占极少布局高度，IntersectionObserver root 为 .ref-messages */
+.ref-messages-top-sentinel {
+	flex-shrink: 0;
 	width: 100%;
+	height: 1px;
+	margin: 0;
+	padding: 0;
+	pointer-events: none;
 }
 
-/* 虚拟行内为绝对定位子树；与 .ref-messages-track 的 flex+align-items:center 一致，否则气泡贴左不居中 */
-.ref-msg-virtual-row {
+/* 包裹单行消息以便测量 offsetHeight，布局与直接子项一致（列内居中、满宽） */
+.ref-msg-row-measure {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	min-height: 0;
 	width: 100%;
-	box-sizing: border-box;
-}
-
-/* transform 排布下列内 sticky 无效，降级为普通块避免错误粘附 */
-.ref-messages.ref-messages--virtual .ref-msg-sticky-user-wrap {
-	position: relative;
-	top: auto;
+	min-width: 0;
+	flex-shrink: 0;
 }
 
 /* ??????/????????????????????????? */
