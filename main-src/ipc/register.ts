@@ -80,6 +80,7 @@ import { flattenAssistantTextPartsForSearch } from '../../src/agentStructuredMes
 import * as gitService from '../gitService.js';
 import { parseComposerMode, type ComposerMode } from '../llm/composerMode.js';
 import { resolveModelRequest, resolveThinkingLevelForSelection } from '../llm/modelResolve.js';
+import { preconnectLlmBaseUrlIfEligible } from '../llm/apiPreconnect.js';
 import { streamChatUnified } from '../llm/llmRouter.js';
 import {
 	buildWorkspaceTreeSummary,
@@ -360,6 +361,13 @@ function runChatStream(
 				send({ threadId, type: 'error', message: resolved.message });
 				return;
 			}
+
+			// 与 Claude Code `apiPreconnect.ts` 一致：首条对话前预热到当前模型 API 基址的 TCP/TLS（无代理时）
+			preconnectLlmBaseUrlIfEligible({
+				paradigm: resolved.paradigm,
+				baseURL: resolved.baseURL,
+				appProxyUrl: resolved.proxyUrl?.trim() || settings.openAI?.proxyUrl?.trim() || undefined,
+			});
 
 			// 发送端压缩：超长线程仅压缩发给 LLM 的副本，磁盘保留完整历史
 			const thread = getThread(threadId);

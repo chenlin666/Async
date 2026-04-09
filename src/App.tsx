@@ -663,7 +663,10 @@ function AppMainWorkspaceInner() {
 		markFirstToken,
 		recordThoughtSeconds,
 		resetStreamingSession,
+		clearInFlightIpcRouting,
 		streamThreadRef,
+		ipcInFlightChatThreadIdRef,
+		offThreadStreamDraftsRef,
 		streamStartedAtRef,
 		firstTokenAtRef,
 		setStreaming,
@@ -771,6 +774,20 @@ function AppMainWorkspaceInner() {
 		resetComposerState,
 	} = useComposer();
 
+	/** 切回正在后台流式回复的线程时，把离屏累积的正文/思考草稿铺回 UI */
+	const flushOffThreadStreamDraftIfNeeded = useCallback(
+		(threadId: string) => {
+			const draft = offThreadStreamDraftsRef.current[threadId];
+			if (draft && ipcInFlightChatThreadIdRef.current === threadId) {
+				setStreaming(draft.streaming);
+				setStreamingThinking(draft.streamingThinking);
+				setAwaitingReply(true);
+				delete offThreadStreamDraftsRef.current[threadId];
+			}
+		},
+		[setStreaming, setStreamingThinking, setAwaitingReply]
+	);
+
 	const clearPlanQuestion = useCallback(() => {
 		setPlanQuestion(null);
 		setPlanQuestionRequestId(null);
@@ -795,6 +812,9 @@ function AppMainWorkspaceInner() {
 		resetLiveAgentBlocks,
 		beginStream,
 		resetStreamingSession,
+		clearInFlightIpcRouting,
+		ipcInFlightChatThreadIdRef,
+		offThreadStreamDraftsRef,
 		flashComposerAttachErr,
 		t,
 		clearAgentReviewForThread,
@@ -809,6 +829,8 @@ function AppMainWorkspaceInner() {
 		shell,
 		composerMode,
 		streamThreadRef,
+		ipcInFlightChatThreadIdRef,
+		offThreadStreamDraftsRef,
 		streamingToolPreviewClearTimerRef,
 		setStreamingToolPreview,
 		setLiveAssistantBlocks,
@@ -1839,12 +1861,13 @@ function AppMainWorkspaceInner() {
 			// 间接触发导致多出一帧空白 render。去重 ref 确保 effect 不会发起重复 IPC。
 			if (threadId) {
 				await loadMessages(threadId, onMessagesLoaded);
+				flushOffThreadStreamDraftIfNeeded(threadId);
 				mark('messages-done');
 				measure('void-ws:apply-path:messages', 'threads-done', 'messages-done');
 				console.log(`[perf][renderer] loadMessages done in ${(performance.now() - t0).toFixed(1)}ms`);
 			}
 		},
-		[clearWorkspaceConversationState, refreshThreads, loadMessages, onMessagesLoaded]
+		[clearWorkspaceConversationState, refreshThreads, loadMessages, onMessagesLoaded, flushOffThreadStreamDraftIfNeeded]
 	);
 
 	const openWorkspaceByPath = useCallback(
@@ -2172,6 +2195,7 @@ function AppMainWorkspaceInner() {
 				}
 				await loadMessages(id, onMessagesLoaded);
 			}
+			flushOffThreadStreamDraftIfNeeded(id);
 
 			if (dev) {
 				const tAfterLoad = performance.now();
@@ -2188,7 +2212,17 @@ function AppMainWorkspaceInner() {
 				});
 			}
 		},
-		[shell, workspace, openWorkspaceByPath, loadMessages, onMessagesLoaded, clearStreamingToolPreviewNow, resetLiveAgentBlocks, setAgentFilePreview]
+		[
+			shell,
+			workspace,
+			openWorkspaceByPath,
+			loadMessages,
+			onMessagesLoaded,
+			clearStreamingToolPreviewNow,
+			resetLiveAgentBlocks,
+			setAgentFilePreview,
+			flushOffThreadStreamDraftIfNeeded,
+		]
 	);
 
 	const selectThreadByHistoryIndex = useCallback(

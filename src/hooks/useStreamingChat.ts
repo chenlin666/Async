@@ -51,6 +51,9 @@ type StreamingSendRuntime = {
 	resetLiveAgentBlocks: () => void;
 	beginStream: (threadId: string) => void;
 	resetStreamingSession: (options?: { clearThread?: boolean }) => void;
+	clearInFlightIpcRouting: (threadId?: string | null) => void;
+	ipcInFlightChatThreadIdRef: MutableRefObject<string | null>;
+	offThreadStreamDraftsRef: MutableRefObject<Record<string, { streaming: string; streamingThinking: string }>>;
 	flashComposerAttachErr: (msg: string) => void;
 	t: TFunction;
 	clearAgentReviewForThread: (threadId: string) => void;
@@ -65,6 +68,8 @@ type StreamingSubscriptionRuntime = {
 	shell: NonNullable<Window['asyncShell']> | undefined;
 	composerMode: ComposerMode;
 	streamThreadRef: MutableRefObject<string | null>;
+	ipcInFlightChatThreadIdRef: MutableRefObject<string | null>;
+	offThreadStreamDraftsRef: MutableRefObject<Record<string, { streaming: string; streamingThinking: string }>>;
 	streamingToolPreviewClearTimerRef: MutableRefObject<number | null>;
 	setStreamingToolPreview: Dispatch<
 		SetStateAction<{ name: string; partialJson: string; index: number } | null>
@@ -120,6 +125,9 @@ export function useStreamingChat() {
 
 	const subAgentBgToastTimerRef = useRef<number | null>(null);
 	const streamThreadRef = useRef<string | null>(null);
+	/** 与主进程流式 IPC 路由：切工作区时勿清空，否则后台仍在跑但前端丢事件 */
+	const ipcInFlightChatThreadIdRef = useRef<string | null>(null);
+	const offThreadStreamDraftsRef = useRef<Record<string, { streaming: string; streamingThinking: string }>>({});
 	const streamStartedAtRef = useRef<number | null>(null);
 	const firstTokenAtRef = useRef<number | null>(null);
 
@@ -148,6 +156,7 @@ export function useStreamingChat() {
 
 	const beginStream = useCallback((threadId: string) => {
 		streamThreadRef.current = threadId;
+		ipcInFlightChatThreadIdRef.current = threadId;
 		streamStartedAtRef.current = Date.now();
 		firstTokenAtRef.current = null;
 		setStreaming('');
@@ -185,11 +194,19 @@ export function useStreamingChat() {
 	const resetStreamingSession = useCallback((options?: { clearThread?: boolean }) => {
 		if (options?.clearThread !== false) {
 			streamThreadRef.current = null;
+			// 刻意不清 ipcInFlightChatThreadIdRef：工作区切换时后台流可能仍在进行
 		}
 		streamStartedAtRef.current = null;
 		firstTokenAtRef.current = null;
 		setAwaitingReply(false);
 		setStreaming('');
+	}, []);
+
+	const clearInFlightIpcRouting = useCallback((threadId?: string | null) => {
+		ipcInFlightChatThreadIdRef.current = null;
+		if (threadId) {
+			delete offThreadStreamDraftsRef.current[threadId];
+		}
 	}, []);
 
 	// thinkingTick 改为 ref 后仍需触发 UI 更新（思考计时器显示），使用 forceUpdate
@@ -221,7 +238,10 @@ export function useStreamingChat() {
 		markFirstToken,
 		recordThoughtSeconds,
 		resetStreamingSession,
+		clearInFlightIpcRouting,
 		streamThreadRef,
+		ipcInFlightChatThreadIdRef,
+		offThreadStreamDraftsRef,
 		streamStartedAtRef,
 		firstTokenAtRef,
 	};
@@ -310,13 +330,19 @@ export function useStreamingChatControls(runtime: StreamingSendRuntime) {
 
 	const abortActiveStream = useCallback(async () => {
 		const rt = runtimeRef.current;
-		if (!rt.shell || !rt.currentId) {
+		if (!rt.shell) {
+			return;
+		}
+		// 切工作区后 currentId 可能已是另一线程，但后台流仍挂在 ipcInFlight 上
+		const threadToAbort = rt.ipcInFlightChatThreadIdRef.current ?? rt.currentId;
+		if (!threadToAbort) {
 			return;
 		}
 		rt.planBuildPendingMarkerRef.current = null;
 		rt.clearMistakeLimitRequest();
-		await rt.shell.invoke('chat:abort', rt.currentId);
+		await rt.shell.invoke('chat:abort', threadToAbort);
 		// 与 App 原逻辑一致：不 resetStreamingSession，由后端 done/error 收尾正文流式状态
+		rt.clearInFlightIpcRouting(threadToAbort);
 		rt.clearStreamingToolPreviewNow();
 		rt.resetLiveAgentBlocks();
 		rt.setAwaitingReply(false);
@@ -340,12 +366,42 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 		const unsub = shell.subscribeChat((raw: unknown) => {
 			const rt = runtimeRef.current;
 			const payload = raw as ChatStreamPayload;
-			if (payload.threadId !== rt.streamThreadRef.current) {
+			const inFlight = rt.ipcInFlightChatThreadIdRef.current;
+			if (!inFlight || payload.threadId !== inFlight) {
 				return;
 			}
 
-			const trackLiveBlocks = rt.composerMode === 'agent' || rt.composerMode === 'plan';
+			const visible = payload.threadId === rt.currentIdRef.current;
+			const draftRow = () => {
+				const m = rt.offThreadStreamDraftsRef.current;
+				if (!m[payload.threadId]) {
+					m[payload.threadId] = { streaming: '', streamingThinking: '' };
+				}
+				return m[payload.threadId]!;
+			};
+			const patchStream = (updater: (s: string) => string) => {
+				if (visible) {
+					rt.setStreaming(updater);
+				} else {
+					const d = draftRow();
+					d.streaming = updater(d.streaming);
+				}
+			};
+			const patchThinking = (updater: (s: string) => string) => {
+				if (visible) {
+					rt.setStreamingThinking(updater);
+				} else {
+					const d = draftRow();
+					d.streamingThinking = updater(d.streamingThinking);
+				}
+			};
+
+			const trackLiveBlocks =
+				(rt.composerMode === 'agent' || rt.composerMode === 'plan') && visible;
 			const applyToolInputDeltaUi = (p: { name: string; partialJson: string; index: number }) => {
+				if (!visible) {
+					return;
+				}
 				if (rt.streamingToolPreviewClearTimerRef.current !== null) {
 					window.clearTimeout(rt.streamingToolPreviewClearTimerRef.current);
 					rt.streamingToolPreviewClearTimerRef.current = null;
@@ -371,7 +427,7 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 				const subParent = payload.parentToolCallId;
 				if (subParent) {
 					const deltaText = payload.text;
-					rt.setStreaming((s) => {
+					patchStream((s) => {
 						const inner = escapeSubAgentXmlText(deltaText);
 						const p = escapeStreamAttr(subParent);
 						const d = payload.nestingDepth ?? 1;
@@ -388,10 +444,10 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 						);
 					}
 				} else {
-					if (payload.text.length > 0) {
+					if (visible && payload.text.length > 0) {
 						rt.markFirstToken();
 					}
-					rt.setStreaming((s) => s + payload.text);
+					patchStream((s) => s + payload.text);
 					if (trackLiveBlocks) {
 						rt.setLiveAssistantBlocks((st) =>
 							applyLiveAgentChatPayload(st, {
@@ -412,7 +468,7 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 			} else if (payload.type === 'thinking_delta') {
 				const parentToolCallId = payload.parentToolCallId;
 				if (parentToolCallId) {
-					rt.setStreaming((s) => {
+					patchStream((s) => {
 						const inner = escapeSubAgentXmlText(payload.text);
 						const p = escapeStreamAttr(parentToolCallId);
 						const d = payload.nestingDepth ?? 1;
@@ -429,7 +485,7 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 						);
 					}
 				} else {
-					rt.setStreamingThinking((s) => s + payload.text);
+					patchThinking((s) => s + payload.text);
 					if (trackLiveBlocks) {
 						rt.setLiveAssistantBlocks((st) =>
 							applyLiveAgentChatPayload(st, {
@@ -440,7 +496,11 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 					}
 				}
 			} else if (payload.type === 'tool_call') {
-				if (!payload.parentToolCallId && rt.streamingToolPreviewClearTimerRef.current !== null) {
+				if (
+					visible &&
+					!payload.parentToolCallId &&
+					rt.streamingToolPreviewClearTimerRef.current !== null
+				) {
 					window.clearTimeout(rt.streamingToolPreviewClearTimerRef.current);
 					rt.streamingToolPreviewClearTimerRef.current = null;
 				}
@@ -449,7 +509,7 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 						? ` sub_parent="${escapeStreamAttr(payload.parentToolCallId)}" sub_depth="${payload.nestingDepth ?? 1}"`
 						: '';
 				const marker = `\n<tool_call tool="${payload.name}"${nest}>${payload.args}</tool_call>\n`;
-				rt.setStreaming((s) => s + marker);
+				patchStream((s) => s + marker);
 				if (trackLiveBlocks && !payload.parentToolCallId) {
 					rt.setLiveAssistantBlocks((st) =>
 						applyLiveAgentChatPayload(st, {
@@ -461,14 +521,14 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 					);
 				}
 			} else if (payload.type === 'tool_result') {
-				if (!payload.parentToolCallId) {
+				if (!payload.parentToolCallId && visible) {
 					rt.setStreamingToolPreview(null);
 				}
 				const truncated =
 					payload.result.length > 3000 ? `${payload.result.slice(0, 3000)}\n... (truncated)` : payload.result;
 				const safe = truncated.split('</tool_result>').join('</tool\u200c_result>');
 				const marker = `<tool_result tool="${payload.name}" success="${payload.success}">${safe}</tool_result>\n`;
-				rt.setStreaming((s) => s + marker);
+				patchStream((s) => s + marker);
 				if (trackLiveBlocks && !payload.parentToolCallId) {
 					rt.setLiveAssistantBlocks((st) =>
 						applyLiveAgentChatPayload(st, {
@@ -492,21 +552,27 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 					);
 				}
 			} else if (payload.type === 'tool_approval_request') {
-				rt.setToolApprovalRequest({
-					approvalId: payload.approvalId,
-					toolName: payload.toolName,
-					command: payload.command,
-					path: payload.path,
-				});
+				if (visible) {
+					rt.setToolApprovalRequest({
+						approvalId: payload.approvalId,
+						toolName: payload.toolName,
+						command: payload.command,
+						path: payload.path,
+					});
+				}
 			} else if (payload.type === 'plan_question_request') {
-				rt.setPlanQuestion(payload.question);
-				rt.setPlanQuestionRequestId(payload.requestId);
+				if (visible) {
+					rt.setPlanQuestion(payload.question);
+					rt.setPlanQuestionRequestId(payload.requestId);
+				}
 			} else if (payload.type === 'agent_mistake_limit') {
-				rt.setMistakeLimitRequest({
-					recoveryId: payload.recoveryId,
-					consecutiveFailures: payload.consecutiveFailures,
-					threshold: payload.threshold,
-				});
+				if (visible) {
+					rt.setMistakeLimitRequest({
+						recoveryId: payload.recoveryId,
+						consecutiveFailures: payload.consecutiveFailures,
+						threshold: payload.threshold,
+					});
+				}
 			} else if (payload.type === 'sub_agent_background_done') {
 				const preview = payload.result.length > 240 ? `${payload.result.slice(0, 240)}…` : payload.result;
 				const text = payload.success
@@ -518,16 +584,20 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 				if (payload.usage) {
 					rt.setLastTurnUsage(payload.usage);
 				}
-				// 与 App 一致：done 后保留 streamThreadRef，避免与旧实现行为漂移
-				rt.resetStreamingSession({ clearThread: false });
-				rt.setStreamingThinking('');
-				rt.setToolApprovalRequest(null);
-				rt.setMistakeLimitRequest(null);
-				rt.setPlanQuestionRequestId(null);
-				rt.clearStreamingToolPreviewNow();
-				rt.resetLiveAgentBlocks();
-				rt.setFileChangesDismissed(false);
-				rt.setDismissedFiles(new Set());
+				delete rt.offThreadStreamDraftsRef.current[payload.threadId];
+				rt.ipcInFlightChatThreadIdRef.current = null;
+
+				if (visible) {
+					rt.resetStreamingSession({ clearThread: false });
+					rt.setStreamingThinking('');
+					rt.setToolApprovalRequest(null);
+					rt.setMistakeLimitRequest(null);
+					rt.setPlanQuestionRequestId(null);
+					rt.clearStreamingToolPreviewNow();
+					rt.resetLiveAgentBlocks();
+					rt.setFileChangesDismissed(false);
+					rt.setDismissedFiles(new Set());
+				}
 
 				const pendingPlan = rt.planBuildPendingMarkerRef.current;
 				if (pendingPlan && pendingPlan.threadId === payload.threadId) {
@@ -556,7 +626,7 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 
 				const fullText = payload.text ?? '';
 				const textForPlanMarkers = flattenAssistantTextPartsForSearch(fullText);
-				if (payload.threadId === rt.currentIdRef.current) {
+				if (visible) {
 					rt.setMessages((messages) => {
 						const last = messages[messages.length - 1];
 						if (last?.role === 'assistant' && last.content === fullText) {
@@ -564,45 +634,45 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 						}
 						return [...messages, { role: 'assistant', content: fullText }];
 					});
-				}
 
-				const question = parseQuestions(textForPlanMarkers);
-				if (question) {
-					rt.setPlanQuestion(question);
-					rt.setPlanQuestionRequestId(null);
-				} else {
-					rt.setPlanQuestion(null);
-					rt.setPlanQuestionRequestId(null);
-				}
+					const question = parseQuestions(textForPlanMarkers);
+					if (question) {
+						rt.setPlanQuestion(question);
+						rt.setPlanQuestionRequestId(null);
+					} else {
+						rt.setPlanQuestion(null);
+						rt.setPlanQuestionRequestId(null);
+					}
 
-				const plan = parsePlanDocument(textForPlanMarkers);
-				if (plan) {
-					rt.setParsedPlan(plan);
-					const filename = generatePlanFilename(plan.name);
-					const markdown = toPlanMd(plan);
-					if (rt.shell) {
-						void (async () => {
-							const result = (await rt.shell!.invoke('plan:save', { filename, content: markdown })) as
-								| { ok: true; path: string; relPath?: string }
-								| { ok: false };
-							if (result.ok) {
-								rt.setPlanFilePath(result.path);
-								rt.setPlanFileRelPath(result.relPath ?? null);
-							}
-							await rt.shell!.invoke('plan:saveStructured', {
-								threadId: payload.threadId,
-								plan: {
-									title: plan.name,
-									steps: plan.todos.map((todo) => ({
-										id: todo.id,
-										title: todo.content.split(':')[0]?.trim() ?? todo.content,
-										description: todo.content,
-										status: 'pending' as const,
-									})),
-									updatedAt: Date.now(),
-								},
-							});
-						})();
+					const plan = parsePlanDocument(textForPlanMarkers);
+					if (plan) {
+						rt.setParsedPlan(plan);
+						const filename = generatePlanFilename(plan.name);
+						const markdown = toPlanMd(plan);
+						if (rt.shell) {
+							void (async () => {
+								const result = (await rt.shell!.invoke('plan:save', { filename, content: markdown })) as
+									| { ok: true; path: string; relPath?: string }
+									| { ok: false };
+								if (result.ok) {
+									rt.setPlanFilePath(result.path);
+									rt.setPlanFileRelPath(result.relPath ?? null);
+								}
+								await rt.shell!.invoke('plan:saveStructured', {
+									threadId: payload.threadId,
+									plan: {
+										title: plan.name,
+										steps: plan.todos.map((todo) => ({
+											id: todo.id,
+											title: todo.content.split(':')[0]?.trim() ?? todo.content,
+											description: todo.content,
+											status: 'pending' as const,
+										})),
+										updatedAt: Date.now(),
+									},
+								});
+							})();
+						}
 					}
 				}
 
@@ -611,17 +681,25 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 			} else if (payload.type === 'error') {
 				rt.recordThoughtSeconds(payload.threadId, 0.3);
 				rt.planBuildPendingMarkerRef.current = null;
-				rt.resetStreamingSession({ clearThread: false });
-				rt.setStreamingThinking('');
-				rt.setToolApprovalRequest(null);
-				rt.setMistakeLimitRequest(null);
-				rt.setPlanQuestionRequestId(null);
-				rt.clearStreamingToolPreviewNow();
-				rt.resetLiveAgentBlocks();
-				rt.setMessages((messages) => [
-					...messages,
-					{ role: 'assistant', content: rt.t('app.errorPrefix', { message: translateChatError(payload.message, rt.t) }) },
-				]);
+				delete rt.offThreadStreamDraftsRef.current[payload.threadId];
+				rt.ipcInFlightChatThreadIdRef.current = null;
+				if (visible) {
+					rt.resetStreamingSession({ clearThread: false });
+					rt.setStreamingThinking('');
+					rt.setToolApprovalRequest(null);
+					rt.setMistakeLimitRequest(null);
+					rt.setPlanQuestionRequestId(null);
+					rt.clearStreamingToolPreviewNow();
+					rt.resetLiveAgentBlocks();
+					rt.setMessages((messages) => [
+						...messages,
+						{
+							role: 'assistant',
+							content: rt.t('app.errorPrefix', { message: translateChatError(payload.message, rt.t) }),
+						},
+					]);
+				}
+				void rt.loadMessages(payload.threadId);
 				void rt.refreshThreads();
 			}
 		});

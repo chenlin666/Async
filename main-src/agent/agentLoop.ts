@@ -21,6 +21,8 @@ import type { ChatMessage } from '../threadStore.js';
 import type { ShellSettings, ModelRequestParadigm, ThinkingLevel } from '../settingsStore.js';
 import { assembleAgentToolPool, filterMcpToolsByDenyPrefixes } from './agentToolPool.js';
 import type { TurnTokenUsage } from '../llm/types.js';
+import { llmSdkResponseHeadTimeoutMs } from '../llm/sdkResponseHeadTimeoutMs.js';
+import { withLlmTransportRetry } from '../llm/llmTransportRetry.js';
 import { composeSystem, temperatureForMode } from '../llm/modePrompts.js';
 import {
 	anthropicEffectiveMaxTokens,
@@ -434,7 +436,14 @@ async function runOpenAILoop(
 		}
 	}
 
-	const client = new OpenAI({ apiKey: key, baseURL, httpAgent, dangerouslyAllowBrowser: false });
+	const client = new OpenAI({
+		apiKey: key,
+		baseURL,
+		httpAgent,
+		dangerouslyAllowBrowser: false,
+		timeout: llmSdkResponseHeadTimeoutMs(),
+		maxRetries: 0,
+	});
 	const storedSystem = threadMessages.find((m) => m.role === 'system');
 	const systemContent = appendMcpToolsSystemHint(
 		composeSystem(storedSystem?.content, options.composerMode, options.agentSystemAppend),
@@ -611,18 +620,22 @@ async function runOpenAILoop(
 		timeoutMgr.start();
 
 		try {
-			const stream = await client.chat.completions.create(
-				{
-					model,
-					messages: conversation,
-					tools,
-					stream: true,
-					stream_options: { include_usage: true },
-					temperature,
-					max_completion_tokens: options.maxOutputTokens,
-					...(effort ? { reasoning_effort: effort } : {}),
-				},
-				{ signal: roundSignal }
+			const stream = await withLlmTransportRetry(
+				() =>
+					client.chat.completions.create(
+						{
+							model,
+							messages: conversation,
+							tools,
+							stream: true,
+							stream_options: { include_usage: true },
+							temperature,
+							max_completion_tokens: options.maxOutputTokens,
+							...(effort ? { reasoning_effort: effort } : {}),
+						},
+						{ signal: roundSignal }
+					),
+				{ signal: options.signal }
 			);
 
 			for await (const chunk of stream) {
@@ -810,7 +823,12 @@ async function runAnthropicLoop(
 	if (!key) { handlers.onError('未配置 Anthropic API Key。请在设置 → 模型中填写。'); return; }
 
 	const baseURL = options.requestBaseURL?.trim() || undefined;
-	const client = new Anthropic({ apiKey: key, baseURL: baseURL || undefined });
+	const client = new Anthropic({
+		apiKey: key,
+		baseURL: baseURL || undefined,
+		timeout: llmSdkResponseHeadTimeoutMs(),
+		maxRetries: 0,
+	});
 	const storedSystem = threadMessages.find((m) => m.role === 'system');
 	const systemText = appendMcpToolsSystemHint(
 		composeSystem(storedSystem?.content, options.composerMode, options.agentSystemAppend),
@@ -1007,17 +1025,24 @@ async function runAnthropicLoop(
 				anthropicPromptCaching,
 				options.skipAnthropicPromptCacheWrite === true
 			);
-			const stream = client.messages.stream(
-				{
-					model,
-					max_tokens: maxTokens,
-					system,
-					messages: messagesForApi,
-					tools: tools as Anthropic.Messages.Tool[],
-					temperature,
-					...(thinkingParam ? { thinking: thinkingParam } : {}),
+			const stream = await withLlmTransportRetry(
+				async () => {
+					const s = client.messages.stream(
+						{
+							model,
+							max_tokens: maxTokens,
+							system,
+							messages: messagesForApi,
+							tools: tools as Anthropic.Messages.Tool[],
+							temperature,
+							...(thinkingParam ? { thinking: thinkingParam } : {}),
+						},
+						{ signal: roundSignalA }
+					);
+					await s.withResponse();
+					return s;
 				},
-				{ signal: roundSignalA }
+				{ signal: options.signal }
 			);
 
 			for await (const ev of stream) {

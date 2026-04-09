@@ -6,6 +6,8 @@ import { composeSystem, temperatureForMode } from './modePrompts.js';
 import type { StreamHandlers, TurnTokenUsage, UnifiedChatOptions } from './types.js';
 import { openAIReasoningEffort } from './thinkingLevel.js';
 import { resolveStreamTimeouts, createStreamTimeoutManager } from './streamTimeouts.js';
+import { llmSdkResponseHeadTimeoutMs } from './sdkResponseHeadTimeoutMs.js';
+import { withLlmTransportRetry } from './llmTransportRetry.js';
 
 export async function streamOpenAICompatible(
 	settings: ShellSettings,
@@ -37,11 +39,14 @@ export async function streamOpenAICompatible(
 		}
 	}
 
+	// maxRetries: 0 与 Claude Code `services/api/claude.ts` 流式路径一致，避免 SDK 对超时类失败自动重试拉长等待
 	const client = new OpenAI({
 		apiKey: key,
 		baseURL,
 		httpAgent,
 		dangerouslyAllowBrowser: false,
+		timeout: llmSdkResponseHeadTimeoutMs(),
+		maxRetries: 0,
 	});
 
 	const apiMessages = messages
@@ -66,17 +71,21 @@ export async function streamOpenAICompatible(
 	timeoutMgr.start();
 
 	try {
-		const stream = await client.chat.completions.create(
-			{
-				model,
-				messages: [{ role: 'system' as const, content: systemContent }, ...apiMessages],
-				stream: true,
-				stream_options: { include_usage: true },
-				temperature,
-				max_tokens: options.maxOutputTokens,
-				...(effort ? { reasoning_effort: effort } : {}),
-			},
-			{ signal: timeoutAc.signal }
+		const stream = await withLlmTransportRetry(
+			() =>
+				client.chat.completions.create(
+					{
+						model,
+						messages: [{ role: 'system' as const, content: systemContent }, ...apiMessages],
+						stream: true,
+						stream_options: { include_usage: true },
+						temperature,
+						max_tokens: options.maxOutputTokens,
+						...(effort ? { reasoning_effort: effort } : {}),
+					},
+					{ signal: timeoutAc.signal }
+				),
+			{ signal: options.signal }
 		);
 
 		for await (const chunk of stream) {

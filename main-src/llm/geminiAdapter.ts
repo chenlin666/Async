@@ -4,6 +4,8 @@ import type { ChatMessage } from '../threadStore.js';
 import type { ShellSettings } from '../settingsStore.js';
 import { composeSystem, temperatureForMode } from './modePrompts.js';
 import type { StreamHandlers, TurnTokenUsage, UnifiedChatOptions } from './types.js';
+import { llmSdkResponseHeadTimeoutMs } from './sdkResponseHeadTimeoutMs.js';
+import { withLlmTransportRetry } from './llmTransportRetry.js';
 
 function toGeminiContents(messages: ChatMessage[]): Content[] {
 	const nonSystem = messages.filter((m) => m.role === 'user' || m.role === 'assistant');
@@ -60,8 +62,19 @@ export async function streamGemini(
 	let full = '';
 	let usage: TurnTokenUsage | undefined;
 	try {
-		const streamResult = await model.generateContentStream(
-			{ contents },
+		const streamResult = await withLlmTransportRetry(
+			async () => {
+				const connectAc = new AbortController();
+				const onUserAbort = () => connectAc.abort();
+				options.signal.addEventListener('abort', onUserAbort, { once: true });
+				const connectTimer = setTimeout(() => connectAc.abort(), llmSdkResponseHeadTimeoutMs());
+				try {
+					return await model.generateContentStream({ contents }, { signal: connectAc.signal });
+				} finally {
+					clearTimeout(connectTimer);
+					options.signal.removeEventListener('abort', onUserAbort);
+				}
+			},
 			{ signal: options.signal }
 		);
 
@@ -85,6 +98,10 @@ export async function streamGemini(
 	} catch (e: unknown) {
 		if (options.signal.aborted) {
 			handlers.onDone(full, usage);
+			return;
+		}
+		if (e instanceof Error && e.name === 'AbortError') {
+			handlers.onError('连接超时：无法在限定时间内建立与 Gemini 的响应。请检查网络后重试。');
 			return;
 		}
 		const msg = e instanceof Error ? e.message : String(e);

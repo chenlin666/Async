@@ -15,6 +15,8 @@ import {
 	buildAnthropicSystemForApi,
 	isAnthropicPromptCachingEnabled,
 } from './anthropicPromptCache.js';
+import { llmSdkResponseHeadTimeoutMs } from './sdkResponseHeadTimeoutMs.js';
+import { withLlmTransportRetry } from './llmTransportRetry.js';
 
 function toAnthropicMessages(messages: ChatMessage[]): MessageParam[] {
 	const nonSystem = messages.filter((m) => m.role === 'user' || m.role === 'assistant');
@@ -52,9 +54,12 @@ export async function streamAnthropic(
 	}
 
 	const baseURL = options.requestBaseURL?.trim() || undefined;
+	// maxRetries: 0 与 Claude Code `services/api/claude.ts` 流式路径一致
 	const client = new Anthropic({
 		apiKey: key,
 		baseURL: baseURL || undefined,
+		timeout: llmSdkResponseHeadTimeoutMs(),
+		maxRetries: 0,
 	});
 
 	const storedSystem = messages.find((m) => m.role === 'system');
@@ -95,16 +100,23 @@ export async function streamAnthropic(
 	timeoutMgr.start();
 
 	try {
-		const stream = client.messages.stream(
-			{
-				model,
-				max_tokens: maxTokens,
-				system,
-				messages: anthropicMessages,
-				temperature,
-				...(thinkingParam ? { thinking: thinkingParam } : {}),
+		const stream = await withLlmTransportRetry(
+			async () => {
+				const s = client.messages.stream(
+					{
+						model,
+						max_tokens: maxTokens,
+						system,
+						messages: anthropicMessages,
+						temperature,
+						...(thinkingParam ? { thinking: thinkingParam } : {}),
+					},
+					{ signal: timeoutAc.signal }
+				);
+				await s.withResponse();
+				return s;
 			},
-			{ signal: timeoutAc.signal }
+			{ signal: options.signal }
 		);
 
 		for await (const ev of stream) {
