@@ -10,6 +10,11 @@ import {
 	anthropicThinkingBudget,
 } from './thinkingLevel.js';
 import { resolveStreamTimeouts, createStreamTimeoutManager } from './streamTimeouts.js';
+import {
+	addAnthropicCacheBreakpoints,
+	buildAnthropicSystemForApi,
+	isAnthropicPromptCachingEnabled,
+} from './anthropicPromptCache.js';
 
 function toAnthropicMessages(messages: ChatMessage[]): MessageParam[] {
 	const nonSystem = messages.filter((m) => m.role === 'user' || m.role === 'assistant');
@@ -53,13 +58,19 @@ export async function streamAnthropic(
 	});
 
 	const storedSystem = messages.find((m) => m.role === 'system');
-	const system = composeSystem(storedSystem?.content, options.mode, options.agentSystemAppend);
-	const anthropicMessages = toAnthropicMessages(messages);
+	const systemText = composeSystem(storedSystem?.content, options.mode, options.agentSystemAppend);
 	const model = options.requestModelId.trim();
 	if (!model) {
 		handlers.onError('模型请求名称为空。请在 Models 中编辑该模型的「请求名称」。');
 		return;
 	}
+	const promptCaching = isAnthropicPromptCachingEnabled(model);
+	const system = buildAnthropicSystemForApi(systemText, promptCaching);
+	const anthropicMessages = addAnthropicCacheBreakpoints(
+		toAnthropicMessages(messages),
+		promptCaching,
+		false
+	);
 	const thinkBudget = anthropicThinkingBudget(options.thinkingLevel ?? 'off');
 	const temperature = anthropicEffectiveTemperature(temperatureForMode(options.mode), thinkBudget);
 	const maxTokens = anthropicEffectiveMaxTokens(thinkBudget, options.maxOutputTokens);

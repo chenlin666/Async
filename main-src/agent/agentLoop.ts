@@ -28,6 +28,11 @@ import {
 	anthropicThinkingBudget,
 	openAIReasoningEffort,
 } from '../llm/thinkingLevel.js';
+import {
+	addAnthropicCacheBreakpoints,
+	buildAnthropicSystemForApi,
+	isAnthropicPromptCachingEnabled,
+} from '../llm/anthropicPromptCache.js';
 import type { ComposerMode } from '../llm/composerMode.js';
 import {
 	agentToolsForComposerMode,
@@ -192,6 +197,10 @@ export type AgentLoopOptions = {
 	toolLspSession?: TsLspSession | null;
 	/** 当前会话线程 ID，用于 TodoWrite 等按线程隔离状态的工具 */
 	threadId?: string | null;
+	/**
+	 * Anthropic：与 Claude Code fork 的 `skipCacheWrite` 一致，prompt cache 断点挂在倒数第二条消息，避免无后续读取的尾部写入 KVCC。
+	 */
+	skipAnthropicPromptCacheWrite?: boolean;
 };
 
 /**
@@ -803,13 +812,15 @@ async function runAnthropicLoop(
 	const baseURL = options.requestBaseURL?.trim() || undefined;
 	const client = new Anthropic({ apiKey: key, baseURL: baseURL || undefined });
 	const storedSystem = threadMessages.find((m) => m.role === 'system');
-	const system = appendMcpToolsSystemHint(
+	const systemText = appendMcpToolsSystemHint(
 		composeSystem(storedSystem?.content, options.composerMode, options.agentSystemAppend),
 		options.composerMode,
 		settings
 	);
 	const model = options.requestModelId.trim();
 	if (!model) { handlers.onError('模型请求名称为空。'); return; }
+	const anthropicPromptCaching = isAnthropicPromptCachingEnabled(model);
+	const system = buildAnthropicSystemForApi(systemText, anthropicPromptCaching);
 	let conversation: MessageParam[] = normalizeAnthropicMessagesForApi(threadToAnthropic(threadMessages));
 	conversation = repairAnthropicToolPairing(conversation);
 	conversation = mergeAdjacentAnthropicUserMessages(conversation);
@@ -991,12 +1002,17 @@ async function runAnthropicLoop(
 		timeoutMgrA.start();
 
 		try {
+			const messagesForApi = addAnthropicCacheBreakpoints(
+				conversation,
+				anthropicPromptCaching,
+				options.skipAnthropicPromptCacheWrite === true
+			);
 			const stream = client.messages.stream(
 				{
 					model,
 					max_tokens: maxTokens,
 					system,
-					messages: conversation,
+					messages: messagesForApi,
 					tools: tools as Anthropic.Messages.Tool[],
 					temperature,
 					...(thinkingParam ? { thinking: thinkingParam } : {}),
