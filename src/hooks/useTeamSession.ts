@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage } from '../threadTypes';
 import type { ChatStreamPayload, TeamRoleScope, TurnTokenUsage } from '../ipcTypes';
+import {
+	applyLiveAgentChatPayload,
+	createEmptyLiveAgentBlocks,
+	type LiveAgentBlocksState,
+} from '../liveAgentBlocks';
+import { extractTeamLeadNarrative } from '../teamWorkflowText';
 
 export type TeamSessionPhase = 'planning' | 'executing' | 'reviewing' | 'delivering';
 export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'revision';
@@ -25,11 +31,10 @@ export type TeamRoleWorkflowState = {
 	expertId: string;
 	expertName: string;
 	roleType: TeamRoleType;
-	roleKind: 'specialist' | 'reviewer';
-	/** @deprecated 后端不再发送 delta 到渲染器，保留字段兼容类型引用 */
+	roleKind: 'specialist' | 'reviewer' | 'lead';
 	streaming: string;
-	/** @deprecated */
 	streamingThinking: string;
+	liveBlocks: LiveAgentBlocksState;
 	messages: ChatMessage[];
 	lastTurnUsage: TurnTokenUsage | null;
 	awaitingReply: boolean;
@@ -39,6 +44,9 @@ export type TeamRoleWorkflowState = {
 export type TeamSessionState = {
 	phase: TeamSessionPhase;
 	tasks: TeamTask[];
+	originalUserRequest: string;
+	leaderMessage: string;
+	leaderWorkflow: TeamRoleWorkflowState | null;
 	planSummary: string;
 	reviewSummary: string;
 	reviewVerdict: 'approved' | 'revision_needed' | null;
@@ -52,6 +60,9 @@ function emptySession(): TeamSessionState {
 	return {
 		phase: 'planning',
 		tasks: [],
+		originalUserRequest: '',
+		leaderMessage: '',
+		leaderWorkflow: null,
 		planSummary: '',
 		reviewSummary: '',
 		reviewVerdict: null,
@@ -63,7 +74,19 @@ function emptySession(): TeamSessionState {
 }
 
 const MAX_TASK_LOGS = 50;
-const FLUSH_INTERVAL_MS = 1000;
+const FLUSH_INTERVAL_MS = 250;
+
+function buildDefaultLeaderMessage(userRequest: string): string {
+	const hasCjk = /[\u3400-\u9fff]/.test(userRequest);
+	if (!userRequest.trim()) {
+		return hasCjk
+			? '这是一个需要团队协作的复杂任务，我正在拆解需求并分配合适的角色。'
+			: "This request needs coordinated work. I'm breaking it down and assigning the right specialists now.";
+	}
+	return hasCjk
+		? '这是一个需要团队协作的复杂任务。我先拆解需求、分配合适的角色，并把每个成员的执行轨迹实时展示给你。'
+		: "This request needs coordinated work. I'm breaking it down, assigning the right specialists, and I'll surface each role's execution trace as it progresses.";
+}
 
 function ensureRoleWorkflow(
 	roleWorkflowByTaskId: Record<string, TeamRoleWorkflowState>,
@@ -77,7 +100,7 @@ function ensureRoleWorkflow(
 		current.roleKind = scope.teamRoleKind;
 		return current;
 	}
-	const wf: TeamRoleWorkflowState = {
+	const workflow: TeamRoleWorkflowState = {
 		taskId: scope.teamTaskId,
 		expertId: scope.teamExpertId,
 		expertName: scope.teamExpertName,
@@ -85,76 +108,174 @@ function ensureRoleWorkflow(
 		roleKind: scope.teamRoleKind,
 		streaming: '',
 		streamingThinking: '',
+		liveBlocks: createEmptyLiveAgentBlocks(),
 		messages: [],
 		lastTurnUsage: null,
 		awaitingReply: true,
 		lastUpdatedAt: Date.now(),
 	};
-	roleWorkflowByTaskId[scope.teamTaskId] = wf;
-	return wf;
+	roleWorkflowByTaskId[scope.teamTaskId] = workflow;
+	return workflow;
 }
 
-/**
- * 直接 mutate roleWorkflow（在 ref 中），返回是否需要立即刷新 UI。
- *
- * 参考 Claude Code coordinator 模式：specialist 的 token 流不推入 React state，
- * 只在 done/error 时携带完整文本一次性更新。前端仅通过 task 级别的状态事件
- * （expert_started/expert_done）来驱动 UI，避免高频渲染。
- */
+function ensureLeaderWorkflow(
+	session: TeamSessionState,
+	scope: TeamRoleScope
+): TeamRoleWorkflowState {
+	const current = session.leaderWorkflow;
+	if (current) {
+		current.expertId = scope.teamExpertId;
+		current.expertName = scope.teamExpertName;
+		current.roleType = scope.teamRoleType;
+		current.roleKind = 'lead';
+		return current;
+	}
+	const workflow: TeamRoleWorkflowState = {
+		taskId: scope.teamTaskId,
+		expertId: scope.teamExpertId,
+		expertName: scope.teamExpertName,
+		roleType: scope.teamRoleType,
+		roleKind: 'lead',
+		streaming: '',
+		streamingThinking: '',
+		liveBlocks: createEmptyLiveAgentBlocks(),
+		messages: [],
+		lastTurnUsage: null,
+		awaitingReply: true,
+		lastUpdatedAt: Date.now(),
+	};
+	session.leaderWorkflow = workflow;
+	return workflow;
+}
+
 function mutateRoleWorkflowPayload(
 	session: TeamSessionState,
 	payload: ChatStreamPayload,
 	scope: TeamRoleScope
 ): boolean {
-	const wf = ensureRoleWorkflow(session.roleWorkflowByTaskId, scope);
-	if (!session.selectedTaskId) {
+	const isLead = scope.teamRoleKind === 'lead';
+	const workflow = isLead
+		? ensureLeaderWorkflow(session, scope)
+		: ensureRoleWorkflow(session.roleWorkflowByTaskId, scope);
+	if (!isLead && !session.selectedTaskId) {
 		session.selectedTaskId = scope.teamTaskId;
 	}
 	if (scope.teamRoleKind === 'reviewer') {
 		session.reviewerTaskId = scope.teamTaskId;
 	}
 
-	if (payload.type === 'done') {
-		const msg: ChatMessage = { role: 'assistant', content: payload.text };
-		const lastMsg = wf.messages[wf.messages.length - 1];
-		if (!(lastMsg?.role === msg.role && lastMsg?.content === msg.content)) {
-			wf.messages = [...wf.messages, msg];
+	switch (payload.type) {
+		case 'delta':
+			workflow.streaming += payload.text;
+			workflow.liveBlocks = applyLiveAgentChatPayload(workflow.liveBlocks, {
+				type: 'delta',
+				text: payload.text,
+			});
+			workflow.awaitingReply = true;
+			workflow.lastUpdatedAt = Date.now();
+			return false;
+		case 'thinking_delta':
+			workflow.streamingThinking += payload.text;
+			workflow.liveBlocks = applyLiveAgentChatPayload(workflow.liveBlocks, {
+				type: 'thinking_delta',
+				text: payload.text,
+			});
+			workflow.awaitingReply = true;
+			workflow.lastUpdatedAt = Date.now();
+			return false;
+		case 'tool_input_delta':
+			workflow.liveBlocks = applyLiveAgentChatPayload(workflow.liveBlocks, {
+				type: 'tool_input_delta',
+				name: payload.name,
+				partialJson: payload.partialJson,
+				index: payload.index,
+			});
+			workflow.awaitingReply = true;
+			workflow.lastUpdatedAt = Date.now();
+			return false;
+		case 'tool_progress':
+			workflow.liveBlocks = applyLiveAgentChatPayload(workflow.liveBlocks, {
+				type: 'tool_progress',
+				name: payload.name,
+				phase: payload.phase,
+				detail: payload.detail,
+			});
+			workflow.awaitingReply = true;
+			workflow.lastUpdatedAt = Date.now();
+			return true;
+		case 'tool_call':
+			workflow.liveBlocks = applyLiveAgentChatPayload(workflow.liveBlocks, {
+				type: 'tool_call',
+				name: payload.name,
+				args: payload.args,
+				toolCallId: payload.toolCallId,
+			});
+			workflow.awaitingReply = true;
+			workflow.lastUpdatedAt = Date.now();
+			return true;
+		case 'tool_result':
+			workflow.liveBlocks = applyLiveAgentChatPayload(workflow.liveBlocks, {
+				type: 'tool_result',
+				name: payload.name,
+				result: payload.result,
+				success: payload.success,
+				toolCallId: payload.toolCallId,
+			});
+			workflow.awaitingReply = true;
+			workflow.lastUpdatedAt = Date.now();
+			return true;
+		case 'done': {
+			const nextMessage: ChatMessage = { role: 'assistant', content: payload.text };
+			const lastMessage = workflow.messages[workflow.messages.length - 1];
+			if (!(lastMessage?.role === nextMessage.role && lastMessage?.content === nextMessage.content)) {
+				workflow.messages = [...workflow.messages, nextMessage];
+			}
+			workflow.streaming = '';
+			workflow.streamingThinking = '';
+			workflow.liveBlocks = createEmptyLiveAgentBlocks();
+			workflow.lastTurnUsage = payload.usage ?? workflow.lastTurnUsage;
+			workflow.awaitingReply = false;
+			workflow.lastUpdatedAt = Date.now();
+			if (isLead) {
+				session.leaderMessage = payload.text;
+			}
+			return true;
 		}
-		wf.streaming = '';
-		wf.streamingThinking = '';
-		wf.lastTurnUsage = payload.usage ?? wf.lastTurnUsage;
-		wf.awaitingReply = false;
-		return true;
-	}
-
-	if (payload.type === 'error') {
-		const errMsg: ChatMessage = { role: 'assistant', content: `Error: ${payload.message}` };
-		const lastErrMsg = wf.messages[wf.messages.length - 1];
-		if (!(lastErrMsg?.role === errMsg.role && lastErrMsg?.content === errMsg.content)) {
-			wf.messages = [...wf.messages, errMsg];
+		case 'error': {
+			const nextMessage: ChatMessage = { role: 'assistant', content: `Error: ${payload.message}` };
+			const lastMessage = workflow.messages[workflow.messages.length - 1];
+			if (!(lastMessage?.role === nextMessage.role && lastMessage?.content === nextMessage.content)) {
+				workflow.messages = [...workflow.messages, nextMessage];
+			}
+			workflow.streaming = '';
+			workflow.streamingThinking = '';
+			workflow.liveBlocks = createEmptyLiveAgentBlocks();
+			workflow.awaitingReply = false;
+			workflow.lastUpdatedAt = Date.now();
+			if (isLead) {
+				session.leaderMessage = nextMessage.content;
+			}
+			return true;
 		}
-		wf.streaming = '';
-		wf.streamingThinking = '';
-		wf.awaitingReply = false;
-		return true;
+		default:
+			return false;
 	}
-
-	// 其余事件（delta / thinking_delta / tool_* 等）后端已不再发送给渲染器
-	return false;
 }
 
-function upsertTask(tasks: TeamTask[], next: TeamTask): TeamTask[] {
-	const idx = tasks.findIndex((t) => t.id === next.id);
-	if (idx < 0) {
-		return [...tasks, next];
+function upsertTask(tasks: TeamTask[], nextTask: TeamTask): TeamTask[] {
+	const index = tasks.findIndex((task) => task.id === nextTask.id);
+	if (index < 0) {
+		return [...tasks, nextTask];
 	}
 	const copy = [...tasks];
-	copy[idx] = { ...copy[idx]!, ...next };
+	copy[index] = { ...copy[index]!, ...nextTask };
 	return copy;
 }
 
 function clampLogs(logs: string[], entry: string): string[] {
-	if (!entry) return logs;
+	if (!entry) {
+		return logs;
+	}
 	if (logs.length >= MAX_TASK_LOGS) {
 		const next = logs.slice(-(MAX_TASK_LOGS - 1));
 		next.push(entry);
@@ -163,16 +284,30 @@ function clampLogs(logs: string[], entry: string): string[] {
 	return [...logs, entry];
 }
 
-/** 浅拷贝 session 快照到 React state（不含 liveBlocks，非常轻量） */
 function snapshotSession(session: TeamSessionState): TeamSessionState {
-	const rwCopy: Record<string, TeamRoleWorkflowState> = {};
-	for (const [k, v] of Object.entries(session.roleWorkflowByTaskId)) {
-		rwCopy[k] = { ...v };
+	const roleWorkflowByTaskId: Record<string, TeamRoleWorkflowState> = {};
+	for (const [taskId, workflow] of Object.entries(session.roleWorkflowByTaskId)) {
+		roleWorkflowByTaskId[taskId] = {
+			...workflow,
+			messages: workflow.messages.map((message) => ({ ...message })),
+			liveBlocks: {
+				blocks: workflow.liveBlocks.blocks.map((block) => ({ ...block })),
+			},
+		};
 	}
 	return {
 		...session,
-		tasks: session.tasks.map((t) => ({ ...t })),
-		roleWorkflowByTaskId: rwCopy,
+		tasks: session.tasks.map((task) => ({ ...task })),
+		leaderWorkflow: session.leaderWorkflow
+			? {
+					...session.leaderWorkflow,
+					messages: session.leaderWorkflow.messages.map((message) => ({ ...message })),
+					liveBlocks: {
+						blocks: session.leaderWorkflow.liveBlocks.blocks.map((block) => ({ ...block })),
+					},
+				}
+			: null,
+		roleWorkflowByTaskId,
 	};
 }
 
@@ -186,35 +321,40 @@ export function useTeamSession() {
 	const flushDirty = useCallback(() => {
 		flushTimerRef.current = null;
 		const dirty = dirtyThreadsRef.current;
-		if (dirty.size === 0) return;
+		if (dirty.size === 0) {
+			return;
+		}
 		const threadIds = [...dirty];
 		dirty.clear();
 		setSessionsByThread((prev) => {
 			const next = { ...prev };
-			for (const tid of threadIds) {
-				const live = sessionsRef.current[tid];
+			for (const threadId of threadIds) {
+				const live = sessionsRef.current[threadId];
 				if (live) {
-					next[tid] = snapshotSession(live);
+					next[threadId] = snapshotSession(live);
 				} else {
-					delete next[tid];
+					delete next[threadId];
 				}
 			}
 			return next;
 		});
 	}, []);
 
-	const scheduleFlush = useCallback((threadId: string, immediate: boolean) => {
-		dirtyThreadsRef.current.add(threadId);
-		if (immediate) {
-			if (flushTimerRef.current) {
-				clearTimeout(flushTimerRef.current);
-				flushTimerRef.current = null;
+	const scheduleFlush = useCallback(
+		(threadId: string, immediate: boolean) => {
+			dirtyThreadsRef.current.add(threadId);
+			if (immediate) {
+				if (flushTimerRef.current) {
+					clearTimeout(flushTimerRef.current);
+					flushTimerRef.current = null;
+				}
+				flushDirty();
+			} else if (!flushTimerRef.current) {
+				flushTimerRef.current = setTimeout(flushDirty, FLUSH_INTERVAL_MS);
 			}
-			flushDirty();
-		} else if (!flushTimerRef.current) {
-			flushTimerRef.current = setTimeout(flushDirty, FLUSH_INTERVAL_MS);
-		}
-	}, [flushDirty]);
+		},
+		[flushDirty]
+	);
 
 	useEffect(() => {
 		return () => {
@@ -225,86 +365,113 @@ export function useTeamSession() {
 		};
 	}, []);
 
-	const applyTeamPayload = useCallback((payload: ChatStreamPayload) => {
-		if (!payload.threadId) return;
-		const threadId = payload.threadId;
+	const applyTeamPayload = useCallback(
+		(payload: ChatStreamPayload) => {
+			if (!payload.threadId) {
+				return;
+			}
+			const threadId = payload.threadId;
 
-		if (!sessionsRef.current[threadId]) {
-			sessionsRef.current[threadId] = emptySession();
-		}
-		const session = sessionsRef.current[threadId]!;
+			if (!sessionsRef.current[threadId]) {
+				sessionsRef.current[threadId] = emptySession();
+			}
+			const session = sessionsRef.current[threadId]!;
 
-		if (payload.teamRoleScope) {
-			const needFlush = mutateRoleWorkflowPayload(session, payload, payload.teamRoleScope);
+			if (payload.teamRoleScope) {
+				const needFlush = mutateRoleWorkflowPayload(session, payload, payload.teamRoleScope);
+				session.updatedAt = Date.now();
+				scheduleFlush(threadId, needFlush);
+				return;
+			}
+
+			if (!String(payload.type).startsWith('team_')) {
+				return;
+			}
+
+			let needFlush = true;
+			switch (payload.type) {
+				case 'team_phase':
+					session.phase = payload.phase;
+					break;
+				case 'team_task_created': {
+					const created: TeamTask = {
+						id: payload.task.id,
+						expertId: payload.task.expertId,
+						expertAssignmentKey: payload.task.expertAssignmentKey,
+						expertName: payload.task.expertName,
+						roleType: payload.task.roleType,
+						description: payload.task.description,
+						status: payload.task.status,
+						dependencies: payload.task.dependencies ?? [],
+						acceptanceCriteria: payload.task.acceptanceCriteria ?? [],
+						logs: [],
+					};
+					session.tasks = upsertTask(session.tasks, created);
+					if (!session.selectedTaskId) {
+						session.selectedTaskId = created.id;
+					}
+					break;
+				}
+				case 'team_expert_started': {
+					if (!session.selectedTaskId) {
+						session.selectedTaskId = payload.taskId;
+					}
+					const task = session.tasks.find((candidate) => candidate.id === payload.taskId);
+					if (task) {
+						task.status = 'in_progress';
+						task.logs = clampLogs(task.logs, 'Started');
+					}
+					break;
+				}
+				case 'team_expert_progress': {
+					const detail = payload.message ?? payload.delta ?? '';
+					const task = session.tasks.find((candidate) => candidate.id === payload.taskId);
+					if (task && detail) {
+						task.logs = clampLogs(task.logs, detail);
+					}
+					needFlush = false;
+					break;
+				}
+				case 'team_expert_done': {
+					const task = session.tasks.find((candidate) => candidate.id === payload.taskId);
+					if (task) {
+						task.status = payload.success ? 'completed' : 'failed';
+						task.result = payload.result;
+						if (payload.result) {
+							task.logs = clampLogs(task.logs, payload.result);
+						}
+					}
+					break;
+				}
+				case 'team_plan_summary':
+					session.planSummary = payload.summary;
+					session.leaderMessage = extractTeamLeadNarrative(payload.summary) || session.leaderMessage;
+					break;
+				case 'team_review':
+					session.reviewVerdict = payload.verdict;
+					session.reviewSummary = payload.summary;
+					break;
+				default:
+					return;
+			}
+
 			session.updatedAt = Date.now();
 			scheduleFlush(threadId, needFlush);
-			return;
-		}
+		},
+		[scheduleFlush]
+	);
 
-		if (!String(payload.type).startsWith('team_')) return;
-
-		let needFlush = true;
-		switch (payload.type) {
-			case 'team_phase':
-				session.phase = payload.phase;
-				break;
-			case 'team_task_created': {
-				const created: TeamTask = {
-					id: payload.task.id,
-					expertId: payload.task.expertId,
-					expertAssignmentKey: payload.task.expertAssignmentKey,
-					expertName: payload.task.expertName,
-					roleType: payload.task.roleType,
-					description: payload.task.description,
-					status: payload.task.status,
-					dependencies: payload.task.dependencies ?? [],
-					acceptanceCriteria: payload.task.acceptanceCriteria ?? [],
-					logs: [],
-				};
-				session.tasks = upsertTask(session.tasks, created);
-				if (!session.selectedTaskId) session.selectedTaskId = created.id;
-				break;
-			}
-			case 'team_expert_started': {
-				if (!session.selectedTaskId) session.selectedTaskId = payload.taskId;
-				const t = session.tasks.find((x) => x.id === payload.taskId);
-				if (t) {
-					t.status = 'in_progress';
-					t.logs = clampLogs(t.logs, 'Started');
-				}
-				break;
-			}
-			case 'team_expert_progress': {
-				const detail = payload.message ?? payload.delta ?? '';
-				const t = session.tasks.find((x) => x.id === payload.taskId);
-				if (t && detail) {
-					t.logs = clampLogs(t.logs, detail);
-				}
-				needFlush = false;
-				break;
-			}
-			case 'team_expert_done': {
-				const t = session.tasks.find((x) => x.id === payload.taskId);
-				if (t) {
-					t.status = payload.success ? 'completed' : 'failed';
-					t.result = payload.result;
-					if (payload.result) t.logs = clampLogs(t.logs, payload.result);
-				}
-				break;
-			}
-			case 'team_plan_summary':
-				session.planSummary = payload.summary;
-				break;
-			case 'team_review':
-				session.reviewVerdict = payload.verdict;
-				session.reviewSummary = payload.summary;
-				break;
-			default:
-				return;
-		}
+	const startTeamSession = useCallback((threadId: string, userRequest: string) => {
+		const session = emptySession();
+		session.originalUserRequest = userRequest;
+		session.leaderMessage = buildDefaultLeaderMessage(userRequest);
 		session.updatedAt = Date.now();
-		scheduleFlush(threadId, needFlush);
-	}, [scheduleFlush]);
+		sessionsRef.current[threadId] = session;
+		setSessionsByThread((prev) => ({
+			...prev,
+			[threadId]: snapshotSession(session),
+		}));
+	}, []);
 
 	const setSelectedTask = useCallback((threadId: string, taskId: string | null) => {
 		const session = sessionsRef.current[threadId];
@@ -313,38 +480,53 @@ export function useTeamSession() {
 			session.updatedAt = Date.now();
 		}
 		setSessionsByThread((prev) => {
-			const cur = prev[threadId] ?? emptySession();
+			const current = prev[threadId] ?? emptySession();
 			return {
 				...prev,
-				[threadId]: { ...cur, selectedTaskId: taskId, updatedAt: Date.now() },
+				[threadId]: { ...current, selectedTaskId: taskId, updatedAt: Date.now() },
 			};
 		});
 	}, []);
 
-	const abortTeamSession = useCallback((threadId: string) => {
-		const session = sessionsRef.current[threadId];
-		if (!session) return;
-		let changed = false;
-		for (const task of session.tasks) {
-			if (task.status === 'in_progress' || task.status === 'pending') {
-				task.status = 'failed';
-				if (!task.result) task.result = 'Aborted by user.';
+	const abortTeamSession = useCallback(
+		(threadId: string) => {
+			const session = sessionsRef.current[threadId];
+			if (!session) {
+				return;
+			}
+			let changed = false;
+			for (const task of session.tasks) {
+				if (task.status === 'in_progress' || task.status === 'pending') {
+					task.status = 'failed';
+					if (!task.result) {
+						task.result = 'Aborted by user.';
+					}
+					changed = true;
+				}
+			}
+			for (const workflow of Object.values(session.roleWorkflowByTaskId)) {
+				if (workflow.awaitingReply) {
+					workflow.awaitingReply = false;
+					workflow.streaming = '';
+					workflow.streamingThinking = '';
+					workflow.liveBlocks = createEmptyLiveAgentBlocks();
+					changed = true;
+				}
+			}
+			if (session.leaderWorkflow?.awaitingReply) {
+				session.leaderWorkflow.awaitingReply = false;
+				session.leaderWorkflow.streaming = '';
+				session.leaderWorkflow.streamingThinking = '';
+				session.leaderWorkflow.liveBlocks = createEmptyLiveAgentBlocks();
 				changed = true;
 			}
-		}
-		for (const wf of Object.values(session.roleWorkflowByTaskId)) {
-			if (wf.awaitingReply) {
-				wf.awaitingReply = false;
-				wf.streaming = '';
-				wf.streamingThinking = '';
-				changed = true;
+			if (changed) {
+				session.updatedAt = Date.now();
+				scheduleFlush(threadId, true);
 			}
-		}
-		if (changed) {
-			session.updatedAt = Date.now();
-			scheduleFlush(threadId, true);
-		}
-	}, [scheduleFlush]);
+		},
+		[scheduleFlush]
+	);
 
 	const clearTeamSession = useCallback((threadId: string) => {
 		if (flushTimerRef.current) {
@@ -354,7 +536,9 @@ export function useTeamSession() {
 		dirtyThreadsRef.current.delete(threadId);
 		delete sessionsRef.current[threadId];
 		setSessionsByThread((prev) => {
-			if (!prev[threadId]) return prev;
+			if (!prev[threadId]) {
+				return prev;
+			}
 			const next = { ...prev };
 			delete next[threadId];
 			return next;
@@ -363,7 +547,9 @@ export function useTeamSession() {
 
 	const getTeamSession = useCallback(
 		(threadId: string | null): TeamSessionState | null => {
-			if (!threadId) return null;
+			if (!threadId) {
+				return null;
+			}
 			return sessionsByThread[threadId] ?? null;
 		},
 		[sessionsByThread]
@@ -373,11 +559,20 @@ export function useTeamSession() {
 		() => ({
 			sessionsByThread,
 			applyTeamPayload,
+			startTeamSession,
 			setSelectedTask,
 			clearTeamSession,
 			abortTeamSession,
 			getTeamSession,
 		}),
-		[sessionsByThread, applyTeamPayload, setSelectedTask, clearTeamSession, abortTeamSession, getTeamSession]
+		[
+			sessionsByThread,
+			applyTeamPayload,
+			startTeamSession,
+			setSelectedTask,
+			clearTeamSession,
+			abortTeamSession,
+			getTeamSession,
+		]
 	);
 }

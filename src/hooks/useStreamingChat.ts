@@ -61,6 +61,7 @@ type StreamingSendRuntime = {
 	flashComposerAttachErr: (msg: string) => void;
 	t: TFunction;
 	clearAgentReviewForThread: (threadId: string) => void;
+	startTeamSession: (threadId: string, userRequest: string) => void;
 	clearPlanQuestion: () => void;
 	clearMistakeLimitRequest: () => void;
 	planBuildPendingMarkerRef: MutableRefObject<{ threadId: string; pathKey: string } | null>;
@@ -295,6 +296,9 @@ export function useStreamingChatControls(runtime: StreamingSendRuntime) {
 		}
 
 		rt.clearAgentReviewForThread(targetThreadId);
+		if (effectiveMode === 'team') {
+			rt.startTeamSession(targetThreadId, text);
+		}
 		if (rt.resendFromUserIndex !== null) {
 			const resendIdx = rt.resendFromUserIndex;
 			rt.setInlineResendSegments([]);

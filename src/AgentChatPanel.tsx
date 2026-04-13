@@ -743,22 +743,100 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 		return nodes;
 	};
 
+	const buildTeamLeaderRow = (): ReactNode | null => {
+		if (!teamSession || composerMode !== 'team' || !hasConversation) {
+			return null;
+		}
+		const workflow = teamSession.leaderWorkflow;
+		const lastLeaderMessage = workflow?.messages[workflow.messages.length - 1]?.content ?? '';
+		const content = lastLeaderMessage || teamSession.leaderMessage || '';
+		const isWorking = Boolean(workflow?.awaitingReply);
+		if (!content.trim() && !isWorking && !(workflow?.liveBlocks.blocks.length ?? 0)) {
+			return null;
+		}
+		const liveThoughtMeta =
+			isWorking || workflow?.streamingThinking
+				? {
+						phase: (workflow?.streaming?.trim() ? 'streaming' : 'thinking') as 'thinking' | 'streaming' | 'done',
+						elapsedSeconds: 0,
+						streamingThinking: workflow?.streamingThinking ?? '',
+						tokenUsage: workflow?.lastTurnUsage ?? null,
+					}
+				: workflow?.lastTurnUsage
+					? {
+							phase: 'done' as const,
+							elapsedSeconds: 0,
+							streamingThinking: '',
+							tokenUsage: workflow.lastTurnUsage,
+						}
+					: null;
+
+		return (
+			<div
+				key={`row-${conversationRenderKey}-team-leader`}
+				className="ref-msg-row-measure ref-msg-row-measure--team-leader"
+				data-msg-index={String(displayMessages.length)}
+			>
+				<div className="ref-msg-slot ref-msg-slot--assistant">
+					<div className="ref-msg-assistant-body">
+						<ChatMarkdown
+							content={content}
+							agentUi
+							workspaceRoot={workspace}
+							onOpenAgentFile={onOpenAgentConversationFile}
+							onRunCommand={onRunCommand}
+							showAgentWorking={isWorking}
+							liveAgentBlocksState={workflow?.liveBlocks ?? null}
+							liveThoughtMeta={liveThoughtMeta}
+							revertedPaths={revertedFiles}
+							revertedChangeKeys={revertedChangeKeys}
+							skipPlanTodo
+						/>
+					</div>
+				</div>
+			</div>
+		);
+	};
+
 	const buildTeamTimelineRows = (): ReactNode[] => {
 		const nodes = buildFlatMessageList();
 		if (!teamSession || composerMode !== 'team' || !hasConversation) {
 			return nodes;
 		}
-		nodes.push(
+		const leaderRow = buildTeamLeaderRow();
+		const teamTimelineRow = (
 			<div
 				key={`row-${conversationRenderKey}-team-timeline`}
 				className="ref-msg-row-measure ref-msg-row-measure--team-card"
-				data-msg-index={String(displayMessages.length)}
+				data-msg-index={String(displayMessages.length + 1)}
 			>
 				<div className="ref-msg-slot ref-msg-slot--assistant ref-msg-slot--team-card">
 					<TeamWorkflowTimelineCard t={t} session={teamSession} onSelectTask={onSelectTeamExpert} />
 				</div>
 			</div>
 		);
+		const isTrailingDeliveryMessage =
+			!awaitingReply &&
+			lastAssistantMessageIndex === displayMessages.length - 1 &&
+			lastAssistantMessageIndex >= messageStartIndex &&
+			displayMessages[displayMessages.length - 1]?.role === 'assistant';
+
+		if (isTrailingDeliveryMessage) {
+			const trailingAssistant = nodes.pop();
+			if (leaderRow) {
+				nodes.push(leaderRow);
+			}
+			nodes.push(teamTimelineRow);
+			if (trailingAssistant) {
+				nodes.push(trailingAssistant);
+			}
+			return nodes;
+		}
+
+		if (leaderRow) {
+			nodes.push(leaderRow);
+		}
+		nodes.push(teamTimelineRow);
 		return nodes;
 	};
 

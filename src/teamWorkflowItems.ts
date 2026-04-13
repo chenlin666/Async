@@ -11,6 +11,8 @@ export type TeamWorkflowListItem = {
 	expertName: string;
 	roleType: TeamRoleType;
 	description: string;
+	dependencies: string[];
+	acceptanceCriteria: string[];
 	status: TeamTaskStatus;
 	result?: string;
 	logs: string[];
@@ -28,6 +30,8 @@ export function buildTeamWorkflowItems(session: TeamSessionState | null): TeamWo
 		expertName: task.expertName,
 		roleType: task.roleType,
 		description: task.description,
+		dependencies: task.dependencies,
+		acceptanceCriteria: task.acceptanceCriteria ?? [],
 		status: task.status,
 		result: task.result,
 		logs: task.logs,
@@ -45,6 +49,8 @@ export function buildTeamWorkflowItems(session: TeamSessionState | null): TeamWo
 		expertName: reviewerWorkflow?.expertName ?? 'Reviewer',
 		roleType: reviewerWorkflow?.roleType ?? 'reviewer',
 		description: 'Review specialist results and decide whether the delivery is ready.',
+		dependencies: session.tasks.map((task) => task.id),
+		acceptanceCriteria: ['Review all specialist outputs', 'Decide whether the result is ready to deliver'],
 		status: session.reviewVerdict
 			? session.reviewVerdict === 'approved'
 				? 'completed'

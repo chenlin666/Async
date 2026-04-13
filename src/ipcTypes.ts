@@ -48,7 +48,7 @@ export type ChatStreamNonce = { streamNonce?: number };
 export type TeamRoleScope = {
 	teamTaskId: string;
 	teamExpertId: string;
-	teamRoleKind: 'specialist' | 'reviewer';
+	teamRoleKind: 'specialist' | 'reviewer' | 'lead';
 	teamExpertName: string;
 	teamRoleType: 'team_lead' | 'frontend' | 'backend' | 'qa' | 'reviewer' | 'custom';
 };

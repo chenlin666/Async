@@ -849,7 +849,9 @@ export const AgentRightSidebar = memo(function AgentRightSidebar({
 				<div className="ref-agent-review-head">
 					<div className="ref-agent-review-title-stack">
 						<span className="ref-agent-review-kicker">{t('composer.mode.team')}</span>
-						<span className="ref-agent-review-title">{teamSession?.phase ?? 'planning'}</span>
+						<span className="ref-agent-review-title">
+							{t(`team.phase.${teamSession?.phase ?? 'planning'}`)}
+						</span>
 					</div>
 					<RightSidebarTabs
 						t={t}
@@ -861,27 +863,6 @@ export const AgentRightSidebar = memo(function AgentRightSidebar({
 				<div className="ref-right-panel-stage">
 					{workflowItems.length ? (
 						<div className="ref-team-right-sidebar-layout">
-							<div className="ref-team-right-sidebar-list">
-								{workflowItems.map((task) => (
-								<button
-									key={task.id}
-									type="button"
-									className={`ref-team-right-sidebar-item ${
-										teamSession?.selectedTaskId === task.id ? 'is-active' : ''
-									}`}
-									onClick={() => onSelectTeamExpert(task.id)}
-								>
-									<span className={`ref-team-expert-avatar ref-team-expert-avatar--${task.roleType} ref-team-avatar-sm`}>
-										{task.expertName.slice(0, 1).toUpperCase()}
-									</span>
-									<span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.expertName}</span>
-									<span className={`ref-team-expert-status ref-team-expert-status--${task.status}`}>
-										{task.status === 'in_progress' ? <span className="ref-team-pulse" /> : null}
-										{task.status}
-									</span>
-								</button>
-								))}
-							</div>
 							<TeamRoleWorkflowPanel
 								t={t}
 								session={teamSession}

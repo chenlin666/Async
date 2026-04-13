@@ -16380,7 +16380,7 @@ select.ref-settings-native-select:focus {
 
 .ref-team-right-sidebar-item {
 	display: flex;
-	align-items: center;
+	align-items: flex-start;
 	justify-content: space-between;
 	gap: 8px;
 	border: 1px solid var(--void-border);
@@ -16392,6 +16392,29 @@ select.ref-settings-native-select:focus {
 	transition: border-color 0.2s;
 }
 
+.ref-team-right-sidebar-item-copy {
+	flex: 1;
+	min-width: 0;
+	display: grid;
+	gap: 2px;
+}
+
+.ref-team-right-sidebar-item-name {
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 1.4;
+}
+
+.ref-team-right-sidebar-item-desc {
+	font-size: 12px;
+	line-height: 1.5;
+	color: var(--void-fg-2);
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
 .ref-team-right-sidebar-item:hover {
 	border-color: var(--void-fg-2);
 }
@@ -16401,9 +16424,7 @@ select.ref-settings-native-select:focus {
 }
 
 .ref-team-right-sidebar-layout {
-	display: grid;
-	grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-	gap: 12px;
+	display: block;
 	height: 100%;
 }
 
@@ -16467,6 +16488,18 @@ select.ref-settings-native-select:focus {
 	line-height: 1.6;
 }
 
+.ref-team-timeline-section {
+	display: grid;
+	gap: 10px;
+}
+
+.ref-team-timeline-section-label {
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--void-fg-3);
+}
+
 .ref-team-timeline-list,
 .ref-team-role-panel-switcher {
 	display: flex;
@@ -16485,10 +16518,17 @@ select.ref-settings-native-select:focus {
 
 .ref-team-timeline-item {
 	display: flex;
-	align-items: center;
+	align-items: flex-start;
 	gap: 10px;
-	padding: 10px;
+	padding: 14px;
 	text-align: left;
+	border-radius: 14px;
+	transition: border-color 0.16s ease, transform 0.16s ease, background 0.16s ease;
+}
+
+.ref-team-timeline-item:hover {
+	border-color: color-mix(in srgb, var(--void-accent) 55%, var(--void-border));
+	transform: translateY(-1px);
 }
 
 .ref-team-timeline-item.is-active,
@@ -16499,19 +16539,39 @@ select.ref-settings-native-select:focus {
 
 .ref-team-timeline-item-copy {
 	display: grid;
-	gap: 2px;
+	gap: 4px;
 	flex: 1;
 	min-width: 0;
 }
 
+.ref-team-timeline-item-meta {
+	font-size: 11px;
+	color: var(--void-fg-3);
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+}
+
 .ref-team-timeline-item-title {
 	font-weight: 600;
+	line-height: 1.35;
 }
 
 .ref-team-timeline-item-body {
 	color: var(--void-fg-2);
 	font-size: 12px;
 	line-height: 1.5;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+.ref-team-timeline-empty {
+	padding: 14px 16px;
+	border: 1px dashed var(--void-border);
+	border-radius: 14px;
+	color: var(--void-fg-2);
+	background: var(--void-bg-1);
 }
 
 .ref-team-role-panel--agent-sidebar {
@@ -16534,6 +16594,42 @@ select.ref-settings-native-select:focus {
 .ref-team-role-panel-body {
 	min-height: 0;
 	overflow: auto;
+}
+
+.ref-team-role-panel-meta {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.ref-team-transcript {
+	display: grid;
+	gap: 14px;
+}
+
+.ref-team-role-msg {
+	width: 100%;
+	max-width: 100%;
+}
+
+.ref-team-role-user-bubble,
+.ref-team-role-assistant-bubble {
+	width: min(100%, 760px);
+	max-width: min(100%, 760px);
+}
+
+.ref-team-role-caption {
+	margin-bottom: 8px;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--void-fg-3);
+}
+
+.ref-team-role-empty-state {
+	font-size: 13px;
+	line-height: 1.6;
+	color: var(--void-fg-2);
 }
 
 .ref-team-role-working {

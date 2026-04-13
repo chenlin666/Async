@@ -686,7 +686,7 @@ function AppMainWorkspaceInner() {
 		setStreaming,
 		setAwaitingReply,
 	} = useStreamingChat();
-	const { applyTeamPayload, getTeamSession, setSelectedTask, abortTeamSession } = useTeamSession();
+	const { applyTeamPayload, getTeamSession, setSelectedTask, abortTeamSession, startTeamSession } = useTeamSession();
 	const {
 		agentReviewPendingByThread,
 		setAgentReviewPendingByThread,
@@ -839,6 +839,7 @@ function AppMainWorkspaceInner() {
 		flashComposerAttachErr,
 		t,
 		clearAgentReviewForThread,
+		startTeamSession,
 		clearPlanQuestion,
 		clearMistakeLimitRequest: () => setMistakeLimitRequest(null),
 		planBuildPendingMarkerRef,

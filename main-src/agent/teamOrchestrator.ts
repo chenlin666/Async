@@ -34,7 +34,7 @@ type TeamEmit =
 			teamRoleScope: {
 				teamTaskId: string;
 				teamExpertId: string;
-				teamRoleKind: 'specialist' | 'reviewer';
+				teamRoleKind: 'specialist' | 'reviewer' | 'lead';
 				teamExpertName: string;
 				teamRoleType: TeamRoleType;
 			};
@@ -48,7 +48,7 @@ type TeamEmit =
 			teamRoleScope: {
 				teamTaskId: string;
 				teamExpertId: string;
-				teamRoleKind: 'specialist' | 'reviewer';
+				teamRoleKind: 'specialist' | 'reviewer' | 'lead';
 				teamExpertName: string;
 				teamRoleType: TeamRoleType;
 			};
@@ -60,7 +60,7 @@ type TeamEmit =
 			teamRoleScope: {
 				teamTaskId: string;
 				teamExpertId: string;
-				teamRoleKind: 'specialist' | 'reviewer';
+				teamRoleKind: 'specialist' | 'reviewer' | 'lead';
 				teamExpertName: string;
 				teamRoleType: TeamRoleType;
 			};
@@ -74,7 +74,7 @@ type TeamEmit =
 			teamRoleScope: {
 				teamTaskId: string;
 				teamExpertId: string;
-				teamRoleKind: 'specialist' | 'reviewer';
+				teamRoleKind: 'specialist' | 'reviewer' | 'lead';
 				teamExpertName: string;
 				teamRoleType: TeamRoleType;
 			};
@@ -88,7 +88,7 @@ type TeamEmit =
 			teamRoleScope: {
 				teamTaskId: string;
 				teamExpertId: string;
-				teamRoleKind: 'specialist' | 'reviewer';
+				teamRoleKind: 'specialist' | 'reviewer' | 'lead';
 				teamExpertName: string;
 				teamRoleType: TeamRoleType;
 			};
@@ -103,7 +103,7 @@ type TeamEmit =
 			teamRoleScope: {
 				teamTaskId: string;
 				teamExpertId: string;
-				teamRoleKind: 'specialist' | 'reviewer';
+				teamRoleKind: 'specialist' | 'reviewer' | 'lead';
 				teamExpertName: string;
 				teamRoleType: TeamRoleType;
 			};
@@ -116,7 +116,7 @@ type TeamEmit =
 			teamRoleScope: {
 				teamTaskId: string;
 				teamExpertId: string;
-				teamRoleKind: 'specialist' | 'reviewer';
+				teamRoleKind: 'specialist' | 'reviewer' | 'lead';
 				teamExpertName: string;
 				teamRoleType: TeamRoleType;
 			};
@@ -154,10 +154,10 @@ type TeamEmit =
 	| { threadId: string; type: 'team_review'; verdict: 'approved' | 'revision_needed'; summary: string }
 	| { threadId: string; type: 'team_plan_summary'; summary: string };
 
-function createTeamRoleScope(task: TeamTask, roleKind: 'specialist' | 'reviewer'): {
+function createTeamRoleScope(task: TeamTask, roleKind: 'specialist' | 'reviewer' | 'lead'): {
 	teamTaskId: string;
 	teamExpertId: string;
-	teamRoleKind: 'specialist' | 'reviewer';
+	teamRoleKind: 'specialist' | 'reviewer' | 'lead';
 	teamExpertName: string;
 	teamRoleType: TeamRoleType;
 } {
@@ -349,6 +349,7 @@ export function buildReviewerTaskPacket(params: {
 
 async function llmPlanTasks(params: {
 	settings: ShellSettings;
+	threadId: string;
 	teamLead: TeamExpertRuntimeProfile;
 	specialists: TeamExpertRuntimeProfile[];
 	messages: ChatMessage[];
@@ -358,11 +359,11 @@ async function llmPlanTasks(params: {
 	thinkingLevel?: TeamOrchestratorInput['thinkingLevel'];
 	workspaceRoot?: string | null;
 	workspaceLspManager?: WorkspaceLspManager | null;
-	baseTools: AgentToolDef[];
+	emit: (evt: TeamEmit) => void;
 }): Promise<{ tasks: LLMPlannedTask[]; planSummary: string }> {
 	const {
-		settings, teamLead, specialists, messages, modelSelection, resolvedModel,
-		signal, thinkingLevel, workspaceRoot, workspaceLspManager, baseTools,
+		settings, threadId, teamLead, specialists, messages, modelSelection, resolvedModel,
+		signal, thinkingLevel, workspaceRoot, workspaceLspManager, emit,
 	} = params;
 
 	const availableRoles = specialists.map((s) => `- ${s.assignmentKey}: ${s.name}`).join('\n');
@@ -385,6 +386,20 @@ async function llmPlanTasks(params: {
 	];
 
 	let planText = '';
+	const teamLeadScope = createTeamRoleScope(
+		{
+			id: 'team-lead',
+			expertId: teamLead.id,
+			expertAssignmentKey: teamLead.assignmentKey,
+			expertName: teamLead.name,
+			roleType: teamLead.roleType,
+			description: 'Plan the team workflow and assign specialist tasks.',
+			status: 'in_progress',
+			dependencies: [],
+			acceptanceCriteria: [],
+		},
+		'lead'
+	);
 	const options: AgentLoopOptions = {
 		modelSelection: teamLead.preferredModelId?.trim() || modelSelection,
 		requestModelId: resolvedModel.requestModelId,
@@ -395,7 +410,7 @@ async function llmPlanTasks(params: {
 		maxOutputTokens: resolvedModel.maxOutputTokens,
 		signal,
 		composerMode: 'agent',
-		toolPoolOverride: baseTools.filter((t) => ['Read', 'Glob', 'Grep', 'LSP'].includes(t.name)),
+		toolPoolOverride: [],
 		agentSystemAppend: teamLead.systemPrompt,
 		thinkingLevel,
 		workspaceRoot,
@@ -417,10 +432,44 @@ async function llmPlanTasks(params: {
 	}
 
 	const handlers: AgentLoopHandlers = {
-		onTextDelta: (text) => { planText += text; },
-		onToolCall: () => {},
-		onToolResult: () => {},
-		onDone: (text) => { planText = text; },
+		onTextDelta: (text) => {
+			planText += text;
+			emit({ threadId, type: 'delta', text, teamRoleScope: teamLeadScope });
+		},
+		onToolInputDelta: ({ name, partialJson, index }) => {
+			emit({ threadId, type: 'tool_input_delta', name, partialJson, index, teamRoleScope: teamLeadScope });
+		},
+		onThinkingDelta: (text) => {
+			emit({ threadId, type: 'thinking_delta', text, teamRoleScope: teamLeadScope });
+		},
+		onToolProgress: ({ name, phase, detail }) => {
+			emit({ threadId, type: 'tool_progress', name, phase, detail, teamRoleScope: teamLeadScope });
+		},
+		onToolCall: (name, args, toolCallId) => {
+			emit({
+				threadId,
+				type: 'tool_call',
+				name,
+				args: JSON.stringify(args),
+				toolCallId,
+				teamRoleScope: teamLeadScope,
+			});
+		},
+		onToolResult: (name, result, success, toolCallId) => {
+			emit({
+				threadId,
+				type: 'tool_result',
+				name,
+				result,
+				success,
+				toolCallId,
+				teamRoleScope: teamLeadScope,
+			});
+		},
+		onDone: (text, usage) => {
+			planText = text;
+			emit({ threadId, type: 'done', text, usage, teamRoleScope: teamLeadScope });
+		},
 		onError: () => {},
 	};
 
@@ -556,12 +605,40 @@ async function runReviewerAgent(params: {
 	}
 
 	const handlers: AgentLoopHandlers = {
-		onTextDelta: (text) => { reviewText += text; },
-		onToolInputDelta: () => {},
-		onThinkingDelta: () => {},
-		onToolProgress: () => {},
-		onToolCall: () => {},
-		onToolResult: () => {},
+		onTextDelta: (text) => {
+			reviewText += text;
+			emit({ threadId, type: 'delta', text, teamRoleScope });
+		},
+		onToolInputDelta: ({ name, partialJson, index }) => {
+			emit({ threadId, type: 'tool_input_delta', name, partialJson, index, teamRoleScope });
+		},
+		onThinkingDelta: (text) => {
+			emit({ threadId, type: 'thinking_delta', text, teamRoleScope });
+		},
+		onToolProgress: ({ name, phase, detail }) => {
+			emit({ threadId, type: 'tool_progress', name, phase, detail, teamRoleScope });
+		},
+		onToolCall: (name, args, toolCallId) => {
+			emit({
+				threadId,
+				type: 'tool_call',
+				name,
+				args: JSON.stringify(args),
+				toolCallId,
+				teamRoleScope,
+			});
+		},
+		onToolResult: (name, result, success, toolCallId) => {
+			emit({
+				threadId,
+				type: 'tool_result',
+				name,
+				result,
+				success,
+				toolCallId,
+				teamRoleScope,
+			});
+		},
 		onDone: (text, usage) => {
 			reviewText = text;
 			emit({ threadId, type: 'done', text, usage, teamRoleScope });
@@ -661,11 +738,20 @@ async function runOneSpecialist(params: {
 	};
 
 	const handlers: AgentLoopHandlers = {
-		onTextDelta: (text) => { finalText += text; },
-		onToolInputDelta: () => {},
-		onThinkingDelta: () => {},
-		onToolProgress: () => {},
-		onToolCall: (name) => {
+		onTextDelta: (text) => {
+			finalText += text;
+			emit({ threadId, type: 'delta', text, teamRoleScope });
+		},
+		onToolInputDelta: ({ name, partialJson, index }) => {
+			emit({ threadId, type: 'tool_input_delta', name, partialJson, index, teamRoleScope });
+		},
+		onThinkingDelta: (text) => {
+			emit({ threadId, type: 'thinking_delta', text, teamRoleScope });
+		},
+		onToolProgress: ({ name, phase, detail }) => {
+			emit({ threadId, type: 'tool_progress', name, phase, detail, teamRoleScope });
+		},
+		onToolCall: (name, args, toolCallId) => {
 			emit({
 				threadId,
 				type: 'team_expert_progress',
@@ -673,14 +759,31 @@ async function runOneSpecialist(params: {
 				expertId: task.expertId,
 				message: `Calling tool: ${name}`,
 			});
+			emit({
+				threadId,
+				type: 'tool_call',
+				name,
+				args: JSON.stringify(args),
+				toolCallId,
+				teamRoleScope,
+			});
 		},
-		onToolResult: (name, _result, toolSuccess) => {
+		onToolResult: (name, result, toolSuccess, toolCallId) => {
 			emit({
 				threadId,
 				type: 'team_expert_progress',
 				taskId: task.id,
 				expertId: task.expertId,
 				message: `Tool ${name}: ${toolSuccess ? 'success' : 'failed'}`,
+			});
+			emit({
+				threadId,
+				type: 'tool_result',
+				name,
+				result,
+				success: toolSuccess,
+				toolCallId,
+				teamRoleScope,
 			});
 		},
 		onDone: (text, usage) => {
@@ -771,9 +874,8 @@ export async function runTeamSession(input: TeamOrchestratorInput): Promise<void
 
 		try {
 			const planResult = await llmPlanTasks({
-				settings, teamLead, specialists, messages, modelSelection,
-				resolvedModel, signal, thinkingLevel, workspaceRoot, workspaceLspManager,
-				baseTools: baseTeamTools,
+				settings, threadId, teamLead, specialists, messages, modelSelection,
+				resolvedModel, signal, thinkingLevel, workspaceRoot, workspaceLspManager, emit,
 			});
 			planSummary = planResult.planSummary;
 
