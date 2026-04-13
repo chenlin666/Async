@@ -1,6 +1,6 @@
 import type { AgentToolDef } from './agentTools.js';
 import type { TeamExpertConfig, TeamRoleType, TeamPresetId } from '../settingsStore.js';
-import { buildTeamPresetExperts, getTeamPreset } from '../../src/teamPresetCatalog.js';
+import { buildTeamPresetExperts, getTeamPreset, mergeBuiltinExpertsWithSaved } from '../../src/teamPresetCatalog.js';
 
 export type TeamExpertRuntimeProfile = {
 	id: string;
@@ -32,9 +32,9 @@ export function resolveTeamExpertProfiles(
 	baseTools: AgentToolDef[]
 ): TeamExpertRuntimeProfile[] {
 	const preset = getTeamPreset(team?.presetId);
-	const builtins = team?.useDefaults === false ? [] : defaultTeamExperts(preset.id);
-	const custom = (team?.experts ?? []).filter((x) => x && x.enabled !== false);
-	const merged = [...builtins, ...custom];
+	const merged = mergeBuiltinExpertsWithSaved(team?.presetId, team?.useDefaults, team?.experts).filter(
+		(x) => x && x.enabled !== false
+	);
 	const out: TeamExpertRuntimeProfile[] = [];
 	for (const item of merged) {
 		const prompt = String(item.systemPrompt ?? '').trim();
@@ -61,18 +61,4 @@ export function resolveTeamExpertProfiles(
 		});
 	}
 	return out;
-}
-
-export function clampTeamParallel(value: number | undefined): number {
-	if (!Number.isFinite(value)) {
-		return 3;
-	}
-	const n = Math.floor(value ?? 3);
-	if (n < 1) {
-		return 1;
-	}
-	if (n > 8) {
-		return 8;
-	}
-	return n;
 }

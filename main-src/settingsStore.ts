@@ -139,8 +139,10 @@ export type TeamExpertConfig = {
 export type TeamSettings = {
 	experts?: TeamExpertConfig[];
 	useDefaults?: boolean;
+	/** @deprecated 保留仅兼容旧 settings.json */
 	maxParallelExperts?: number;
 	presetId?: TeamPresetId;
+	presetExpertSnapshots?: Partial<Record<TeamPresetId, TeamExpertConfig[]>>;
 };
 
 export type ShellSettings = {
@@ -224,7 +226,6 @@ const defaultSettings: ShellSettings = {
 	lastOpenedWorkspace: null,
 	team: {
 		useDefaults: true,
-		maxParallelExperts: 3,
 		presetId: 'engineering',
 		experts: [],
 	},

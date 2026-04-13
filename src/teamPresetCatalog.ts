@@ -1,3 +1,5 @@
+import type { TeamExpertConfig, TeamPresetId } from './agentSettingsTypes';
+
 export type TeamPresetCatalogId = 'engineering' | 'planning' | 'design';
 export type TeamPresetCatalogRoleType = 'team_lead' | 'frontend' | 'backend' | 'qa' | 'reviewer' | 'custom';
 
@@ -452,4 +454,78 @@ export function buildTeamPresetExperts(presetId?: string) {
 		allowedTools: expert.allowedTools ? [...expert.allowedTools] : undefined,
 		enabled: expert.enabled,
 	}));
+}
+
+function normAssignmentKey(k?: string): string {
+	return String(k ?? '').trim().toLowerCase();
+}
+
+/** 内置模板与当前 experts 按 id 合并，避免 useDefaults 下重复；多出的 id 视为用户新增角色 */
+export function mergeBuiltinExpertsWithSaved(
+	presetId: TeamPresetId | undefined,
+	useDefaults: boolean | undefined,
+	experts: TeamExpertConfig[] | undefined
+): TeamExpertConfig[] {
+	if (useDefaults === false) {
+		return (experts ?? []).map((e) => ({ ...e }));
+	}
+	const builtins = buildTeamPresetExperts(presetId);
+	const custom = experts ?? [];
+	const builtinIds = new Set(builtins.map((b) => b.id));
+	const mergedBuiltins = builtins.map((b) => {
+		const o = custom.find((c) => c.id === b.id);
+		if (!o) {
+			return { ...b };
+		}
+		return {
+			...b,
+			...o,
+			name: o.name?.trim() || b.name,
+			systemPrompt: o.systemPrompt?.trim() || b.systemPrompt,
+			assignmentKey: String(o.assignmentKey ?? '').trim() ? o.assignmentKey : b.assignmentKey,
+		};
+	});
+	const extras = custom.filter((c) => !builtinIds.has(c.id));
+	return [...mergedBuiltins, ...extras];
+}
+
+/** 切换模板时用：以当前目录为准，从快照按 assignmentKey / id 恢复用户配置 */
+export function mergeTeamPresetSavedRows(fresh: TeamExpertConfig[], saved: TeamExpertConfig[] | undefined): TeamExpertConfig[] {
+	if (!saved?.length) {
+		return fresh.map((x) => ({ ...x }));
+	}
+	const used = new Set<string>();
+	const result = fresh.map((f) => {
+		let m = saved.find((s) => !used.has(s.id) && normAssignmentKey(s.assignmentKey) === normAssignmentKey(f.assignmentKey));
+		if (!m) {
+			m = saved.find((s) => !used.has(s.id) && s.id === f.id);
+		}
+		if (m) {
+			used.add(m.id);
+			return {
+				...f,
+				name: m.name?.trim() || f.name,
+				roleType: m.roleType ?? f.roleType,
+				systemPrompt: m.systemPrompt?.trim() || f.systemPrompt,
+				preferredModelId: m.preferredModelId,
+				allowedTools: m.allowedTools,
+				enabled: m.enabled,
+				assignmentKey: f.assignmentKey,
+				id: f.id,
+			};
+		}
+		return { ...f };
+	});
+	for (const s of saved) {
+		if (used.has(s.id)) {
+			continue;
+		}
+		const overlaps = fresh.some(
+			(f) => normAssignmentKey(f.assignmentKey) === normAssignmentKey(s.assignmentKey) || f.id === s.id
+		);
+		if (!overlaps) {
+			result.push({ ...s });
+		}
+	}
+	return result;
 }

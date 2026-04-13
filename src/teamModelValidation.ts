@@ -1,11 +1,11 @@
 import type { TeamExpertConfig, TeamSettings } from './agentSettingsTypes';
 import type { UserModelEntry } from './modelCatalog';
-import { buildTeamPresetExperts } from './teamPresetCatalog';
+import { mergeBuiltinExpertsWithSaved } from './teamPresetCatalog';
 
 function activeTeamExperts(teamSettings: TeamSettings | undefined): TeamExpertConfig[] {
-	const builtins = teamSettings?.useDefaults === false ? [] : buildTeamPresetExperts(teamSettings?.presetId);
-	const custom = (teamSettings?.experts ?? []).filter((role) => role.enabled !== false);
-	return [...builtins, ...custom].filter((role) => role.enabled !== false && role.systemPrompt.trim().length > 0);
+	return mergeBuiltinExpertsWithSaved(teamSettings?.presetId, teamSettings?.useDefaults, teamSettings?.experts).filter(
+		(role) => role.enabled !== false && role.systemPrompt.trim().length > 0
+	);
 }
 
 export function findTeamRolesMissingModels(

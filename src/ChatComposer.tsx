@@ -145,7 +145,7 @@ export function ChatComposer({
 				? modelPillBottomRef
 				: modelPillInlineRef;
 	const isBottomSlot = slot === 'bottom';
-	const showModelPicker = true;
+	const showModelPicker = composerMode !== 'team';
 	const inputPlaceholder =
 		isBottomSlot && hasConversation ? followUpComposerPlaceholder : composerPlaceholder;
 

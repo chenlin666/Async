@@ -973,6 +973,7 @@ export function SettingsPage({
 									value={teamSettings}
 									onChange={onChangeTeamSettings}
 									modelEntries={modelEntries}
+									modelProviders={modelProviders}
 								/>
 							</Suspense>
 						) : null}

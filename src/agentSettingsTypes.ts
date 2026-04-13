@@ -86,8 +86,11 @@ export type TeamExpertConfig = {
 export type TeamSettings = {
 	experts?: TeamExpertConfig[];
 	useDefaults?: boolean;
+	/** @deprecated 并行度由 Team Lead 的任务依赖与就绪队列决定，保留仅兼容旧配置 */
 	maxParallelExperts?: number;
 	presetId?: TeamPresetId;
+	/** 切换团队模板时按 preset 缓存角色列表（含模型等），切回时可恢复 */
+	presetExpertSnapshots?: Partial<Record<TeamPresetId, TeamExpertConfig[]>>;
 };
 
 /** Bash 执行权限三档（与 Composer 下拉、设置页一致） */

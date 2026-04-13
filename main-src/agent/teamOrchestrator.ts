@@ -5,11 +5,7 @@ import type { WorkspaceLspManager } from '../lsp/workspaceLspManager.js';
 import { runAgentLoop, type AgentLoopHandlers, type AgentLoopOptions } from './agentLoop.js';
 import { assembleAgentToolPool } from './agentToolPool.js';
 import type { AgentToolDef } from './agentTools.js';
-import {
-	clampTeamParallel,
-	resolveTeamExpertProfiles,
-	type TeamExpertRuntimeProfile,
-} from './teamExpertProfiles.js';
+import { resolveTeamExpertProfiles, type TeamExpertRuntimeProfile } from './teamExpertProfiles.js';
 import { resolveModelRequest, type ResolvedModelRequest } from '../llm/modelResolve.js';
 
 type TeamPhase = 'planning' | 'executing' | 'reviewing' | 'delivering' | 'waiting_user';
@@ -856,7 +852,6 @@ export async function runTeamSession(input: TeamOrchestratorInput): Promise<void
 
 		checkAbort();
 		emit({ threadId, type: 'team_phase', phase: 'executing' });
-		const maxParallel = clampTeamParallel(settings.team?.maxParallelExperts);
 		const pending = [...plannedTasks];
 		const completed: TeamTask[] = [];
 		const completedIds = new Set<string>();
@@ -874,7 +869,7 @@ export async function runTeamSession(input: TeamOrchestratorInput): Promise<void
 				break;
 			}
 
-			const batch = ready.slice(0, maxParallel);
+			const batch = ready;
 			for (const bt of batch) {
 				const idx = pending.indexOf(bt);
 				if (idx !== -1) pending.splice(idx, 1);
