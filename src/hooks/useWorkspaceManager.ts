@@ -37,8 +37,8 @@ export type WorkspaceFileSearchItem = {
  *
  * ### 文件列表架构（v3 - 完全按需）
  * - `@` 提及：`workspace:searchFiles`（主进程 top-K 搜索，首次触发时用 git ls-files 建索引，~50ms）。
- * - 历史消息里的 `@路径` 解析、快速打开、内联重发等：在需要时调用 `ensureWorkspaceFileListLoaded()`，
- *   通过 `workspace:listFiles` 拉取一次全量到 `workspaceFileListRef`，并递增 `workspaceFileListVersion` 触发依赖方重渲染。
+ * - 快速打开等仍可在需要时调用 `ensureWorkspaceFileListLoaded()`，通过 `workspace:listFiles` 拉全量到 `workspaceFileListRef`；
+ *   历史消息里的 `@路径` 气泡展示由渲染端启发式解析，不再依赖该列表。
  * - 不再在工作区打开时预热文件索引，完全按需触发，消除启动时的主进程阻塞。
  */
 export function useWorkspaceManager(shell: Shell | undefined) {
@@ -174,7 +174,7 @@ export function useWorkspaceManager(shell: Shell | undefined) {
 		workspace,
 		setWorkspace,
 		workspaceFileListRef: workspaceFileListRef as MutableRefObject<string[]>,
-		/** 在 `workspaceFileListRef` 更新后递增，供父组件把快照传给 memo 子树 */
+		/** 在 `workspaceFileListRef` 更新后递增，供依赖全量列表的 UI（如快速打开）重读 ref */
 		workspaceFileListVersion,
 		/** 首次需要全量路径时调用（幂等、并发合并） */
 		ensureWorkspaceFileListLoaded,

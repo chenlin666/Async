@@ -16328,6 +16328,8 @@ select.ref-settings-native-select:focus {
 	border-radius: 999px;
 	background: var(--void-accent);
 	animation: team-pulse-ring 1.5s ease-in-out infinite;
+	will-change: opacity, transform;
+	contain: strict;
 }
 
 /* Detail panel */
@@ -16532,6 +16534,30 @@ select.ref-settings-native-select:focus {
 .ref-team-role-panel-body {
 	min-height: 0;
 	overflow: auto;
+}
+
+.ref-team-role-working {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 16px;
+	color: var(--void-fg-2);
+}
+.ref-team-role-working-label {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-weight: 500;
+	color: var(--void-accent);
+}
+.ref-team-role-working-log {
+	margin: 0;
+	font-size: 12px;
+	color: var(--void-fg-3);
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: 80px;
+	overflow: hidden;
 }
 
 .ref-team-timeline-input-needed {

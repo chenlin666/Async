@@ -78,7 +78,6 @@ export type AgentChatPanelProps = {
 	liveAssistantBlocks: LiveAgentBlocksState;
 	workspace: string | null;
 	workspaceBasename: string;
-	workspaceFileList: string[];
 	revertedFiles: ReadonlySet<string>;
 	revertedChangeKeys: ReadonlySet<string>;
 	resendFromUserIndex: number | null;
@@ -219,7 +218,6 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 	liveAssistantBlocks,
 	workspace,
 	workspaceBasename,
-	workspaceFileList,
 	revertedFiles,
 	revertedChangeKeys,
 	resendFromUserIndex,
@@ -286,6 +284,15 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 		content: string;
 		result: ReturnType<typeof segmentAssistantContentUnified>;
 	} | null>(null);
+	const userSegsCacheRef = useRef<Map<string, ComposerSegment[]>>(new Map());
+	const cachedUserMessageToSegments = (content: string): ComposerSegment[] => {
+		const cache = userSegsCacheRef.current;
+		const cached = cache.get(content);
+		if (cached) return cached;
+		const result = userMessageToSegments(content);
+		cache.set(content, result);
+		return result;
+	};
 	const agentFileChanges = useMemo(
 		() =>
 			computeMergedAgentFileChanges(
@@ -572,7 +579,7 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 			}
 
 			if (m.role === 'user') {
-				const userSegs = userMessageToSegments(m.content, workspaceFileList);
+				const userSegs = cachedUserMessageToSegments(m.content);
 
 				// Look ahead: does the next assistant message contain TodoWrite?
 				const nextMsg = displayMessages[i + 1];
@@ -729,7 +736,7 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 			const elapsed = performance.now() - t0;
 			if (elapsed > 12) {
 				console.log(
-					`[perf] renderChatMessageList: ${elapsed.toFixed(1)}ms, slice=${nodes.length}/${displayMessages.length}, workspaceFiles=${workspaceFileList.length}, awaiting=${awaitingReply}`
+					`[perf] renderChatMessageList: ${elapsed.toFixed(1)}ms, slice=${nodes.length}/${displayMessages.length}, awaiting=${awaitingReply}`
 				);
 			}
 		}

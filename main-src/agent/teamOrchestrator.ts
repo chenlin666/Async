@@ -7,6 +7,7 @@ import { assembleAgentToolPool } from './agentToolPool.js';
 import type { AgentToolDef } from './agentTools.js';
 import { resolveTeamExpertProfiles, type TeamExpertRuntimeProfile } from './teamExpertProfiles.js';
 import { resolveModelRequest, type ResolvedModelRequest } from '../llm/modelResolve.js';
+import { getTeamPreset } from '../../src/teamPresetCatalog.js';
 
 type TeamPhase = 'planning' | 'executing' | 'reviewing' | 'delivering';
 type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'revision';
@@ -555,54 +556,12 @@ async function runReviewerAgent(params: {
 	}
 
 	const handlers: AgentLoopHandlers = {
-		onTextDelta: (text) => {
-			reviewText += text;
-			emit({ threadId, type: 'delta', text, teamRoleScope });
-		},
-		onToolInputDelta: (payload) => {
-			emit({
-				threadId,
-				type: 'tool_input_delta',
-				name: payload.name,
-				partialJson: payload.partialJson,
-				index: payload.index,
-				teamRoleScope,
-			});
-		},
-		onThinkingDelta: (text) => {
-			emit({ threadId, type: 'thinking_delta', text, teamRoleScope });
-		},
-		onToolProgress: (payload) => {
-			emit({
-				threadId,
-				type: 'tool_progress',
-				name: payload.name,
-				phase: payload.phase,
-				detail: payload.detail,
-				teamRoleScope,
-			});
-		},
-		onToolCall: (name, args, toolCallId) => {
-			emit({
-				threadId,
-				type: 'tool_call',
-				name,
-				args: JSON.stringify(args),
-				toolCallId,
-				teamRoleScope,
-			});
-		},
-		onToolResult: (name, result, success, toolCallId) => {
-			emit({
-				threadId,
-				type: 'tool_result',
-				name,
-				result,
-				success,
-				toolCallId,
-				teamRoleScope,
-			});
-		},
+		onTextDelta: (text) => { reviewText += text; },
+		onToolInputDelta: () => {},
+		onThinkingDelta: () => {},
+		onToolProgress: () => {},
+		onToolCall: () => {},
+		onToolResult: () => {},
 		onDone: (text, usage) => {
 			reviewText = text;
 			emit({ threadId, type: 'done', text, usage, teamRoleScope });
@@ -702,52 +661,11 @@ async function runOneSpecialist(params: {
 	};
 
 	const handlers: AgentLoopHandlers = {
-		onTextDelta: (text) => {
-			finalText += text;
-			emit({
-				threadId,
-				type: 'delta',
-				text,
-				teamRoleScope,
-			});
-		},
-		onToolInputDelta: (payload) => {
-			emit({
-				threadId,
-				type: 'tool_input_delta',
-				name: payload.name,
-				partialJson: payload.partialJson,
-				index: payload.index,
-				teamRoleScope,
-			});
-		},
-		onThinkingDelta: (text) => {
-			emit({
-				threadId,
-				type: 'thinking_delta',
-				text,
-				teamRoleScope,
-			});
-		},
-		onToolProgress: (payload) => {
-			emit({
-				threadId,
-				type: 'tool_progress',
-				name: payload.name,
-				phase: payload.phase,
-				detail: payload.detail,
-				teamRoleScope,
-			});
-		},
-		onToolCall: (name, _args, _id) => {
-			emit({
-				threadId,
-				type: 'tool_call',
-				name,
-				args: JSON.stringify(_args),
-				toolCallId: _id,
-				teamRoleScope,
-			});
+		onTextDelta: (text) => { finalText += text; },
+		onToolInputDelta: () => {},
+		onThinkingDelta: () => {},
+		onToolProgress: () => {},
+		onToolCall: (name) => {
 			emit({
 				threadId,
 				type: 'team_expert_progress',
@@ -756,16 +674,7 @@ async function runOneSpecialist(params: {
 				message: `Calling tool: ${name}`,
 			});
 		},
-		onToolResult: (name, _result, toolSuccess, _id) => {
-			emit({
-				threadId,
-				type: 'tool_result',
-				name,
-				result: _result,
-				success: toolSuccess,
-				toolCallId: _id,
-				teamRoleScope,
-			});
+		onToolResult: (name, _result, toolSuccess) => {
 			emit({
 				threadId,
 				type: 'team_expert_progress',
@@ -776,23 +685,12 @@ async function runOneSpecialist(params: {
 		},
 		onDone: (text, usage) => {
 			finalText = text;
-			emit({
-				threadId,
-				type: 'done',
-				text,
-				usage,
-				teamRoleScope,
-			});
+			emit({ threadId, type: 'done', text, usage, teamRoleScope });
 		},
 		onError: (message) => {
 			success = false;
 			finalText = message;
-			emit({
-				threadId,
-				type: 'error',
-				message,
-				teamRoleScope,
-			});
+			emit({ threadId, type: 'error', message, teamRoleScope });
 		},
 	};
 
@@ -845,6 +743,12 @@ export async function runTeamSession(input: TeamOrchestratorInput): Promise<void
 		const teamLead = experts.find((e) => e.assignmentKey === 'team_lead') ?? experts.find((e) => e.roleType === 'team_lead');
 		const reviewerExpert = experts.find((e) => e.assignmentKey === 'reviewer') ?? experts.find((e) => e.roleType === 'reviewer');
 		const specialists = experts.filter((e) => e.id !== teamLead?.id && e.id !== reviewerExpert?.id);
+		const presetMaxParallel = getTeamPreset(settings.team?.presetId).maxParallelExperts;
+		const rawConfiguredMaxParallel = Number(settings.team?.maxParallelExperts);
+		const maxParallelExperts =
+			Number.isFinite(rawConfiguredMaxParallel) && rawConfiguredMaxParallel > 0
+				? Math.max(1, Math.floor(rawConfiguredMaxParallel))
+				: Math.max(1, Math.floor(presetMaxParallel || 2));
 
 		if (!teamLead || specialists.length === 0) {
 			onError('Team mode requires at least one Team Lead and one enabled specialist.');
@@ -950,31 +854,46 @@ export async function runTeamSession(input: TeamOrchestratorInput): Promise<void
 				break;
 			}
 
-			const batch = ready;
+			const batch = ready.slice(0, maxParallelExperts);
 			for (const bt of batch) {
 				const idx = pending.indexOf(bt);
 				if (idx !== -1) pending.splice(idx, 1);
 			}
 
-			const results = await Promise.all(
-				batch.map(async (task) => {
-					checkAbort(); // 确保每个子任务开始前检查中止信号
-					const expert = specialists.find((s) => s.id === task.expertId) ?? specialists[0]!;
-					emit({ threadId, type: 'team_expert_started', taskId: task.id, expertId: task.expertId });
-					const result = await runOneSpecialist({
-						settings, task, expert, userRequest: effectiveUserText, planSummary, completedTasksById,
-						modelSelection, resolvedModel,
-						signal, thinkingLevel, workspaceRoot, workspaceLspManager,
-						baseTools: baseTeamTools, threadId, emit,
-					});
-					emit({
-						threadId, type: 'team_expert_done',
-						taskId: task.id, expertId: task.expertId,
-						success: result.success, result: result.text,
-					});
-					return { task, result };
-				})
-			);
+			// 用 Promise.race 确保 abort 信号能立即中断 Promise.all，
+			// 避免 agent loop 因 AbortSignal 事件监听器竞态而不停止
+			const abortPromise = new Promise<never>((_, reject) => {
+				if (signal.aborted) {
+					reject(new Error('Team session aborted by user.'));
+					return;
+				}
+				signal.addEventListener('abort', () => {
+					reject(new Error('Team session aborted by user.'));
+				}, { once: true });
+			});
+
+			const results = await Promise.race([
+				Promise.all(
+					batch.map(async (task) => {
+						if (signal.aborted) throw new Error('Team session aborted by user.');
+						const expert = specialists.find((s) => s.id === task.expertId) ?? specialists[0]!;
+						emit({ threadId, type: 'team_expert_started', taskId: task.id, expertId: task.expertId });
+						const result = await runOneSpecialist({
+							settings, task, expert, userRequest: effectiveUserText, planSummary, completedTasksById,
+							modelSelection, resolvedModel,
+							signal, thinkingLevel, workspaceRoot, workspaceLspManager,
+							baseTools: baseTeamTools, threadId, emit,
+						});
+						emit({
+							threadId, type: 'team_expert_done',
+							taskId: task.id, expertId: task.expertId,
+							success: result.success, result: result.text,
+						});
+						return { task, result };
+					})
+				),
+				abortPromise,
+			]);
 
 			for (const item of results) {
 				const finishedTask = {

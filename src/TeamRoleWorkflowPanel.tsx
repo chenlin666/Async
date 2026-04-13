@@ -35,10 +35,11 @@ export const TeamRoleWorkflowPanel = memo(function TeamRoleWorkflowPanel({ t, se
 		);
 	}
 	const workflow = item.workflow;
-	const content =
-		workflow?.streaming && workflow.awaitingReply
-			? workflow.streaming
-			: workflow?.messages[workflow.messages.length - 1]?.content || item.result || item.logs.join('\n') || item.description;
+	const isWorking = workflow?.awaitingReply ?? (item.status === 'in_progress');
+	const lastMessage = workflow?.messages[workflow.messages.length - 1]?.content;
+	const content = lastMessage || item.result || item.description;
+
+	const latestLog = item.logs.length > 0 ? item.logs[item.logs.length - 1] : null;
 
 	return (
 		<section className={`ref-team-role-panel ref-team-role-panel--${layout}`}>
@@ -75,25 +76,23 @@ export const TeamRoleWorkflowPanel = memo(function TeamRoleWorkflowPanel({ t, se
 				</div>
 			</div>
 			<div className="ref-team-role-panel-body">
-				<ChatMarkdown
-					content={content}
-					agentUi
-					workspaceRoot={null}
-					showAgentWorking={workflow?.awaitingReply ?? false}
-					liveAgentBlocksState={workflow?.liveBlocks ?? null}
-					liveThoughtMeta={
-						workflow
-							? {
-									phase: workflow.awaitingReply ? (workflow.streaming ? 'streaming' : 'thinking') : 'done',
-									elapsedSeconds: 0,
-									streamingThinking: workflow.streamingThinking,
-									tokenUsage: workflow.lastTurnUsage,
-							  }
-							: null
-					}
-				/>
+				{isWorking ? (
+					<div className="ref-team-role-working">
+						<span className="ref-team-pulse" />
+						<span className="ref-team-role-working-label">{item.expertName} {t('team.phase.executing')}…</span>
+						{latestLog ? (
+							<p className="ref-team-role-working-log">{latestLog}</p>
+						) : null}
+					</div>
+				) : (
+					<ChatMarkdown
+						content={content}
+						agentUi
+						workspaceRoot={null}
+						showAgentWorking={false}
+					/>
+				)}
 			</div>
 		</section>
 	);
 });
-

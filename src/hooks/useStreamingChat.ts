@@ -45,7 +45,6 @@ type StreamingSendRuntime = {
 	composerMode: ComposerMode;
 	teamSettings?: TeamSettings;
 	modelEntries: UserModelEntry[];
-	ensureWorkspaceFileListLoaded: () => Promise<string[]>;
 	resendFromUserIndex: number | null;
 	setResendFromUserIndex: Dispatch<SetStateAction<number | null>>;
 	setInlineResendSegments: Dispatch<SetStateAction<ComposerSegment[]>>;
@@ -335,9 +334,10 @@ export function useStreamingChatControls(runtime: StreamingSendRuntime) {
 					rt.resetStreamingSession({ clearThread: false });
 					rt.streamStartedAtRef.current = null;
 					rt.setResendFromUserIndex(resendIdx);
-					const paths = await rt.ensureWorkspaceFileListLoaded();
-					rt.setInlineResendSegments(userMessageToSegments(text, paths));
-					rt.flashComposerAttachErr(rt.t('app.chatSendFailed'));
+					rt.setInlineResendSegments(userMessageToSegments(text));
+					if (result?.error !== 'aborted') {
+						rt.flashComposerAttachErr(rt.t('app.chatSendFailed'));
+					}
 					void rt.loadMessages(targetThreadId);
 				} else {
 					void rt.refreshThreads();
@@ -347,9 +347,11 @@ export function useStreamingChatControls(runtime: StreamingSendRuntime) {
 				rt.resetStreamingSession({ clearThread: false });
 				rt.streamStartedAtRef.current = null;
 				rt.setResendFromUserIndex(resendIdx);
-				const paths = await rt.ensureWorkspaceFileListLoaded();
-				rt.setInlineResendSegments(userMessageToSegments(text, paths));
-				rt.flashComposerAttachErr(e instanceof Error ? e.message : String(e));
+				rt.setInlineResendSegments(userMessageToSegments(text));
+				const msg = e instanceof Error ? e.message : String(e);
+				if (!/abort/i.test(msg)) {
+					rt.flashComposerAttachErr(msg);
+				}
 				void rt.loadMessages(targetThreadId);
 			}
 			return;
@@ -371,6 +373,10 @@ export function useStreamingChatControls(runtime: StreamingSendRuntime) {
 				rt.streamStartedAtRef.current = null;
 				rt.clearStreamingToolPreviewNow();
 				rt.resetLiveAgentBlocks();
+				if (sendResult?.error === 'aborted') {
+					void rt.loadMessages(targetThreadId);
+					return;
+				}
 				if (sendResult?.error === 'no-model') {
 					rt.flashComposerAttachErr(rt.t('app.noModelSelected'));
 				} else {
@@ -392,7 +398,10 @@ export function useStreamingChatControls(runtime: StreamingSendRuntime) {
 			rt.streamStartedAtRef.current = null;
 			rt.clearStreamingToolPreviewNow();
 			rt.resetLiveAgentBlocks();
-			rt.flashComposerAttachErr(e instanceof Error ? e.message : String(e));
+			const msg = e instanceof Error ? e.message : String(e);
+			if (!/abort/i.test(msg)) {
+				rt.flashComposerAttachErr(msg);
+			}
 			void rt.loadMessages(targetThreadId);
 		}
 	}, []);

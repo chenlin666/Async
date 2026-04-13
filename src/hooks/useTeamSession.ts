@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { applyLiveAgentChatPayload, createEmptyLiveAgentBlocks, type LiveAgentBlocksState } from '../liveAgentBlocks';
 import type { ChatMessage } from '../threadTypes';
 import type { ChatStreamPayload, TeamRoleScope, TurnTokenUsage } from '../ipcTypes';
 
@@ -27,9 +26,10 @@ export type TeamRoleWorkflowState = {
 	expertName: string;
 	roleType: TeamRoleType;
 	roleKind: 'specialist' | 'reviewer';
+	/** @deprecated 后端不再发送 delta 到渲染器，保留字段兼容类型引用 */
 	streaming: string;
+	/** @deprecated */
 	streamingThinking: string;
-	liveBlocks: LiveAgentBlocksState;
 	messages: ChatMessage[];
 	lastTurnUsage: TurnTokenUsage | null;
 	awaitingReply: boolean;
@@ -63,6 +63,7 @@ function emptySession(): TeamSessionState {
 }
 
 const MAX_TASK_LOGS = 50;
+const FLUSH_INTERVAL_MS = 1000;
 
 function ensureRoleWorkflow(
 	roleWorkflowByTaskId: Record<string, TeamRoleWorkflowState>,
@@ -84,7 +85,6 @@ function ensureRoleWorkflow(
 		roleKind: scope.teamRoleKind,
 		streaming: '',
 		streamingThinking: '',
-		liveBlocks: createEmptyLiveAgentBlocks(),
 		messages: [],
 		lastTurnUsage: null,
 		awaitingReply: true,
@@ -96,8 +96,10 @@ function ensureRoleWorkflow(
 
 /**
  * 直接 mutate roleWorkflow（在 ref 中），返回是否需要立即刷新 UI。
- * delta/thinking_delta/tool_input_delta/tool_progress 不需要立即刷新；
- * done/error/tool_call/tool_result 需要立即刷新。
+ *
+ * 参考 Claude Code coordinator 模式：specialist 的 token 流不推入 React state，
+ * 只在 done/error 时携带完整文本一次性更新。前端仅通过 task 级别的状态事件
+ * （expert_started/expert_done）来驱动 UI，避免高频渲染。
  */
 function mutateRoleWorkflowPayload(
 	session: TeamSessionState,
@@ -112,102 +114,33 @@ function mutateRoleWorkflowPayload(
 		session.reviewerTaskId = scope.teamTaskId;
 	}
 
-	switch (payload.type) {
-		case 'delta':
-			wf.streaming += payload.text;
-			wf.liveBlocks = applyLiveAgentChatPayload(wf.liveBlocks, { type: 'delta', text: payload.text });
-			wf.awaitingReply = true;
-			wf.lastUpdatedAt = Date.now();
-			return false; // 高频事件，不立即刷新
-
-		case 'thinking_delta':
-			wf.streamingThinking += payload.text;
-			wf.liveBlocks = applyLiveAgentChatPayload(wf.liveBlocks, { type: 'thinking_delta', text: payload.text });
-			wf.awaitingReply = true;
-			wf.lastUpdatedAt = Date.now();
-			return false;
-
-		case 'tool_input_delta':
-			wf.liveBlocks = applyLiveAgentChatPayload(wf.liveBlocks, {
-				type: 'tool_input_delta',
-				name: payload.name,
-				partialJson: payload.partialJson,
-				index: payload.index,
-			});
-			wf.awaitingReply = true;
-			wf.lastUpdatedAt = Date.now();
-			return false;
-
-		case 'tool_call':
-			wf.streaming += `\n<tool_call tool="${payload.name}">${payload.args}</tool_call>\n`;
-			wf.liveBlocks = applyLiveAgentChatPayload(wf.liveBlocks, {
-				type: 'tool_call',
-				name: payload.name,
-				args: payload.args,
-				toolCallId: payload.toolCallId,
-			});
-			wf.awaitingReply = true;
-			wf.lastUpdatedAt = Date.now();
-			return true;
-
-		case 'tool_result': {
-			const safe = payload.result.split('</tool_result>').join('</tool\u200c_result>');
-			wf.streaming += `<tool_result tool="${payload.name}" success="${payload.success}">${safe}</tool_result>\n`;
-			wf.liveBlocks = applyLiveAgentChatPayload(wf.liveBlocks, {
-				type: 'tool_result',
-				name: payload.name,
-				result: payload.result,
-				success: payload.success,
-				toolCallId: payload.toolCallId,
-			});
-			wf.awaitingReply = true;
-			wf.lastUpdatedAt = Date.now();
-			return true;
+	if (payload.type === 'done') {
+		const msg: ChatMessage = { role: 'assistant', content: payload.text };
+		const lastMsg = wf.messages[wf.messages.length - 1];
+		if (!(lastMsg?.role === msg.role && lastMsg?.content === msg.content)) {
+			wf.messages = [...wf.messages, msg];
 		}
-
-		case 'tool_progress':
-			wf.liveBlocks = applyLiveAgentChatPayload(wf.liveBlocks, {
-				type: 'tool_progress',
-				name: payload.name,
-				phase: payload.phase,
-				detail: payload.detail,
-			});
-			wf.awaitingReply = true;
-			wf.lastUpdatedAt = Date.now();
-			return false;
-
-		case 'done': {
-			const msg: ChatMessage = { role: 'assistant', content: payload.text };
-			const lastMsg = wf.messages[wf.messages.length - 1];
-			if (!(lastMsg?.role === msg.role && lastMsg?.content === msg.content)) {
-				wf.messages = [...wf.messages, msg];
-			}
-			wf.streaming = '';
-			wf.streamingThinking = '';
-			wf.liveBlocks = createEmptyLiveAgentBlocks();
-			wf.lastTurnUsage = payload.usage ?? wf.lastTurnUsage;
-			wf.awaitingReply = false;
-			wf.lastUpdatedAt = Date.now();
-			return true;
-		}
-
-		case 'error': {
-			const errMsg: ChatMessage = { role: 'assistant', content: `Error: ${payload.message}` };
-			const lastErrMsg = wf.messages[wf.messages.length - 1];
-			if (!(lastErrMsg?.role === errMsg.role && lastErrMsg?.content === errMsg.content)) {
-				wf.messages = [...wf.messages, errMsg];
-			}
-			wf.streaming = '';
-			wf.streamingThinking = '';
-			wf.liveBlocks = createEmptyLiveAgentBlocks();
-			wf.awaitingReply = false;
-			wf.lastUpdatedAt = Date.now();
-			return true;
-		}
-
-		default:
-			return false;
+		wf.streaming = '';
+		wf.streamingThinking = '';
+		wf.lastTurnUsage = payload.usage ?? wf.lastTurnUsage;
+		wf.awaitingReply = false;
+		return true;
 	}
+
+	if (payload.type === 'error') {
+		const errMsg: ChatMessage = { role: 'assistant', content: `Error: ${payload.message}` };
+		const lastErrMsg = wf.messages[wf.messages.length - 1];
+		if (!(lastErrMsg?.role === errMsg.role && lastErrMsg?.content === errMsg.content)) {
+			wf.messages = [...wf.messages, errMsg];
+		}
+		wf.streaming = '';
+		wf.streamingThinking = '';
+		wf.awaitingReply = false;
+		return true;
+	}
+
+	// 其余事件（delta / thinking_delta / tool_* 等）后端已不再发送给渲染器
+	return false;
 }
 
 function upsertTask(tasks: TeamTask[], next: TeamTask): TeamTask[] {
@@ -222,30 +155,30 @@ function upsertTask(tasks: TeamTask[], next: TeamTask): TeamTask[] {
 
 function clampLogs(logs: string[], entry: string): string[] {
 	if (!entry) return logs;
-	const next = [...logs, entry];
-	return next.length > MAX_TASK_LOGS ? next.slice(-MAX_TASK_LOGS) : next;
+	if (logs.length >= MAX_TASK_LOGS) {
+		const next = logs.slice(-(MAX_TASK_LOGS - 1));
+		next.push(entry);
+		return next;
+	}
+	return [...logs, entry];
 }
 
-/** 深拷贝 session 快照到 React state（冻结当前 ref 状态） */
+/** 浅拷贝 session 快照到 React state（不含 liveBlocks，非常轻量） */
 function snapshotSession(session: TeamSessionState): TeamSessionState {
 	const rwCopy: Record<string, TeamRoleWorkflowState> = {};
 	for (const [k, v] of Object.entries(session.roleWorkflowByTaskId)) {
-		rwCopy[k] = { ...v, liveBlocks: { blocks: [...v.liveBlocks.blocks] } };
+		rwCopy[k] = { ...v };
 	}
 	return {
 		...session,
-		tasks: session.tasks.map((t) => ({ ...t, logs: [...t.logs] })),
+		tasks: session.tasks.map((t) => ({ ...t })),
 		roleWorkflowByTaskId: rwCopy,
-		updatedAt: Date.now(),
 	};
 }
-
-const FLUSH_INTERVAL_MS = 200;
 
 export function useTeamSession() {
 	const [sessionsByThread, setSessionsByThread] = useState<Record<string, TeamSessionState>>({});
 
-	// mutable ref 持有实时状态；React state 只做定时快照用于渲染
 	const sessionsRef = useRef<Record<string, TeamSessionState>>({});
 	const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const dirtyThreadsRef = useRef<Set<string>>(new Set());
@@ -283,7 +216,6 @@ export function useTeamSession() {
 		}
 	}, [flushDirty]);
 
-	// 组件卸载时清理定时器
 	useEffect(() => {
 		return () => {
 			if (flushTimerRef.current) {
@@ -348,7 +280,7 @@ export function useTeamSession() {
 				if (t && detail) {
 					t.logs = clampLogs(t.logs, detail);
 				}
-				needFlush = false; // progress 高频，走定时器
+				needFlush = false;
 				break;
 			}
 			case 'team_expert_done': {
@@ -389,7 +321,6 @@ export function useTeamSession() {
 		});
 	}, []);
 
-	/** abort 时标记所有运行中的 task/workflow 为已停止，避免 CSS 动画和渲染循环 */
 	const abortTeamSession = useCallback((threadId: string) => {
 		const session = sessionsRef.current[threadId];
 		if (!session) return;
@@ -404,6 +335,8 @@ export function useTeamSession() {
 		for (const wf of Object.values(session.roleWorkflowByTaskId)) {
 			if (wf.awaitingReply) {
 				wf.awaitingReply = false;
+				wf.streaming = '';
+				wf.streamingThinking = '';
 				changed = true;
 			}
 		}

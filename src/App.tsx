@@ -521,7 +521,6 @@ function AppMainWorkspaceInner() {
 		workspace,
 		setWorkspace,
 		workspaceFileListRef,
-		workspaceFileListVersion,
 		ensureWorkspaceFileListLoaded,
 		searchFiles,
 		homeRecents,
@@ -824,7 +823,6 @@ function AppMainWorkspaceInner() {
 		composerMode,
 		teamSettings,
 		modelEntries,
-		ensureWorkspaceFileListLoaded,
 		resendFromUserIndex,
 		setResendFromUserIndex,
 		setInlineResendSegments,
@@ -4359,20 +4357,6 @@ function AppMainWorkspaceInner() {
 	const displayMessagesRef = useRef(displayMessages);
 	displayMessagesRef.current = displayMessages;
 
-	/** 聊天区出现带 @ 的用户消息时再拉全量路径，供历史气泡解析文件芯片 */
-	useEffect(() => {
-		if (!workspace || !shell) {
-			return;
-		}
-		const needsPaths = displayMessages.some(
-			(m) => m.role === 'user' && /[@\uFF03]/.test(m.content)
-		);
-		if (!needsPaths) {
-			return;
-		}
-		void ensureWorkspaceFileListLoaded();
-	}, [workspace, shell, displayMessages, ensureWorkspaceFileListLoaded]);
-
 	/**
 	 * 从 localStorage 恢复「已保留/已撤销全部」或逐文件忽略，绑定当前线程最后一条助手正文。
 	 * 降级为 useEffect（不涉及 DOM 测量）：主路径已由 onMessagesLoaded 在 startTransition
@@ -5078,18 +5062,15 @@ function AppMainWorkspaceInner() {
 		]
 	);
 
-	/** 内联编辑历史用户消息：按需拉全量路径后再解析 @ 引用 */
+	/** 内联编辑历史用户消息：启发式解析 @ 引用（不拉全量路径列表） */
 	const onStartInlineResend = useCallback(
 		(userMessageIndex: number, content: string) => {
 			setPlanQuestion(null);
 			setPlanQuestionRequestId(null);
 			setResendFromUserIndex(userMessageIndex);
-			void (async () => {
-				const paths = await ensureWorkspaceFileListLoaded();
-				setInlineResendSegments(userMessageToSegments(content, paths));
-			})();
+			setInlineResendSegments(userMessageToSegments(content));
 		},
-		[ensureWorkspaceFileListLoaded, setPlanQuestion, setPlanQuestionRequestId]
+		[setPlanQuestion, setPlanQuestionRequestId]
 	);
 
 	const plusMenuAnchorRefForDropdown =
@@ -5377,8 +5358,6 @@ function AppMainWorkspaceInner() {
 		liveAssistantBlocks,
 		workspace,
 		workspaceBasename,
-		workspaceFileListRef,
-		workspaceFileListVersion,
 		revertedFiles,
 		revertedChangeKeys,
 		resendFromUserIndex,
