@@ -686,7 +686,7 @@ function AppMainWorkspaceInner() {
 		setStreaming,
 		setAwaitingReply,
 	} = useStreamingChat();
-	const { applyTeamPayload, getTeamSession, setSelectedTask, abortTeamSession, startTeamSession } = useTeamSession();
+	const { applyTeamPayload, getTeamSession, setSelectedTask, abortTeamSession, startTeamSession, restoreTeamSession } = useTeamSession();
 	const {
 		agentReviewPendingByThread,
 		setAgentReviewPendingByThread,
@@ -1839,10 +1839,13 @@ function AppMainWorkspaceInner() {
 	 * 避免 messages 变化后 useEffect 级联触发额外 render 轮次。
 	 */
 	const onMessagesLoaded = useCallback(
-		(msgs: ChatMessage[], threadId: string) => {
+		(msgs: ChatMessage[], threadId: string, extra?: { teamSession?: unknown }) => {
 			restoreFileChangesState(threadId, msgs, threadId);
+			if (extra?.teamSession && typeof extra.teamSession === 'object') {
+				restoreTeamSession(threadId, extra.teamSession as import('./hooks/useTeamSession').TeamSessionSnapshot);
+			}
 		},
-		[restoreFileChangesState]
+		[restoreFileChangesState, restoreTeamSession]
 	);
 
 	useEffect(() => {

@@ -16425,6 +16425,10 @@ select.ref-settings-native-select:focus {
 	width: 100%;
 }
 
+.ref-msg-slot--team-item {
+	width: 100%;
+}
+
 .ref-team-timeline-card,
 .ref-team-role-panel {
 	display: grid;

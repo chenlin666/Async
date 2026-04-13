@@ -12,6 +12,26 @@ export type TeamSessionPhase = 'planning' | 'executing' | 'reviewing' | 'deliver
 export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'revision';
 export type TeamRoleType = 'team_lead' | 'frontend' | 'backend' | 'qa' | 'reviewer' | 'custom';
 
+export type TeamSessionSnapshot = {
+	phase: TeamSessionPhase;
+	tasks: Array<{
+		id: string;
+		expertId: string;
+		expertAssignmentKey?: string;
+		expertName: string;
+		roleType: string;
+		description: string;
+		status: string;
+		dependencies: string[];
+		acceptanceCriteria: string[];
+		result?: string;
+	}>;
+	planSummary: string;
+	leaderMessage: string;
+	reviewSummary: string;
+	reviewVerdict: 'approved' | 'revision_needed' | null;
+};
+
 export type TeamTask = {
 	id: string;
 	expertId: string;
@@ -559,6 +579,46 @@ export function useTeamSession() {
 		[sessionsByThread]
 	);
 
+	const restoreTeamSession = useCallback(
+		(threadId: string, snapshot: TeamSessionSnapshot) => {
+			if (sessionsRef.current[threadId]) {
+				return;
+			}
+			const session: TeamSessionState = {
+				phase: snapshot.phase,
+				tasks: snapshot.tasks.map((t) => ({
+					id: t.id,
+					expertId: t.expertId,
+					expertAssignmentKey: t.expertAssignmentKey,
+					expertName: t.expertName,
+					roleType: (t.roleType as TeamRoleType) || 'custom',
+					description: t.description,
+					status: (t.status as TeamTaskStatus) || 'completed',
+					dependencies: t.dependencies,
+					acceptanceCriteria: t.acceptanceCriteria ?? [],
+					result: t.result,
+					logs: t.result ? [t.result] : [],
+				})),
+				originalUserRequest: '',
+				leaderMessage: snapshot.leaderMessage,
+				leaderWorkflow: null,
+				planSummary: snapshot.planSummary,
+				reviewSummary: snapshot.reviewSummary,
+				reviewVerdict: snapshot.reviewVerdict,
+				selectedTaskId: snapshot.tasks[0]?.id ?? null,
+				reviewerTaskId: null,
+				roleWorkflowByTaskId: {},
+				updatedAt: Date.now(),
+			};
+			sessionsRef.current[threadId] = session;
+			setSessionsByThread((prev) => ({
+				...prev,
+				[threadId]: snapshotSession(session),
+			}));
+		},
+		[]
+	);
+
 	return useMemo(
 		() => ({
 			sessionsByThread,
@@ -568,6 +628,7 @@ export function useTeamSession() {
 			clearTeamSession,
 			abortTeamSession,
 			getTeamSession,
+			restoreTeamSession,
 		}),
 		[
 			sessionsByThread,
@@ -577,6 +638,7 @@ export function useTeamSession() {
 			clearTeamSession,
 			abortTeamSession,
 			getTeamSession,
+			restoreTeamSession,
 		]
 	);
 }

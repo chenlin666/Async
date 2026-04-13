@@ -73,6 +73,7 @@ import {
 	getExecutedPlanFileKeys,
 	markPlanFileExecuted,
 	incrementThreadAgentToolCallCount,
+	saveTeamSession,
 	type ChatMessage,
 } from '../threadStore.js';
 import { compressForSend } from '../agent/conversationCompress.js';
@@ -457,10 +458,13 @@ function runChatStream(
 					workspaceRoot,
 					workspaceLspManager,
 					emit: (evt) => send(evt),
-					onDone: (full, usage) => {
+					onDone: (full, usage, teamSnapshot) => {
 						updateLastAssistant(threadId, full);
 						accumulateTokenUsage(threadId, usage?.inputTokens, usage?.outputTokens);
 						recordTurnTokenUsageStats(modelSelection, mode, usage);
+						if (teamSnapshot) {
+							saveTeamSession(threadId, teamSnapshot);
+						}
 						queueExtractMemories({
 							threadId,
 							workspaceRoot,
@@ -1475,6 +1479,7 @@ export function registerIpc(): void {
 		return {
 			ok: true as const,
 			messages: t.messages.filter((m) => m.role !== 'system'),
+			teamSession: t.teamSession ?? null,
 		};
 	});
 

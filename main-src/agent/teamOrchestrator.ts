@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ChatMessage } from '../threadStore.js';
+import type { ChatMessage, TeamSessionSnapshot } from '../threadStore.js';
 import type { ShellSettings, TeamRoleType } from '../settingsStore.js';
 import type { WorkspaceLspManager } from '../lsp/workspaceLspManager.js';
 import { runAgentLoop, type AgentLoopHandlers, type AgentLoopOptions } from './agentLoop.js';
@@ -182,7 +182,7 @@ export type TeamOrchestratorInput = {
 	workspaceRoot?: string | null;
 	workspaceLspManager?: WorkspaceLspManager | null;
 	emit: (evt: TeamEmit) => void;
-	onDone: (fullText: string, usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number }) => void;
+	onDone: (fullText: string, usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number }, teamSnapshot?: TeamSessionSnapshot) => void;
 	onError: (message: string) => void;
 };
 
@@ -418,7 +418,7 @@ async function llmPlanTasks(params: {
 }): Promise<{ tasks: LLMPlannedTask[]; planSummary: string }> {
 	const {
 		settings, threadId, teamLead, specialists, messages, modelSelection, resolvedModel,
-		signal, thinkingLevel, emit,
+		signal, thinkingLevel, workspaceRoot, emit,
 	} = params;
 	const hasCjk = messages.some((message) => /[\u3400-\u9fff]/.test(String(message.content ?? '')));
 
@@ -428,19 +428,20 @@ async function llmPlanTasks(params: {
 		{
 			role: 'user',
 			content: [
-				'You are the Team Lead coordinator.',
-				'Do not inspect the repository yourself.',
-				'Do not search the codebase yourself.',
-				'Do not propose that you will personally investigate files.',
-				'Your only job in this phase is to break the request into delegated specialist tasks.',
+				'[SYSTEM] You are the Team Lead coordinator in a planning-only phase.',
+				'You have NO tools. You CANNOT read, search, or modify files.',
+				'Do NOT say you will inspect the repository, investigate code, or look at files.',
+				'Your ONLY output in this turn is:',
+				'1. A brief kickoff message (1-2 sentences max) telling the user you are assigning specialists.',
+				'2. Immediately after, a ```json fenced block containing a JSON array of task objects.',
 				'',
-				'Available specialists:',
+				'Each task object: { "expert": "<assignment_key>", "task": "<clear instruction for the specialist>", "dependencies": [...], "acceptanceCriteria": [...] }',
+				'',
+				'Available specialist assignment keys:',
 				availableRoles,
 				'',
-				'Respond with:',
-				'1. A brief kickoff message to the user (1-2 sentences) explaining that you are assigning specialists.',
-				'2. A JSON array in a ```json fenced block with the task assignments.',
-				'Each task object must have: "expert" (assignment key), "task" (clear instruction), optionally "dependencies" and "acceptanceCriteria".',
+				'Output NOTHING else. No analysis, no code, no file paths, no investigation plan.',
+				'Delegate ALL investigation and implementation to the specialists.',
 			].join('\n'),
 		},
 	];
@@ -470,11 +471,11 @@ async function llmPlanTasks(params: {
 		requestProxyUrl: resolvedModel.proxyUrl,
 		maxOutputTokens: resolvedModel.maxOutputTokens,
 		signal,
-		composerMode: 'agent',
+		composerMode: 'ask',
 		toolPoolOverride: [],
 		agentSystemAppend: teamLead.systemPrompt,
 		thinkingLevel: thinkingLevel === 'off' ? 'off' : 'low',
-		workspaceRoot: null,
+		workspaceRoot: workspaceRoot ?? null,
 		workspaceLspManager: null,
 		threadId: null,
 	};
@@ -1014,7 +1015,7 @@ export async function runTeamSession(input: TeamOrchestratorInput): Promise<void
 				},
 			});
 			if (index < plannedTasks.length - 1) {
-				await sleepWithAbort(120, signal);
+				await sleepWithAbort(450, signal);
 			}
 		}
 
@@ -1160,7 +1161,25 @@ export async function runTeamSession(input: TeamOrchestratorInput): Promise<void
 			...(agentSystemAppend?.trim() ? ['', '---', agentSystemAppend.trim()] : []),
 		].join('\n');
 
-		onDone(delivery);
+		onDone(delivery, undefined, {
+			phase: 'delivering',
+			tasks: completed.map((t) => ({
+				id: t.id,
+				expertId: t.expertId,
+				expertAssignmentKey: t.expertAssignmentKey,
+				expertName: t.expertName,
+				roleType: t.roleType,
+				description: t.description,
+				status: t.status,
+				dependencies: t.dependencies,
+				acceptanceCriteria: t.acceptanceCriteria,
+				result: t.result,
+			})),
+			planSummary,
+			leaderMessage: planSummary,
+			reviewSummary: review.summary,
+			reviewVerdict: review.verdict,
+		});
 	} catch (error) {
 		if (signal.aborted) {
 			onError('Team session aborted by user.');

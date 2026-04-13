@@ -44,7 +44,6 @@ import { IconArrowDown, IconChevron, IconDoc } from './icons';
 import { type ParsedPlan, type PlanQuestion } from './planParser';
 import { type ChatMessage } from './threadTypes';
 import type { TeamSessionState } from './hooks/useTeamSession';
-import { TeamWorkflowTimelineCard } from './TeamWorkflowTimelineCard';
 import { buildTeamWorkflowItems } from './teamWorkflowItems';
 
 type SharedComposerProps = Omit<
@@ -494,7 +493,7 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 			const isLast = i === displayMessages.length - 1;
 			const stAt = streamStartedAtRef.current;
 			const ftAt = firstTokenAtRef.current;
-			const showLiveThought = isLast && m.role === 'assistant' && awaitingReply;
+			const showLiveThought = isLast && m.role === 'assistant' && awaitingReply && composerMode !== 'team';
 			const agentOrPlanStreaming =
 				(composerMode === 'agent' || composerMode === 'plan') && awaitingReply && isLast;
 			const frozenSec =
@@ -798,18 +797,36 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 		}
 		const workflowItems = buildTeamWorkflowItems(teamSession);
 		const leaderRow = buildTeamLeaderRow();
-		const teamTimelineRow =
-			workflowItems.length > 0 ? (
-				<div
-					key={`row-${conversationRenderKey}-team-timeline`}
-					className="ref-msg-row-measure ref-msg-row-measure--team-card"
-					data-msg-index={String(displayMessages.length + 1)}
-				>
-					<div className="ref-msg-slot ref-msg-slot--assistant ref-msg-slot--team-card">
-						<TeamWorkflowTimelineCard t={t} session={teamSession} onSelectTask={onSelectTeamExpert} />
-					</div>
+		const timelineItemRows = workflowItems.map((item, idx) => (
+			<div
+				key={`row-${conversationRenderKey}-team-item-${item.id}`}
+				className="ref-msg-row-measure ref-msg-row-measure--team-item"
+				data-msg-index={String(displayMessages.length + 1 + idx)}
+			>
+				<div className="ref-msg-slot ref-msg-slot--assistant ref-msg-slot--team-item">
+					<button
+						type="button"
+						className={`ref-team-timeline-item ${teamSession.selectedTaskId === item.id ? 'is-active' : ''}`}
+						onClick={() => onSelectTeamExpert(item.id)}
+					>
+						<span className={`ref-team-expert-avatar ref-team-expert-avatar--${item.roleType}`}>
+							{item.expertName.slice(0, 1).toUpperCase()}
+						</span>
+						<span className="ref-team-timeline-item-copy">
+							<span className="ref-team-timeline-item-meta">
+								{t(`team.timeline.role.${item.roleKind}`)}
+							</span>
+							<span className="ref-team-timeline-item-title">{item.expertName}</span>
+							<span className="ref-team-timeline-item-body">{item.description}</span>
+						</span>
+						<span className={`ref-team-expert-status ref-team-expert-status--${item.status}`}>
+							{item.status === 'in_progress' ? <span className="ref-team-pulse" /> : null}
+							{t(`team.timeline.status.${item.status}`)}
+						</span>
+					</button>
 				</div>
-			) : null;
+			</div>
+		));
 		const isTrailingDeliveryMessage =
 			!awaitingReply &&
 			lastAssistantMessageIndex === displayMessages.length - 1 &&
@@ -821,9 +838,7 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 			if (leaderRow) {
 				nodes.push(leaderRow);
 			}
-			if (teamTimelineRow) {
-				nodes.push(teamTimelineRow);
-			}
+			nodes.push(...timelineItemRows);
 			if (trailingAssistant) {
 				nodes.push(trailingAssistant);
 			}
@@ -833,9 +848,7 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 		if (leaderRow) {
 			nodes.push(leaderRow);
 		}
-		if (teamTimelineRow) {
-			nodes.push(teamTimelineRow);
-		}
+		nodes.push(...timelineItemRows);
 		return nodes;
 	};
 
