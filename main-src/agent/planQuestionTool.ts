@@ -100,7 +100,7 @@ export function normalizePlanQuestionArgs(
 }
 
 /**
- * Plan 专用：阻塞直到用户在 UI 中选择或跳过；结果作为 tool_result 回到模型。
+ * 规划澄清专用：阻塞直到用户在 UI 中选择或跳过；结果作为 tool_result 回到模型。
  */
 export async function executeAskPlanQuestionTool(call: ToolCall): Promise<ToolResult> {
 	const rt = getPlanQuestionRuntime();
@@ -108,7 +108,7 @@ export async function executeAskPlanQuestionTool(call: ToolCall): Promise<ToolRe
 		return {
 			toolCallId: call.id,
 			name: call.name,
-			content: 'ask_plan_question is only available in Plan mode sessions.',
+			content: 'ask_plan_question is only available in planning-style sessions.',
 			isError: true,
 		};
 	}

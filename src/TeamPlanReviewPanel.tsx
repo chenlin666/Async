@@ -15,6 +15,7 @@ export function TeamPlanReviewPanel({ proposal, onApprove, onReject }: Props) {
 	const [showTasks, setShowTasks] = useState(true);
 	const [feedback, setFeedback] = useState('');
 	const decided = !proposal.awaitingApproval;
+	const needsClarification = proposal.preflightVerdict === 'needs_clarification';
 	const decisionLabel =
 		proposal.decision === 'approved'
 			? t('team.plan.decisionApproved')
@@ -69,6 +70,10 @@ export function TeamPlanReviewPanel({ proposal, onApprove, onReject }: Props) {
 							</div>
 						) : null}
 					</div>
+				) : null}
+
+				{!decided && needsClarification ? (
+					<div className="ref-plan-review-overview">{t('team.plan.needsClarificationHint')}</div>
 				) : null}
 
 				{proposal.tasks.length > 0 ? (
@@ -139,14 +144,16 @@ export function TeamPlanReviewPanel({ proposal, onApprove, onReject }: Props) {
 							className="ref-team-plan-btn ref-team-plan-btn--ghost"
 							onClick={() => onReject(feedback.trim() || undefined)}
 						>
-							{t('team.plan.reject')}
+							{needsClarification ? t('team.plan.rejectForClarification') : t('team.plan.reject')}
 						</button>
 						<button
 							type="button"
 							className="ref-plan-review-build ref-team-plan-btn--primary"
+							disabled={needsClarification}
+							title={needsClarification ? t('team.plan.approveDisabledReason') : undefined}
 							onClick={() => onApprove(feedback.trim() || undefined)}
 						>
-							{t('team.plan.approve')}
+							{needsClarification ? t('team.plan.approveBlocked') : t('team.plan.approve')}
 						</button>
 					</>
 				)}

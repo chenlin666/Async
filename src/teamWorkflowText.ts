@@ -27,14 +27,20 @@ function stripTrailingRawJson(text: string): string {
 	return lines.slice(0, rawJsonStart).join('\n').trim();
 }
 
+const TEAM_LEAD_MODE_MARKER_RE = /^\s*MODE:\s*(?:ANSWER|PLAN|CLARIFY)\s*\n?/i;
+const TEAM_LEAD_MODE_MARKER_LINE_RE = /^\s*MODE:\s*(?:ANSWER|PLAN|CLARIFY)\s*$/gim;
+
 export function extractTeamLeadNarrative(summary: string): string {
 	const text = String(summary ?? '').trim();
 	if (!text) {
 		return '';
 	}
 
-	const withoutFence = stripFencedBlocks(text);
-	const withoutRawJson = stripTrailingRawJson(withoutFence || text);
+	const withoutMode = text
+		.replace(TEAM_LEAD_MODE_MARKER_RE, '')
+		.replace(TEAM_LEAD_MODE_MARKER_LINE_RE, '');
+	const withoutFence = stripFencedBlocks(withoutMode);
+	const withoutRawJson = stripTrailingRawJson(withoutFence || withoutMode);
 
-	return normalizeNarrativeText(withoutRawJson || withoutFence || text);
+	return normalizeNarrativeText(withoutRawJson || withoutFence || withoutMode);
 }

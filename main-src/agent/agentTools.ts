@@ -365,7 +365,7 @@ export const AGENT_TOOLS: AgentToolDef[] = [
 	{
 		name: 'ask_plan_question',
 		description:
-			'Plan mode only: ask the user ONE multiple-choice clarification. Keep the old Plan UX shape: provide exactly 4 options total, where the first 3 are concrete recommendations and the 4th is an Other/custom option for free text. The app shows a picker and custom input; your next turn receives the user answer as this tool\'s result text. Call at most one per assistant turn; wait for the result before asking another or drafting `# Plan:`. Do not duplicate the same question in markdown.',
+			'Planning clarification tool: ask the user ONE multiple-choice clarification. Keep the old Plan UX shape: provide exactly 4 options total, where the first 3 are concrete recommendations and the 4th is an Other/custom option for free text. The app shows a picker and custom input; your next turn receives the user answer as this tool\'s result text. Call at most one per assistant turn; wait for the result before asking another question or drafting the final plan / task routing. Do not duplicate the same question in markdown.',
 		parameters: {
 			type: 'object',
 			properties: {

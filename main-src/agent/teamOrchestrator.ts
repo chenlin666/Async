@@ -4,7 +4,7 @@ import type { ShellSettings, TeamRoleType } from '../settingsStore.js';
 import type { WorkspaceLspManager } from '../lsp/workspaceLspManager.js';
 import { runAgentLoop, type AgentLoopHandlers, type AgentLoopOptions } from './agentLoop.js';
 import { assembleAgentToolPool } from './agentToolPool.js';
-import type { AgentToolDef } from './agentTools.js';
+import { AGENT_TOOLS, type AgentToolDef } from './agentTools.js';
 import { resolveTeamExpertProfiles, type TeamExpertRuntimeProfile } from './teamExpertProfiles.js';
 import { resolveModelRequest, type ResolvedModelRequest } from '../llm/modelResolve.js';
 import { getTeamPreset } from '../../src/teamPresetCatalog.js';
@@ -16,6 +16,7 @@ import {
 	unregisterTeamPlanApprovalWaiter,
 	type TeamPlanApprovalPayload,
 } from './teamPlanApprovalTool.js';
+import { executeAskPlanQuestionTool } from './planQuestionTool.js';
 import type { ToolExecutionHooks } from './toolExecutor.js';
 
 type TeamPhase =
@@ -265,6 +266,8 @@ type LLMPlannedTask = {
 	acceptanceCriteria?: string[];
 };
 
+type LeadPlanMode = 'ANSWER' | 'PLAN' | 'CLARIFY';
+
 function parsePlannedTasks(llmOutput: string): LLMPlannedTask[] {
 	const fenceRe = /```(?:json)?\s*\n?([\s\S]*?)```/;
 	const match = fenceRe.exec(llmOutput);
@@ -314,6 +317,7 @@ function matchExpert(
 
 const TEAM_PACKET_TEXT_LIMIT = 4000;
 const TEAM_HANDOFF_TEXT_LIMIT = 2200;
+const MAX_TEAM_CLARIFICATION_ATTEMPTS = 2;
 
 function stripFencedBlocks(text: string): string {
 	const closed = text.replace(/```[\s\S]*?```/g, '');
@@ -335,7 +339,14 @@ function stripTrailingRawJson(text: string): string {
 	return lines.slice(0, rawJsonStart).join('\n').trim();
 }
 
-const MODE_MARKER_VARIANTS = ['MODE: ANSWER', 'MODE:ANSWER', 'MODE: PLAN', 'MODE:PLAN'];
+const MODE_MARKER_VARIANTS = [
+	'MODE: ANSWER',
+	'MODE:ANSWER',
+	'MODE: PLAN',
+	'MODE:PLAN',
+	'MODE: CLARIFY',
+	'MODE:CLARIFY',
+];
 
 function isStreamingModeMarkerPrefix(text: string): boolean {
 	const trimmed = text.trimStart();
@@ -355,7 +366,7 @@ function extractTeamLeadNarrative(text: string): string {
 	if (!normalized) {
 		return '';
 	}
-	const withoutMode = normalized.replace(/^\s*MODE:\s*(?:ANSWER|PLAN)\s*\n?/i, '');
+	const withoutMode = stripLeadModeMarker(normalized);
 	const withoutFence = stripFencedBlocks(withoutMode);
 	const withoutJson = stripTrailingRawJson(withoutFence || withoutMode);
 	return (withoutJson || withoutFence || withoutMode).replace(/\n{3,}/g, '\n\n').trim();
@@ -365,6 +376,93 @@ function buildFallbackTeamLeadNarrative(hasCjk: boolean): string {
 	return hasCjk
 		? '我已开始逐个分派合适的成员处理任务，接下来会汇总他们的反馈再向你汇报。'
 		: 'I have started assigning the right specialists one by one, and I will report back after collecting their findings.';
+}
+
+function buildClarificationNeededNarrative(hasCjk: boolean): string {
+	return hasCjk
+		? '当前需求还不够具体，我先不分派专家。请补充优化目标（如性能、代码质量、用户体验）、范围（模块 / 页面 / 流程）、限制条件，以及你希望得到的产出。'
+		: 'The request is still too broad, so I am not dispatching specialists yet. Please clarify the goal (for example performance, code quality, or UX), the scope (module/page/workflow), any constraints, and the outcome you want.';
+}
+
+function buildTeamClarificationIntro(hasCjk: boolean): string {
+	return hasCjk
+		? '为了避免误分配专家，我需要先确认一个关键方向。'
+		: 'To avoid dispatching the wrong specialists, I need to clarify one key direction first.';
+}
+
+function buildTeamLeadPlanningToolPool(): AgentToolDef[] {
+	return AGENT_TOOLS.filter((tool) => tool.name === 'ask_plan_question');
+}
+
+function buildTeamClarificationQuestion(hasCjk: boolean): { question: string; options: Array<{ id: string; label: string }> } {
+	return hasCjk
+		? {
+				question: '你想优先从哪个方向优化这个项目？我会根据你的选择重新分配团队专家。',
+				options: [
+					{ id: 'performance', label: '性能与响应速度（启动、渲染、接口耗时）' },
+					{ id: 'quality', label: '代码质量与架构（可维护性、模块边界、技术债）' },
+					{ id: 'ux', label: '用户体验与产品流程（交互、设置、Team 模式体验）' },
+					{ id: 'custom', label: '其他（请填写）' },
+				],
+			}
+		: {
+				question: 'Which direction should the team optimize first? I will use your choice to route the right specialists.',
+				options: [
+					{ id: 'performance', label: 'Performance and responsiveness (startup, rendering, API latency)' },
+					{ id: 'quality', label: 'Code quality and architecture (maintainability, boundaries, tech debt)' },
+					{ id: 'ux', label: 'User experience and product flow (interactions, settings, Team mode UX)' },
+					{ id: 'custom', label: 'Other (please specify)' },
+				],
+			};
+}
+
+async function askTeamClarificationQuestion(params: {
+	threadId: string;
+	hasCjk: boolean;
+	signal: AbortSignal;
+}): Promise<string | null> {
+	const { threadId, hasCjk, signal } = params;
+	if (signal.aborted) {
+		throw new Error('Team session aborted by user.');
+	}
+	const q = buildTeamClarificationQuestion(hasCjk);
+	const result = await executeAskPlanQuestionTool({
+		id: `team-clarify-${randomUUID()}`,
+		name: 'ask_plan_question',
+		arguments: q,
+	});
+	if (signal.aborted) {
+		throw new Error('Team session aborted by user.');
+	}
+	if (result.isError) {
+		return null;
+	}
+	const answer = result.content.trim();
+	return answer || null;
+}
+
+function appendTeamClarificationMessage(messages: ChatMessage[], answer: string): ChatMessage[] {
+	return [
+		...messages,
+		{
+			role: 'user',
+			content: [
+				'[TEAM CLARIFICATION ANSWER]',
+				answer,
+				'',
+				'Continue Team planning using this answer. Do not ask the same clarification again.',
+			].join('\n'),
+		},
+	];
+}
+
+function appendEffectiveTeamClarification(userText: string, answer: string): string {
+	return [
+		userText.trim(),
+		'',
+		'[TEAM CLARIFICATION ANSWER]',
+		answer.trim(),
+	].join('\n').trim();
 }
 
 async function sleepWithAbort(ms: number, signal: AbortSignal): Promise<void> {
@@ -505,12 +603,13 @@ async function llmPlanTasks(params: {
 	workspaceLspManager?: WorkspaceLspManager | null;
 	toolHooks?: ToolExecutionHooks;
 	emit: (evt: TeamEmit) => void;
-}): Promise<{ tasks: LLMPlannedTask[]; planSummary: string; mode: 'ANSWER' | 'PLAN' }> {
+}): Promise<{ tasks: LLMPlannedTask[]; planSummary: string; mode: LeadPlanMode }> {
 	const {
 		settings, threadId, teamLead, specialists, messages, modelSelection, resolvedModel,
 		signal, thinkingLevel, workspaceRoot, toolHooks, emit,
 	} = params;
 	const hasCjk = messages.some((message) => /[\u3400-\u9fff]/.test(String(message.content ?? '')));
+	const planningTools = buildTeamLeadPlanningToolPool();
 
 	const availableRoles = specialists.map((s) => `- ${s.assignmentKey}: ${s.name}`).join('\n');
 	const planMessages: ChatMessage[] = [
@@ -519,20 +618,31 @@ async function llmPlanTasks(params: {
 			role: 'user',
 			content: [
 				'[SYSTEM] You are the Team Lead coordinator in a planning-only phase.',
-				'You have NO tools. You CANNOT read, search, or modify files.',
+				'You cannot read, search, or modify files.',
+				planningTools.length > 0
+					? 'Your only available tool is `ask_plan_question`, which opens the existing clarification UI with 3 recommended options plus a custom answer slot.'
+					: 'No clarification tool is available in this session.',
 				'Do NOT say you will inspect the repository, investigate code, or look at files.',
 				'',
 				'First, classify the request. Start your reply with EXACTLY one of these markers on the first line:',
 				'- `MODE: ANSWER` — the request is a generic question unrelated to this repository/project and needs no team expertise (e.g. "what is a closure", casual chat). Follow the marker with your answer in markdown. Do NOT output a JSON block.',
+				'- `MODE: CLARIFY` — the request is about this repository/project, but it is too ambiguous to assign specialists safely. Follow the marker with a concise markdown reply that explains what is missing and asks 2-4 concrete clarification questions. Do NOT output a JSON block.',
 				'- `MODE: PLAN` — the request involves this repository, this project, or any domain where specialists should contribute (analysis, review, investigation, design, refactor, implementation, testing, diagnosis, documentation). Follow the marker with: (1) a brief 1-2 sentence kickoff message, then (2) a ```json fenced block containing a JSON array of task objects.',
 				'',
-				'Default to PLAN whenever the request could benefit from the specialists or requires reading the codebase. Only pick ANSWER for truly generic, repo-agnostic questions that any assistant could answer in one paragraph without looking at code.',
+				'Only pick ANSWER for truly generic, repo-agnostic questions that any assistant could answer in one paragraph without looking at code.',
+				'Pick CLARIFY whenever the request mentions improving, optimizing, reviewing, or refactoring "the project" / "the repo" without enough detail about the target area, desired outcome, scope, constraints, or success criteria.',
+				planningTools.length > 0
+					? 'Before using MODE: CLARIFY, prefer calling `ask_plan_question` to collect the most important missing decision through the built-in UI. You may ask multiple clarification questions over multiple turns, but only one tool question per turn.'
+					: 'If the request is ambiguous and no clarification tool is available, use MODE: CLARIFY.',
+				'Pick PLAN only when you can assign concrete specialist tasks without guessing.',
 				'',
 				'Each PLAN task object: { "expert": "<assignment_key>", "task": "<clear instruction for the specialist>", "dependencies": [...], "acceptanceCriteria": [...] }',
 				'',
 				'Available specialist assignment keys:',
 				availableRoles,
 				'',
+				'If you call `ask_plan_question`, do not repeat the same options or raw tool protocol in markdown.',
+				'Never invent a generic frontend/backend/qa split just to keep the workflow moving.',
 				'In PLAN mode: delegate ALL investigation and implementation to the specialists — do not include analysis, code, or file paths outside the JSON.',
 				'Respond in the same language as the user.',
 			].join('\n'),
@@ -565,7 +675,7 @@ async function llmPlanTasks(params: {
 		maxOutputTokens: resolvedModel.maxOutputTokens,
 		signal,
 		composerMode: 'ask',
-		toolPoolOverride: [],
+		toolPoolOverride: planningTools,
 		agentSystemAppend: appendTeamLanguageRule(settings, teamLead.systemPrompt),
 		thinkingLevel: thinkingLevel === 'off' ? 'off' : 'low',
 		workspaceRoot: workspaceRoot ?? null,
@@ -634,8 +744,9 @@ async function llmPlanTasks(params: {
 		},
 		onDone: (text, usage) => {
 			planText = text;
+			const finalMode = parseLeadMode(text);
 			const finalVisible =
-				extractTeamLeadNarrative(text) ||
+				(finalMode === 'CLARIFY' ? buildTeamClarificationIntro(hasCjk) : extractTeamLeadNarrative(text)) ||
 				visiblePlanText ||
 				buildFallbackTeamLeadNarrative(hasCjk);
 			visiblePlanText = finalVisible;
@@ -648,46 +759,73 @@ async function llmPlanTasks(params: {
 	const tasks = parsePlannedTasks(planText);
 	const mode = parseLeadMode(planText);
 	return {
-		tasks: mode === 'ANSWER' ? [] : tasks,
+		tasks: mode === 'PLAN' ? tasks : [],
 		planSummary: extractTeamLeadNarrative(planText) || buildFallbackTeamLeadNarrative(hasCjk),
 		mode,
 	};
 }
 
-function parseLeadMode(text: string): 'ANSWER' | 'PLAN' {
+function parseLeadMode(text: string): LeadPlanMode {
 	const head = String(text ?? '').trimStart();
-	const match = /^MODE:\s*(ANSWER|PLAN)/i.exec(head);
+	const match = /^MODE:\s*(ANSWER|PLAN|CLARIFY)/i.exec(head);
 	if (match && match[1]) {
-		return match[1].toUpperCase() === 'ANSWER' ? 'ANSWER' : 'PLAN';
+		const mode = match[1].toUpperCase();
+		if (mode === 'PLAN' || mode === 'CLARIFY') {
+			return mode;
+		}
+		return 'ANSWER';
 	}
-	// Legacy fallback: if JSON fence present → PLAN, otherwise ANSWER
-	return /```(?:json)?[\s\S]*```/.test(text) ? 'PLAN' : 'PLAN';
+	if (/```(?:json)?[\s\S]*```/.test(text)) {
+		return 'PLAN';
+	}
+	if (
+		/(clarify|need more (?:info|information|context|detail)|missing (?:scope|constraints|requirements|context)|please (?:clarify|specify)|too broad|success criteria|需要澄清|请补充|不够具体|缺少(?:目标|范围|约束|上下文)|明确(?:一下)?(?:目标|范围|约束)?)/i.test(
+			head
+		)
+	) {
+		return 'CLARIFY';
+	}
+	return 'ANSWER';
 }
 
 function stripLeadModeMarker(text: string): string {
-	return String(text ?? '').replace(/^\s*MODE:\s*(?:ANSWER|PLAN)\s*\n?/i, '');
+	return String(text ?? '')
+		.replace(/^\s*MODE:\s*(?:ANSWER|PLAN|CLARIFY)\s*\n?/i, '')
+		.replace(/^\s*MODE:\s*(?:ANSWER|PLAN|CLARIFY)\s*$/gim, '')
+		.trim();
 }
 
 // ── Regex fallback when LLM planning fails ───────────────────────────────
 
+function requestMentionsExpert(userText: string, expert: TeamExpertRuntimeProfile): boolean {
+	const candidates = [expert.assignmentKey, expert.id, expert.name]
+		.map((value) => String(value ?? '').trim().toLowerCase())
+		.filter((value, index, arr) => value && (value.length >= 3 || /[^\x00-\x7f]/.test(value)) && arr.indexOf(value) === index);
+	return candidates.some((value) => userText.includes(value));
+}
+
 function selectSpecialistTasksFallback(userText: string, experts: TeamExpertRuntimeProfile[]): TeamTask[] {
-	if (experts.some((expert) => expert.roleType === 'custom')) {
-		return experts.map((profile) => ({
+	const normalized = userText.toLowerCase();
+	const customMatches = experts.filter((expert) => expert.roleType === 'custom' && requestMentionsExpert(normalized, expert));
+	if (customMatches.length > 0) {
+		return customMatches.map((profile) => ({
 			id: `task-${randomUUID()}`,
 			expertId: profile.id,
 			expertAssignmentKey: profile.assignmentKey,
 			expertName: profile.name,
 			roleType: profile.roleType,
-			description: `Contribute your specialty to this request and produce a clear deliverable:\n${userText}`,
+			description: `Handle the explicitly requested specialty for this request and produce a clear deliverable:\n${userText}`,
 			status: 'pending',
 			dependencies: [],
 			acceptanceCriteria: [],
 		}));
 	}
-	const normalized = userText.toLowerCase();
-	const hasFrontend = /\b(ui|ux|component|css|style|layout|react|tsx|frontend)\b/.test(normalized);
-	const hasBackend = /\b(api|backend|server|service|endpoint|database|schema)\b/.test(normalized);
-	const hasQa = /\b(test|qa|verify|regression|coverage)\b/.test(normalized);
+	const hasFrontend = /\b(ui|ux|component|css|style|layout|react|tsx|frontend)\b|前端|界面|交互|页面|样式|组件/.test(normalized);
+	const hasBackend = /\b(api|backend|server|service|endpoint|database|schema)\b|后端|接口|服务|数据库|数据层/.test(normalized);
+	const hasQa = /\b(test|qa|verify|regression|coverage)\b|测试|验证|回归|覆盖率/.test(normalized);
+	if (!hasFrontend && !hasBackend && !hasQa) {
+		return [];
+	}
 	const picks: TeamTask[] = [];
 
 	const pushTask = (role: TeamRoleType, description: string) => {
@@ -706,10 +844,10 @@ function selectSpecialistTasksFallback(userText: string, experts: TeamExpertRunt
 		});
 	};
 
-	if (hasFrontend || (!hasBackend && !hasQa)) {
+	if (hasFrontend) {
 		pushTask('frontend', 'Implement UI and interaction updates needed for this request.');
 	}
-	if (hasBackend || (!hasFrontend && !hasQa)) {
+	if (hasBackend) {
 		pushTask('backend', 'Implement service/API/data-layer updates needed for this request.');
 	}
 	if (hasQa || picks.length > 1) {
@@ -1255,103 +1393,198 @@ export async function runTeamSession(input: TeamOrchestratorInput): Promise<void
 			}
 		};
 
-		// ── Phase 1: LLM-based planning (with ANSWER/PLAN triage) ────
-
-		checkAbort();
-		emit({ threadId, type: 'team_phase', phase: 'planning' });
+		const hasCjkRequest = /[\u3400-\u9fff]/.test(effectiveUserText);
 
 		let plannedTasks: TeamTask[] = [];
 		let planSummary = '';
-		let leadMode: 'ANSWER' | 'PLAN' = 'PLAN';
+		let preflightSummary = '';
+		let preflightVerdict: 'ok' | 'needs_clarification' | undefined;
+		let planningMessages = messages;
+		let clarificationAttempts = 0;
 
-		try {
-			const planResult = await llmPlanTasks({
-				settings, threadId, teamLead, specialists, messages, modelSelection,
-				resolvedModel, signal, thinkingLevel, workspaceRoot, workspaceLspManager, toolHooks, emit,
-			});
-			planSummary = planResult.planSummary;
-			leadMode = planResult.mode;
+		while (true) {
+			checkAbort();
+			emit({ threadId, type: 'team_phase', phase: 'planning' });
 
-			// ANSWER mode: Lead handled the request directly; skip specialists/reviewer.
-			if (leadMode === 'ANSWER') {
-				emit({ threadId, type: 'team_plan_summary', summary: planSummary });
+			plannedTasks = [];
+			planSummary = '';
+			preflightSummary = '';
+			preflightVerdict = undefined;
+
+			try {
+				const planResult = await llmPlanTasks({
+					settings, threadId, teamLead, specialists, messages: planningMessages, modelSelection,
+					resolvedModel, signal, thinkingLevel, workspaceRoot, workspaceLspManager, toolHooks, emit,
+				});
+				planSummary = planResult.planSummary;
+
+				if (planResult.mode === 'ANSWER') {
+					const deliveryText = planSummary.trim() || buildFallbackTeamLeadNarrative(hasCjkRequest);
+					emit({ threadId, type: 'team_plan_summary', summary: deliveryText });
+					emit({ threadId, type: 'team_phase', phase: 'delivering' });
+					onDone(deliveryText, undefined, {
+						phase: 'delivering',
+						tasks: [],
+						planSummary: deliveryText,
+						leaderMessage: deliveryText,
+						reviewSummary: '',
+						reviewVerdict: null,
+					});
+					return;
+				}
+
+				if (planResult.mode === 'CLARIFY') {
+					const intro = buildTeamClarificationIntro(hasCjkRequest);
+					emit({ threadId, type: 'team_plan_summary', summary: intro });
+					if (clarificationAttempts < MAX_TEAM_CLARIFICATION_ATTEMPTS) {
+						clarificationAttempts += 1;
+						const answer = await askTeamClarificationQuestion({
+							threadId,
+							hasCjk: hasCjkRequest,
+							signal,
+						});
+						if (answer) {
+							effectiveUserText = appendEffectiveTeamClarification(effectiveUserText, answer);
+							planningMessages = appendTeamClarificationMessage(planningMessages, answer);
+							continue;
+						}
+					}
+
+					const deliveryText = planSummary.trim() || buildClarificationNeededNarrative(hasCjkRequest);
+					emit({ threadId, type: 'team_phase', phase: 'delivering' });
+					onDone(deliveryText, undefined, {
+						phase: 'delivering',
+						tasks: [],
+						planSummary: deliveryText,
+						leaderMessage: deliveryText,
+						reviewSummary: '',
+						reviewVerdict: null,
+					});
+					return;
+				}
+
+				if (planResult.tasks.length > 0) {
+					const taskIdMap = new Map<string, string>();
+					plannedTasks = planResult.tasks.map((pt) => {
+						const expert = matchExpert(pt.expert, specialists) ?? specialists[0]!;
+						const taskId = `task-${randomUUID()}`;
+						taskIdMap.set(pt.expert, taskId);
+						return {
+							id: taskId,
+							expertId: expert.id,
+							expertAssignmentKey: expert.assignmentKey,
+							expertName: expert.name,
+							roleType: expert.roleType,
+							description: pt.task,
+							status: 'pending' as TeamTaskStatus,
+							dependencies: (pt.dependencies ?? [])
+								.map((d) => taskIdMap.get(d) ?? '')
+								.filter(Boolean),
+							acceptanceCriteria: pt.acceptanceCriteria ?? [],
+						};
+					});
+				}
+			} catch {
+				// LLM planning failed — fall through to fallback
+			}
+
+			if (plannedTasks.length === 0) {
+				plannedTasks = selectSpecialistTasksFallback(effectiveUserText, specialists);
+				if (plannedTasks.length > 0) {
+					planSummary = hasCjkRequest
+						? '我已按明确提到的技术方向完成角色分派，接下来会等待各成员反馈并统一汇报。'
+						: 'I assigned specialists only for the explicitly requested technical areas and will report back after their findings come in.';
+				}
+			}
+
+			if (plannedTasks.length === 0) {
+				const intro = buildTeamClarificationIntro(hasCjkRequest);
+				emit({ threadId, type: 'team_plan_summary', summary: intro });
+				if (clarificationAttempts < MAX_TEAM_CLARIFICATION_ATTEMPTS) {
+					clarificationAttempts += 1;
+					const answer = await askTeamClarificationQuestion({
+						threadId,
+						hasCjk: hasCjkRequest,
+						signal,
+					});
+					if (answer) {
+						effectiveUserText = appendEffectiveTeamClarification(effectiveUserText, answer);
+						planningMessages = appendTeamClarificationMessage(planningMessages, answer);
+						continue;
+					}
+				}
+
+				const clarificationText = buildClarificationNeededNarrative(hasCjkRequest);
 				emit({ threadId, type: 'team_phase', phase: 'delivering' });
-				const deliveryText = planSummary.trim() || buildFallbackTeamLeadNarrative(/[\u3400-\u9fff]/.test(effectiveUserText));
-				onDone(deliveryText, undefined, {
+				onDone(clarificationText, undefined, {
 					phase: 'delivering',
 					tasks: [],
-					planSummary,
-					leaderMessage: planSummary,
+					planSummary: clarificationText,
+					leaderMessage: clarificationText,
 					reviewSummary: '',
 					reviewVerdict: null,
 				});
 				return;
 			}
 
-			if (planResult.tasks.length > 0) {
-				const taskIdMap = new Map<string, string>();
-				plannedTasks = planResult.tasks.map((pt) => {
-					const expert = matchExpert(pt.expert, specialists) ?? specialists[0]!;
-					const taskId = `task-${randomUUID()}`;
-					taskIdMap.set(pt.expert, taskId);
-					return {
-						id: taskId,
-						expertId: expert.id,
-						expertAssignmentKey: expert.assignmentKey,
-						expertName: expert.name,
-						roleType: expert.roleType,
-						description: pt.task,
-						status: 'pending' as TeamTaskStatus,
-						dependencies: (pt.dependencies ?? [])
-							.map((d) => taskIdMap.get(d) ?? '')
-							.filter(Boolean),
-						acceptanceCriteria: pt.acceptanceCriteria ?? [],
-					};
-				});
+			emit({ threadId, type: 'team_plan_summary', summary: planSummary });
+
+			// ── Phase 1.25: Preflight requirement/plan review ────────────
+
+			const enablePreflightReview = settings.team?.enablePreflightReview !== false;
+			if (enablePreflightReview && reviewerExpert) {
+				checkAbort();
+				emit({ threadId, type: 'team_phase', phase: 'preflight' });
+				try {
+					const preflight = await runPreflightReviewerAgent({
+						settings, threadId, reviewer: reviewerExpert, plannedTasks,
+						userRequest: effectiveUserText, planSummary, specialists,
+						modelSelection, resolvedModel, signal, thinkingLevel,
+						workspaceRoot, workspaceLspManager, toolHooks, baseTools: baseTeamTools, emit,
+					});
+					preflightSummary = preflight.summary;
+					preflightVerdict = preflight.verdict;
+					emit({
+						threadId, type: 'team_preflight_review',
+						verdict: preflight.verdict, summary: preflight.summary,
+					});
+				} catch (err) {
+					if (signal.aborted) throw err;
+					// Non-fatal — continue without preflight notes.
+				}
 			}
-		} catch {
-			// LLM planning failed — fall through to fallback
-		}
 
-		if (plannedTasks.length === 0) {
-			plannedTasks = selectSpecialistTasksFallback(effectiveUserText, specialists);
-			planSummary = /[\u3400-\u9fff]/.test(effectiveUserText)
-				? '我已按任务特征完成角色分派，接下来会等待各成员反馈并统一汇报。'
-				: 'I assigned the specialists using fallback routing and will report back after their findings come in.';
-		}
+			if (preflightVerdict === 'needs_clarification') {
+				const intro = buildTeamClarificationIntro(hasCjkRequest);
+				emit({ threadId, type: 'team_plan_summary', summary: intro });
+				if (clarificationAttempts < MAX_TEAM_CLARIFICATION_ATTEMPTS) {
+					clarificationAttempts += 1;
+					const answer = await askTeamClarificationQuestion({
+						threadId,
+						hasCjk: hasCjkRequest,
+						signal,
+					});
+					if (answer) {
+						effectiveUserText = appendEffectiveTeamClarification(effectiveUserText, answer);
+						planningMessages = appendTeamClarificationMessage(planningMessages, answer);
+						continue;
+					}
+				}
 
-		if (plannedTasks.length === 0) {
-			onError('No specialist task could be generated for Team mode.');
-			return;
-		}
-
-		emit({ threadId, type: 'team_plan_summary', summary: planSummary });
-
-		// ── Phase 1.25: Preflight requirement/plan review ────────────
-
-		let preflightSummary = '';
-		let preflightVerdict: 'ok' | 'needs_clarification' | undefined;
-		const enablePreflightReview = settings.team?.enablePreflightReview !== false;
-		if (enablePreflightReview && reviewerExpert) {
-			checkAbort();
-			emit({ threadId, type: 'team_phase', phase: 'preflight' });
-			try {
-				const preflight = await runPreflightReviewerAgent({
-					settings, threadId, reviewer: reviewerExpert, plannedTasks,
-					userRequest: effectiveUserText, planSummary, specialists,
-					modelSelection, resolvedModel, signal, thinkingLevel,
-					workspaceRoot, workspaceLspManager, toolHooks, baseTools: baseTeamTools, emit,
+				const deliveryText = preflightSummary.trim() || buildClarificationNeededNarrative(hasCjkRequest);
+				emit({ threadId, type: 'team_phase', phase: 'delivering' });
+				onDone(deliveryText, undefined, {
+					phase: 'delivering',
+					tasks: [],
+					planSummary,
+					leaderMessage: planSummary,
+					reviewSummary: preflightSummary || deliveryText,
+					reviewVerdict: null,
 				});
-				preflightSummary = preflight.summary;
-				preflightVerdict = preflight.verdict;
-				emit({
-					threadId, type: 'team_preflight_review',
-					verdict: preflight.verdict, summary: preflight.summary,
-				});
-			} catch (err) {
-				if (signal.aborted) throw err;
-				// Non-fatal — continue without preflight notes.
+				return;
 			}
+
+			break;
 		}
 
 		// ── Phase 1.5: Plan proposal — await user approval ───────────

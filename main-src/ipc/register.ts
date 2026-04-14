@@ -498,49 +498,58 @@ function runChatStream(
 			};
 			if (mode === 'team') {
 				phaseRef.current = 'runTeamSession';
-				await runTeamSession({
-					settings,
+				setPlanQuestionRuntime({
 					threadId,
-					messages,
-					modelSelection,
-					resolvedModel: resolved,
-					agentSystemAppend,
 					signal: ac.signal,
-					thinkingLevel,
-					workspaceRoot,
-					workspaceLspManager,
-					toolHooks: {
-						beforeWrite: ({ path, previousContent }) => {
-							if (!recordAgentSnapshot(threadId, path, previousContent)) {
-								touchFileInThread(threadId, path, 'modified', false);
-								return;
-							}
-							touchFileInThread(
-								threadId,
-								path,
-								previousContent === null ? 'created' : 'modified',
-								previousContent === null
-							);
-						},
-					},
-					emit: (evt) => send(evt),
-					onDone: (full, usage, teamSnapshot) => {
-						updateLastAssistant(threadId, full);
-						accumulateTokenUsage(threadId, usage?.inputTokens, usage?.outputTokens);
-						recordTurnTokenUsageStats(modelSelection, mode, usage);
-						if (teamSnapshot) {
-							saveTeamSession(threadId, teamSnapshot);
-						}
-						queueExtractMemories({
-							threadId,
-							workspaceRoot,
-							settings,
-							modelSelection,
-						});
-						send({ threadId, type: 'done', text: full, usage });
-					},
-					onError: (message) => emitStreamError(message),
+					emit: (evt) => send({ threadId, ...evt }),
 				});
+				try {
+					await runTeamSession({
+						settings,
+						threadId,
+						messages,
+						modelSelection,
+						resolvedModel: resolved,
+						agentSystemAppend,
+						signal: ac.signal,
+						thinkingLevel,
+						workspaceRoot,
+						workspaceLspManager,
+						toolHooks: {
+							beforeWrite: ({ path, previousContent }) => {
+								if (!recordAgentSnapshot(threadId, path, previousContent)) {
+									touchFileInThread(threadId, path, 'modified', false);
+									return;
+								}
+								touchFileInThread(
+									threadId,
+									path,
+									previousContent === null ? 'created' : 'modified',
+									previousContent === null
+								);
+							},
+						},
+						emit: (evt) => send(evt),
+						onDone: (full, usage, teamSnapshot) => {
+							updateLastAssistant(threadId, full);
+							accumulateTokenUsage(threadId, usage?.inputTokens, usage?.outputTokens);
+							recordTurnTokenUsageStats(modelSelection, mode, usage);
+							if (teamSnapshot) {
+								saveTeamSession(threadId, teamSnapshot);
+							}
+							queueExtractMemories({
+								threadId,
+								workspaceRoot,
+								settings,
+								modelSelection,
+							});
+							send({ threadId, type: 'done', text: full, usage });
+						},
+						onError: (message) => emitStreamError(message),
+					});
+				} finally {
+					setPlanQuestionRuntime(null);
+				}
 				return;
 			}
 

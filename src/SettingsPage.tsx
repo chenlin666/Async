@@ -733,7 +733,7 @@ export function SettingsPage({
 										const subModels = modelsVisibleUnderProvider(prov);
 										return (
 											<li key={prov.id} className="ref-settings-provider-shell">
-												<details className="ref-settings-provider-details" open>
+												<details className="ref-settings-provider-details">
 													<summary className="ref-settings-provider-summary">
 														<span className="ref-settings-provider-summary-chev" aria-hidden />
 														<span className="ref-settings-provider-summary-text">

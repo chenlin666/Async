@@ -4421,7 +4421,7 @@ function AppMainWorkspaceInner() {
 			setPlanQuestionRequestId(null);
 			return;
 		}
-		if (composerMode !== 'plan') {
+		if (composerMode !== 'plan' && composerMode !== 'team') {
 			setPlanQuestion(null);
 			setPlanQuestionRequestId(null);
 			return;

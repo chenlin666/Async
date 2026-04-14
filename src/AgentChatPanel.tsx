@@ -757,10 +757,20 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 		}
 		const workflow = teamSession.leaderWorkflow;
 		const content = teamSession.leaderMessage || '';
+		const lastAssistantContent =
+			[...displayMessages].reverse().find((message) => message.role === 'assistant')?.content?.trim() || '';
 		const hasLiveBlocks = (workflow?.liveBlocks.blocks.length ?? 0) > 0;
 		const isBootstrapping = awaitingReply && !workflow && !content.trim();
 		const isWorking = Boolean(workflow?.awaitingReply) || isBootstrapping;
+		const hideAsDuplicateTerminalReply =
+			teamSession.phase === 'delivering' &&
+			teamSession.tasks.length === 0 &&
+			lastAssistantContent.length > 0 &&
+			lastAssistantContent === content.trim();
 		if (!content.trim() && !isWorking && !hasLiveBlocks) {
+			return null;
+		}
+		if (hideAsDuplicateTerminalReply) {
 			return null;
 		}
 		const liveThoughtMeta =
@@ -946,7 +956,7 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 				/>
 			) : null}
 
-			{hasConversation && planQuestion && composerMode === 'plan' ? (
+			{hasConversation && planQuestion && (composerMode === 'plan' || composerMode === 'team') ? (
 				<PlanQuestionDialog
 					question={planQuestion}
 					onSubmit={onPlanQuestionSubmit}

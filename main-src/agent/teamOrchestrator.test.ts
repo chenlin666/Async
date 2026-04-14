@@ -1,6 +1,22 @@
-import { describe, expect, it } from 'vitest';
-import { buildReviewerTaskPacket, buildSpecialistTaskPacket, type TeamTask } from './teamOrchestrator.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { runAgentLoopMock, assembleAgentToolPoolMock } = vi.hoisted(() => ({
+	runAgentLoopMock: vi.fn(),
+	assembleAgentToolPoolMock: vi.fn(() => []),
+}));
+
+vi.mock('./agentLoop.js', () => ({
+	runAgentLoop: runAgentLoopMock,
+}));
+
+vi.mock('./agentToolPool.js', () => ({
+	assembleAgentToolPool: assembleAgentToolPoolMock,
+}));
+
+import { buildReviewerTaskPacket, buildSpecialistTaskPacket, runTeamSession, type TeamTask } from './teamOrchestrator.js';
 import type { TeamExpertRuntimeProfile } from './teamExpertProfiles.js';
+import { resolvePlanQuestionTool } from './planQuestionTool.js';
+import { setPlanQuestionRuntime } from './planQuestionRuntime.js';
 
 function makeExpert(
 	id: string,
@@ -15,6 +31,75 @@ function makeExpert(
 		systemPrompt: `${name} prompt`,
 	};
 }
+
+function makeExpertConfig(
+	id: string,
+	name: string,
+	roleType: TeamExpertRuntimeProfile['roleType']
+) {
+	return {
+		id,
+		name,
+		roleType,
+		assignmentKey: id,
+		systemPrompt: `${name} prompt`,
+		enabled: true,
+	};
+}
+
+function buildTeamSettings(experts: Array<ReturnType<typeof makeExpertConfig>>, overrides?: Record<string, unknown>) {
+	return {
+		language: 'zh-CN' as const,
+		team: {
+			useDefaults: false,
+			experts,
+			maxParallelExperts: 1,
+			requirePlanApproval: false,
+			enablePreflightReview: false,
+			...(overrides ?? {}),
+		},
+	};
+}
+
+async function runSession(params: {
+	userRequest: string;
+	experts: Array<ReturnType<typeof makeExpertConfig>>;
+	teamOverrides?: Record<string, unknown>;
+}) {
+	const events: Array<{ type: string; [key: string]: unknown }> = [];
+	const doneCalls: Array<{ text: string; snapshot: unknown }> = [];
+	const errorCalls: string[] = [];
+	await runTeamSession({
+		settings: buildTeamSettings(params.experts, params.teamOverrides) as never,
+		threadId: 'thread-test',
+		messages: [{ role: 'user', content: params.userRequest }] as never,
+		modelSelection: 'test-model',
+		resolvedModel: {
+			ok: true,
+			requestModelId: 'test-model',
+			paradigm: 'openai-compatible',
+			apiKey: 'test-key',
+			baseURL: 'https://example.test',
+			proxyUrl: undefined,
+			maxOutputTokens: 2048,
+		},
+		signal: new AbortController().signal,
+		emit: (evt) => events.push(evt as never),
+		onDone: (text, _usage, snapshot) => doneCalls.push({ text, snapshot }),
+		onError: (message) => errorCalls.push(message),
+	});
+	return { events, doneCalls, errorCalls };
+}
+
+beforeEach(() => {
+	vi.clearAllMocks();
+	assembleAgentToolPoolMock.mockReturnValue([]);
+	setPlanQuestionRuntime(null);
+});
+
+afterEach(() => {
+	setPlanQuestionRuntime(null);
+});
 
 describe('buildSpecialistTaskPacket', () => {
 	it('includes dependency handoffs instead of requiring the full transcript', () => {
@@ -92,5 +177,176 @@ describe('buildReviewerTaskPacket', () => {
 		expect(packet).toContain('Added docs for autosave retries and offline recovery.');
 		expect(packet).toContain('### Verdict: APPROVED');
 		expect(packet).toContain('### Verdict: NEEDS_REVISION');
+	});
+});
+
+describe('runTeamSession clarification gates', () => {
+	it('stops immediately when the lead returns CLARIFY', async () => {
+		runAgentLoopMock.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
+			handlers.onDone('MODE: CLARIFY\n请先明确你要优化的是性能、代码质量还是用户体验，以及对应的模块范围。');
+		});
+
+		const experts = [
+			makeExpertConfig('team_lead', 'Team Lead', 'team_lead'),
+			makeExpertConfig('frontend', 'Frontend', 'frontend'),
+		];
+		const { events, doneCalls, errorCalls } = await runSession({
+			userRequest: '请你看看接下来如何优化我的项目',
+			experts,
+		});
+
+		expect(errorCalls).toEqual([]);
+		expect(doneCalls).toHaveLength(1);
+		expect(doneCalls[0]?.text).toContain('请先明确你要优化的是性能、代码质量还是用户体验');
+		expect(events.some((evt) => evt.type === 'team_task_created')).toBe(false);
+		expect(events.some((evt) => evt.type === 'team_preflight_review')).toBe(false);
+	});
+
+	it('offers ask_plan_question to the team lead during planning', async () => {
+		runAgentLoopMock.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
+			handlers.onDone('MODE: CLARIFY\n请先明确优化目标。');
+		});
+
+		const experts = [
+			makeExpertConfig('team_lead', 'Team Lead', 'team_lead'),
+			makeExpertConfig('frontend', 'Frontend', 'frontend'),
+		];
+		await runSession({
+			userRequest: '请你看看接下来如何优化我的项目',
+			experts,
+		});
+
+		const options = runAgentLoopMock.mock.calls[0]?.[2] as { toolPoolOverride?: Array<{ name: string }> } | undefined;
+		expect(options?.toolPoolOverride?.map((tool) => tool.name)).toEqual(['ask_plan_question']);
+	});
+
+	it('opens the clarification dialog and replans with the answer', async () => {
+		const questionEvents: Array<Record<string, unknown>> = [];
+		setPlanQuestionRuntime({
+			threadId: 'thread-test',
+			signal: new AbortController().signal,
+			emit: (evt) => {
+				questionEvents.push(evt);
+				if (evt.type === 'plan_question_request') {
+					queueMicrotask(() => {
+						resolvePlanQuestionTool(String(evt.requestId), {
+							answerText: '我选择：quality. 代码质量与架构',
+						});
+					});
+				}
+			},
+		});
+
+		runAgentLoopMock
+			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
+				handlers.onDone('MODE: CLARIFY\n请先明确优化目标。');
+			})
+			.mockImplementationOnce(async (_settings, messagesArg, _options, handlers) => {
+				const lastUser = [...messagesArg].reverse().find((message) => message.role === 'user');
+				expect(String(lastUser?.content ?? '')).toContain('[TEAM CLARIFICATION ANSWER]');
+				expect(String(lastUser?.content ?? '')).toContain('代码质量与架构');
+				handlers.onDone(`MODE: PLAN
+我会按你选择的代码质量方向分配专家。
+
+\`\`\`json
+[
+  {
+    "expert": "frontend",
+    "task": "Review frontend architecture and identify maintainability improvements",
+    "acceptanceCriteria": ["List actionable quality improvements"]
+  }
+]
+\`\`\``);
+			});
+
+		const experts = [
+			makeExpertConfig('team_lead', 'Team Lead', 'team_lead'),
+			makeExpertConfig('frontend', 'Frontend', 'frontend'),
+		];
+		const { events, doneCalls, errorCalls } = await runSession({
+			userRequest: '请你看看接下来如何优化我的项目',
+			experts,
+		});
+
+		expect(errorCalls).toEqual([]);
+		expect(questionEvents).toHaveLength(1);
+		expect(questionEvents[0]).toMatchObject({
+			type: 'plan_question_request',
+			question: expect.objectContaining({
+				text: expect.stringContaining('你想优先从哪个方向优化这个项目'),
+			}),
+		});
+		expect(events.some((evt) => evt.type === 'team_task_created')).toBe(true);
+		expect(doneCalls).toHaveLength(1);
+		expect(doneCalls[0]?.text).not.toContain('MODE:');
+	});
+
+	it('hard-stops when preflight review needs clarification even without plan approval', async () => {
+		runAgentLoopMock
+			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
+				handlers.onDone(`MODE: PLAN
+我先整理一个执行方案。
+
+\`\`\`json
+[
+  {
+    "expert": "frontend",
+    "task": "Audit renderer hotspots",
+    "acceptanceCriteria": ["List the top bottlenecks"]
+  }
+]
+\`\`\``);
+			})
+			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
+				handlers.onDone(`### Verdict: NEEDS_CLARIFICATION
+### Concerns
+- 当前只说“优化项目”，没有说明目标维度和范围。
+### Suggestions
+- 先明确是性能、代码质量还是体验问题。
+### Summary
+当前需求仍然过于模糊，请先明确优化目标和范围。`);
+			});
+
+		const experts = [
+			makeExpertConfig('team_lead', 'Team Lead', 'team_lead'),
+			makeExpertConfig('frontend', 'Frontend', 'frontend'),
+			makeExpertConfig('reviewer', 'Reviewer', 'reviewer'),
+		];
+		const { events, doneCalls, errorCalls } = await runSession({
+			userRequest: '请你看看接下来如何优化我的项目',
+			experts,
+			teamOverrides: { enablePreflightReview: true, requirePlanApproval: false },
+		});
+
+		expect(errorCalls).toEqual([]);
+		expect(doneCalls).toHaveLength(1);
+		expect(doneCalls[0]?.text).toContain('当前需求仍然过于模糊，请先明确优化目标和范围');
+		expect(events.some((evt) => evt.type === 'team_task_created')).toBe(false);
+		expect(events).toContainEqual(
+			expect.objectContaining({
+				type: 'team_preflight_review',
+				verdict: 'needs_clarification',
+			})
+		);
+	});
+
+	it('does not auto-fan out vague requests through fallback routing', async () => {
+		runAgentLoopMock.mockRejectedValueOnce(new Error('planner failed'));
+
+		const experts = [
+			makeExpertConfig('team_lead', 'Team Lead', 'team_lead'),
+			makeExpertConfig('frontend', 'Frontend', 'frontend'),
+			makeExpertConfig('backend', 'Backend', 'backend'),
+			makeExpertConfig('qa', 'QA', 'qa'),
+		];
+		const { events, doneCalls, errorCalls } = await runSession({
+			userRequest: '请你看看接下来如何优化我的项目',
+			experts,
+		});
+
+		expect(errorCalls).toEqual([]);
+		expect(doneCalls).toHaveLength(1);
+		expect(doneCalls[0]?.text).toContain('当前需求还不够具体，我先不分派专家');
+		expect(events.some((evt) => evt.type === 'team_task_created')).toBe(false);
 	});
 });

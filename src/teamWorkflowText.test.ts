@@ -22,4 +22,19 @@ describe('extractTeamLeadNarrative', () => {
 
 		expect(extractTeamLeadNarrative(input)).toBe('我先分配前端同学查看渲染链路。');
 	});
+
+	it('removes leading mode markers before showing the narrative text', () => {
+		const input = `MODE: CLARIFY
+请先明确你要优化的是性能、代码质量还是用户体验。`;
+
+		expect(extractTeamLeadNarrative(input)).toBe('请先明确你要优化的是性能、代码质量还是用户体验。');
+	});
+
+	it('removes repeated standalone mode marker lines', () => {
+		const input = `MODE: CLARIFY
+MODE: CLARIFY
+请先明确你要优化的是性能、代码质量还是用户体验。`;
+
+		expect(extractTeamLeadNarrative(input)).toBe('请先明确你要优化的是性能、代码质量还是用户体验。');
+	});
 });
