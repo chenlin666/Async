@@ -317,6 +317,54 @@ function readWorkspaceTextFileIfExists(relPath: string, workspaceRoot: string | 
 	}
 }
 
+function getAgentSnapshots(threadId: string, create = false): Map<string, string | null> | null {
+	const id = String(threadId ?? '');
+	if (!id) {
+		return null;
+	}
+	const existing = agentRevertSnapshotsByThread.get(id);
+	if (existing || !create) {
+		return existing ?? null;
+	}
+	const created = new Map<string, string | null>();
+	agentRevertSnapshotsByThread.set(id, created);
+	return created;
+}
+
+function listAgentSnapshotPaths(threadId: string): string[] {
+	const snapshots = getAgentSnapshots(threadId, false);
+	return snapshots ? [...snapshots.keys()] : [];
+}
+
+function recordAgentSnapshot(threadId: string, relPath: string, previousContent: string | null): boolean {
+	const normalizedThreadId = String(threadId ?? '');
+	const normalizedRelPath = String(relPath ?? '').trim();
+	if (!normalizedThreadId || !normalizedRelPath) {
+		return false;
+	}
+	const snapshots = getAgentSnapshots(normalizedThreadId, true);
+	if (!snapshots || snapshots.has(normalizedRelPath)) {
+		return false;
+	}
+	snapshots.set(normalizedRelPath, previousContent);
+	return true;
+}
+
+function seedAgentSnapshotFromWorkspace(threadId: string, relPath: string, workspaceRoot: string | null): boolean {
+	const normalizedRelPath = String(relPath ?? '').trim();
+	const previousContent = readWorkspaceTextFileIfExists(normalizedRelPath, workspaceRoot);
+	const recorded = recordAgentSnapshot(threadId, normalizedRelPath, previousContent);
+	if (recorded && threadId) {
+		touchFileInThread(
+			threadId,
+			normalizedRelPath,
+			previousContent === null ? 'created' : 'modified',
+			previousContent === null
+		);
+	}
+	return recorded;
+}
+
 function contentsEqual(a: string | null, b: string | null): boolean {
 	return (a ?? null) === (b ?? null);
 }
@@ -461,6 +509,20 @@ function runChatStream(
 					thinkingLevel,
 					workspaceRoot,
 					workspaceLspManager,
+					toolHooks: {
+						beforeWrite: ({ path, previousContent }) => {
+							if (!recordAgentSnapshot(threadId, path, previousContent)) {
+								touchFileInThread(threadId, path, 'modified', false);
+								return;
+							}
+							touchFileInThread(
+								threadId,
+								path,
+								previousContent === null ? 'created' : 'modified',
+								previousContent === null
+							);
+						},
+					},
 					emit: (evt) => send(evt),
 					onDone: (full, usage, teamSnapshot) => {
 						updateLastAssistant(threadId, full);
@@ -593,12 +655,10 @@ function runChatStream(
 						threadId,
 						toolHooks: {
 							beforeWrite: ({ path, previousContent }) => {
-								const snapshots = agentRevertSnapshotsByThread.get(threadId);
-								if (!snapshots || snapshots.has(path)) {
+								if (!recordAgentSnapshot(threadId, path, previousContent)) {
 									touchFileInThread(threadId, path, 'modified', false);
 									return;
 								}
-								snapshots.set(path, previousContent);
 								touchFileInThread(
 									threadId,
 									path,
@@ -1538,7 +1598,17 @@ export function registerIpc(): void {
 		if (!threadId || !chunk) {
 			return { applied: [] as string[], failed: [{ path: '(invalid)', reason: '参数无效' }] };
 		}
-		const ar = applyAgentDiffChunk(chunk, senderWorkspaceRoot(event));
+		const workspaceRoot = senderWorkspaceRoot(event);
+		const relPath = listAgentDiffChunks(chunk)[0]?.relPath ?? null;
+		const seeded = relPath ? seedAgentSnapshotFromWorkspace(threadId, relPath, workspaceRoot) : false;
+		const ar = applyAgentDiffChunk(chunk, workspaceRoot);
+		if (seeded && relPath && ar.applied.length === 0) {
+			const snapshots = getAgentSnapshots(threadId, false);
+			snapshots?.delete(relPath);
+			if (snapshots && snapshots.size === 0) {
+				agentRevertSnapshotsByThread.delete(threadId);
+			}
+		}
 		const statsDir = activeUsageStatsDir();
 		if (statsDir && ar.applied.length > 0) {
 			const { add, del } = countDiffLinesInChunk(chunk);
@@ -1569,7 +1639,35 @@ export function registerIpc(): void {
 					succeededIds: [] as string[],
 				};
 			}
-			const ar = applyAgentPatchItems(items, senderWorkspaceRoot(event));
+			const workspaceRoot = senderWorkspaceRoot(event);
+			const seededPaths = new Set<string>();
+			for (const item of items) {
+				const relPath = listAgentDiffChunks(item.chunk)[0]?.relPath ?? null;
+				if (relPath && seedAgentSnapshotFromWorkspace(threadId, relPath, workspaceRoot)) {
+					seededPaths.add(relPath);
+				}
+			}
+			const ar = applyAgentPatchItems(items, workspaceRoot);
+			if (seededPaths.size > 0) {
+				const succeededIds = new Set(ar.succeededIds ?? []);
+				const succeededPaths = new Set(
+					items
+						.filter((item) => succeededIds.has(item.id))
+						.map((item) => listAgentDiffChunks(item.chunk)[0]?.relPath ?? '')
+						.filter(Boolean)
+				);
+				const snapshots = getAgentSnapshots(threadId, false);
+				if (snapshots) {
+					for (const relPath of seededPaths) {
+						if (!succeededPaths.has(relPath)) {
+							snapshots.delete(relPath);
+						}
+					}
+					if (snapshots.size === 0) {
+						agentRevertSnapshotsByThread.delete(threadId);
+					}
+				}
+			}
 			const statsDir = activeUsageStatsDir();
 			if (statsDir && ar.succeededIds.length > 0) {
 				const ok = new Set(ar.succeededIds);
@@ -2067,30 +2165,58 @@ export function registerIpc(): void {
 		return { ok: true as const };
 	});
 
+	ipcMain.handle('agent:listSnapshotPaths', (_e, threadId: string) => {
+		return { ok: true as const, paths: listAgentSnapshotPaths(threadId) };
+	});
+
 	ipcMain.handle('agent:revertLastTurn', (event, threadId: string) => {
 		const root = senderWorkspaceRoot(event);
 		if (!root) {
-			return { ok: false as const, error: 'no-workspace' as const };
+			return {
+				ok: false as const,
+				error: 'no-workspace' as const,
+				reverted: 0,
+				revertedPaths: [] as string[],
+				failed: [] as { path: string; error: string }[],
+			};
 		}
-		const snapshots = agentRevertSnapshotsByThread.get(threadId);
+		const snapshots = getAgentSnapshots(threadId, false);
 		if (!snapshots || snapshots.size === 0) {
-			return { ok: true as const, reverted: 0 };
+			return {
+				ok: true as const,
+				reverted: 0,
+				revertedPaths: [] as string[],
+				failed: [] as { path: string; error: string }[],
+			};
 		}
 
+		const revertedPaths: string[] = [];
+		const failed: { path: string; error: string }[] = [];
 		for (const [relPath, previousContent] of Array.from(snapshots.entries()).reverse()) {
-			const full = resolveWorkspacePath(relPath, root);
-			if (previousContent === null) {
-				if (fs.existsSync(full)) {
-					fs.unlinkSync(full);
+			try {
+				const full = resolveWorkspacePath(relPath, root);
+				if (previousContent === null) {
+					if (fs.existsSync(full)) {
+						fs.unlinkSync(full);
+					}
+				} else {
+					fs.mkdirSync(path.dirname(full), { recursive: true });
+					fs.writeFileSync(full, previousContent, 'utf8');
 				}
-				continue;
+				snapshots.delete(relPath);
+				revertedPaths.push(relPath);
+			} catch (error) {
+				failed.push({
+					path: relPath,
+					error: error instanceof Error ? error.message : String(error),
+				});
 			}
-			fs.mkdirSync(path.dirname(full), { recursive: true });
-			fs.writeFileSync(full, previousContent, 'utf8');
 		}
 
-		agentRevertSnapshotsByThread.delete(threadId);
-		return { ok: true as const, reverted: snapshots.size };
+		if (snapshots.size === 0) {
+			agentRevertSnapshotsByThread.delete(threadId);
+		}
+		return { ok: true as const, reverted: revertedPaths.length, revertedPaths, failed };
 	});
 
 	ipcMain.handle('agent:keepFile', (_e, threadId: string, relPath: string) => {
@@ -2101,17 +2227,17 @@ export function registerIpc(): void {
 		return { ok: true as const };
 	});
 
-ipcMain.handle('agent:getFileSnapshot', (_e, threadId: string, relPath: string) => {
-	const snapshots = agentRevertSnapshotsByThread.get(String(threadId ?? ''));
-	if (!snapshots || !snapshots.has(relPath)) {
-		return { ok: true as const, hasSnapshot: false as const };
-	}
+	ipcMain.handle('agent:getFileSnapshot', (_e, threadId: string, relPath: string) => {
+		const snapshots = getAgentSnapshots(String(threadId ?? ''), false);
+		if (!snapshots || !snapshots.has(relPath)) {
+			return { ok: true as const, hasSnapshot: false as const };
+		}
 		return {
 			ok: true as const,
 			hasSnapshot: true as const,
-		previousContent: snapshots.get(relPath) ?? null,
-	};
-});
+			previousContent: snapshots.get(relPath) ?? null,
+		};
+	});
 
 ipcMain.handle(
 	'agent:seedFileSnapshot',
@@ -2135,9 +2261,7 @@ ipcMain.handle(
 			/^new file mode\s/m.test(diff) || /^---\s+\/dev\/null$/m.test(diff)
 				? null
 				: baseline;
-		const snapshots = agentRevertSnapshotsByThread.get(threadId) ?? new Map<string, string | null>();
-		snapshots.set(relPath, previousContent);
-		agentRevertSnapshotsByThread.set(threadId, snapshots);
+		recordAgentSnapshot(threadId, relPath, previousContent);
 		return {
 			ok: true as const,
 			seeded: true as const,
@@ -2235,17 +2359,25 @@ ipcMain.handle(
 		if (!root) {
 			return { ok: false as const, error: 'no-workspace' as const };
 		}
-		const snapshots = agentRevertSnapshotsByThread.get(threadId);
+		const snapshots = getAgentSnapshots(threadId, false);
 		if (!snapshots || !snapshots.has(relPath)) {
 			return { ok: true as const, reverted: false };
 		}
 		const previousContent = snapshots.get(relPath)!;
-		const full = resolveWorkspacePath(relPath, root);
-		if (previousContent === null) {
-			if (fs.existsSync(full)) fs.unlinkSync(full);
-		} else {
-			fs.mkdirSync(path.dirname(full), { recursive: true });
-			fs.writeFileSync(full, previousContent, 'utf8');
+		try {
+			const full = resolveWorkspacePath(relPath, root);
+			if (previousContent === null) {
+				if (fs.existsSync(full)) fs.unlinkSync(full);
+			} else {
+				fs.mkdirSync(path.dirname(full), { recursive: true });
+				fs.writeFileSync(full, previousContent, 'utf8');
+			}
+		} catch (error) {
+			return {
+				ok: false as const,
+				error: error instanceof Error ? error.message : String(error),
+				reverted: false as const,
+			};
 		}
 		snapshots.delete(relPath);
 		if (snapshots.size === 0) agentRevertSnapshotsByThread.delete(threadId);

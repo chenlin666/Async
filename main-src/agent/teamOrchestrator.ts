@@ -16,6 +16,7 @@ import {
 	unregisterTeamPlanApprovalWaiter,
 	type TeamPlanApprovalPayload,
 } from './teamPlanApprovalTool.js';
+import type { ToolExecutionHooks } from './toolExecutor.js';
 
 type TeamPhase =
 	| 'planning'
@@ -249,6 +250,7 @@ export type TeamOrchestratorInput = {
 	thinkingLevel?: 'off' | 'low' | 'medium' | 'high' | 'max';
 	workspaceRoot?: string | null;
 	workspaceLspManager?: WorkspaceLspManager | null;
+	toolHooks?: ToolExecutionHooks;
 	emit: (evt: TeamEmit) => void;
 	onDone: (fullText: string, usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number }, teamSnapshot?: TeamSessionSnapshot) => void;
 	onError: (message: string) => void;
@@ -501,11 +503,12 @@ async function llmPlanTasks(params: {
 	thinkingLevel?: TeamOrchestratorInput['thinkingLevel'];
 	workspaceRoot?: string | null;
 	workspaceLspManager?: WorkspaceLspManager | null;
+	toolHooks?: ToolExecutionHooks;
 	emit: (evt: TeamEmit) => void;
 }): Promise<{ tasks: LLMPlannedTask[]; planSummary: string; mode: 'ANSWER' | 'PLAN' }> {
 	const {
 		settings, threadId, teamLead, specialists, messages, modelSelection, resolvedModel,
-		signal, thinkingLevel, workspaceRoot, emit,
+		signal, thinkingLevel, workspaceRoot, toolHooks, emit,
 	} = params;
 	const hasCjk = messages.some((message) => /[\u3400-\u9fff]/.test(String(message.content ?? '')));
 
@@ -567,7 +570,8 @@ async function llmPlanTasks(params: {
 		thinkingLevel: thinkingLevel === 'off' ? 'off' : 'low',
 		workspaceRoot: workspaceRoot ?? null,
 		workspaceLspManager: null,
-		threadId: null,
+		threadId,
+		toolHooks,
 	};
 
 	if (teamLead.preferredModelId?.trim() && teamLead.preferredModelId.trim() !== modelSelection) {
@@ -783,13 +787,14 @@ async function runPreflightReviewerAgent(params: {
 	thinkingLevel?: TeamOrchestratorInput['thinkingLevel'];
 	workspaceRoot?: string | null;
 	workspaceLspManager?: WorkspaceLspManager | null;
+	toolHooks?: ToolExecutionHooks;
 	baseTools: AgentToolDef[];
 	emit: (evt: TeamEmit) => void;
 }): Promise<{ verdict: 'ok' | 'needs_clarification'; summary: string }> {
 	const {
 		settings, threadId, reviewer, plannedTasks, userRequest, planSummary, specialists,
 		modelSelection, resolvedModel,
-		signal, thinkingLevel, workspaceRoot, workspaceLspManager, baseTools, emit,
+		signal, thinkingLevel, workspaceRoot, workspaceLspManager, toolHooks, baseTools, emit,
 	} = params;
 
 	const messages: ChatMessage[] = [
@@ -828,7 +833,8 @@ async function runPreflightReviewerAgent(params: {
 		thinkingLevel,
 		workspaceRoot,
 		workspaceLspManager,
-		threadId: null,
+		threadId,
+		toolHooks,
 	};
 
 	if (reviewer.preferredModelId?.trim() && reviewer.preferredModelId.trim() !== modelSelection) {
@@ -928,12 +934,13 @@ async function runReviewerAgent(params: {
 	thinkingLevel?: TeamOrchestratorInput['thinkingLevel'];
 	workspaceRoot?: string | null;
 	workspaceLspManager?: WorkspaceLspManager | null;
+	toolHooks?: ToolExecutionHooks;
 	baseTools: AgentToolDef[];
 	emit: (evt: TeamEmit) => void;
 }): Promise<{ verdict: 'approved' | 'revision_needed'; summary: string }> {
 	const {
 		settings, threadId, reviewer, completedTasks, userRequest, planSummary, modelSelection, resolvedModel,
-		signal, thinkingLevel, workspaceRoot, workspaceLspManager, baseTools, emit,
+		signal, thinkingLevel, workspaceRoot, workspaceLspManager, toolHooks, baseTools, emit,
 	} = params;
 
 	const reviewMessages: ChatMessage[] = [
@@ -968,7 +975,8 @@ async function runReviewerAgent(params: {
 		thinkingLevel,
 		workspaceRoot,
 		workspaceLspManager,
-		threadId: null,
+		threadId,
+		toolHooks,
 	};
 
 	if (reviewer.preferredModelId?.trim() && reviewer.preferredModelId.trim() !== modelSelection) {
@@ -1073,13 +1081,14 @@ async function runOneSpecialist(params: {
 	thinkingLevel?: TeamOrchestratorInput['thinkingLevel'];
 	workspaceRoot?: string | null;
 	workspaceLspManager?: WorkspaceLspManager | null;
+	toolHooks?: ToolExecutionHooks;
 	baseTools: AgentToolDef[];
 	threadId: string;
 	emit: (evt: TeamEmit) => void;
 }): Promise<{ success: boolean; text: string }> {
 	const {
 		settings, task, expert, userRequest, planSummary, completedTasksById, modelSelection, resolvedModel,
-		signal, thinkingLevel, workspaceRoot, workspaceLspManager, baseTools,
+		signal, thinkingLevel, workspaceRoot, workspaceLspManager, toolHooks, baseTools,
 		threadId, emit,
 	} = params;
 
@@ -1115,7 +1124,8 @@ async function runOneSpecialist(params: {
 		thinkingLevel,
 		workspaceRoot,
 		workspaceLspManager,
-		threadId: null,
+		threadId,
+		toolHooks,
 	};
 
 	const handlers: AgentLoopHandlers = {
@@ -1213,7 +1223,7 @@ export async function runTeamSession(input: TeamOrchestratorInput): Promise<void
 	const {
 		settings, threadId, messages, modelSelection, resolvedModel,
 		agentSystemAppend, signal, thinkingLevel, workspaceRoot, workspaceLspManager,
-		emit, onDone, onError,
+		toolHooks, emit, onDone, onError,
 	} = input;
 
 	try {
@@ -1257,7 +1267,7 @@ export async function runTeamSession(input: TeamOrchestratorInput): Promise<void
 		try {
 			const planResult = await llmPlanTasks({
 				settings, threadId, teamLead, specialists, messages, modelSelection,
-				resolvedModel, signal, thinkingLevel, workspaceRoot, workspaceLspManager, emit,
+				resolvedModel, signal, thinkingLevel, workspaceRoot, workspaceLspManager, toolHooks, emit,
 			});
 			planSummary = planResult.planSummary;
 			leadMode = planResult.mode;
@@ -1330,7 +1340,7 @@ export async function runTeamSession(input: TeamOrchestratorInput): Promise<void
 					settings, threadId, reviewer: reviewerExpert, plannedTasks,
 					userRequest: effectiveUserText, planSummary, specialists,
 					modelSelection, resolvedModel, signal, thinkingLevel,
-					workspaceRoot, workspaceLspManager, baseTools: baseTeamTools, emit,
+					workspaceRoot, workspaceLspManager, toolHooks, baseTools: baseTeamTools, emit,
 				});
 				preflightSummary = preflight.summary;
 				preflightVerdict = preflight.verdict;
@@ -1484,7 +1494,7 @@ export async function runTeamSession(input: TeamOrchestratorInput): Promise<void
 						const result = await runOneSpecialist({
 							settings, task, expert, userRequest: effectiveUserText, planSummary, completedTasksById,
 							modelSelection, resolvedModel,
-							signal, thinkingLevel, workspaceRoot, workspaceLspManager,
+							signal, thinkingLevel, workspaceRoot, workspaceLspManager, toolHooks,
 							baseTools: baseTeamTools, threadId, emit,
 						});
 						emit({
@@ -1540,7 +1550,7 @@ export async function runTeamSession(input: TeamOrchestratorInput): Promise<void
 			review = await runReviewerAgent({
 				settings, threadId, reviewer: reviewerExpert, completedTasks: completed,
 				userRequest: effectiveUserText, planSummary, modelSelection, resolvedModel, signal, thinkingLevel,
-				workspaceRoot, workspaceLspManager, baseTools: baseTeamTools, emit,
+				workspaceRoot, workspaceLspManager, toolHooks, baseTools: baseTeamTools, emit,
 			});
 		} else {
 			const failed = completed.filter((t) => t.status === 'failed' || t.status === 'revision');

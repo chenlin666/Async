@@ -28,6 +28,7 @@ import { buildRelevantMemoryContextBlock } from '../memdir/findRelevantMemories.
 import { extractMemoriesToDir } from '../services/extractMemories/extractMemories.js';
 import { setTodos, type TodoItem } from './todoStore.js';
 import { minimatch } from 'minimatch';
+import * as gitService from '../gitService.js';
 
 /** @deprecated 已由 WorkspaceLspManager 取代 */
 export function setToolLspSession(_session: unknown): void {
@@ -989,6 +990,180 @@ const UNIX_REDIRECT: Record<string, string> = {
 	find: 'Use Glob or Grep instead.',
 };
 
+type BashGitDirtyState = {
+	topLevel: string;
+	orderedEntries: Array<{ repoRel: string; wsRel: string }>;
+	dirtyContentByWsPath: Map<string, string | null>;
+};
+
+function decodeGitPorcelainPath(raw: string): string {
+	let value = raw.trim();
+	if (value.startsWith('"') && value.endsWith('"')) {
+		value = value
+			.slice(1, -1)
+			.replace(/\\"/g, '"')
+			.replace(/\\\\/g, '\\');
+	}
+	return value.replace(/\\/g, '/').replace(/^\.\/+/, '');
+}
+
+function parseGitPorcelainEntriesForWorkspace(
+	raw: string,
+	workspaceRoot: string,
+	gitTopLevel: string
+): Array<{ repoRel: string; wsRel: string }> {
+	const line = raw.trimEnd();
+	if (line.length < 4 || line[2] !== ' ') {
+		return [];
+	}
+	const rest = line.slice(3).trimEnd();
+	const repoPaths = rest.includes(' -> ')
+		? (() => {
+				const idx = rest.lastIndexOf(' -> ');
+				return [decodeGitPorcelainPath(rest.slice(0, idx)), decodeGitPorcelainPath(rest.slice(idx + 4))];
+			})()
+		: [decodeGitPorcelainPath(rest)];
+	const out: Array<{ repoRel: string; wsRel: string }> = [];
+	for (const repoRel of repoPaths) {
+		if (!repoRel) {
+			continue;
+		}
+		const wsRel = gitService.workspaceRelativeFromRepoRelative(repoRel, workspaceRoot, gitTopLevel);
+		if (wsRel) {
+			out.push({ repoRel, wsRel });
+		}
+	}
+	return out;
+}
+
+function readUtf8TextFileIfExists(fullPath: string): string | null {
+	try {
+		if (!fs.existsSync(fullPath)) {
+			return null;
+		}
+		const buf = fs.readFileSync(fullPath);
+		if (buf.includes(0)) {
+			return null;
+		}
+		return buf.toString('utf8');
+	} catch {
+		return null;
+	}
+}
+
+async function captureBashGitDirtyState(workspaceRoot: string): Promise<BashGitDirtyState | null> {
+	try {
+		const { stdout: gitRootStdout } = await execFileAsync(
+			'git',
+			['-c', 'core.quotepath=false', 'rev-parse', '--show-toplevel'],
+			{
+				cwd: workspaceRoot,
+				windowsHide: true,
+				maxBuffer: 1024 * 1024,
+				encoding: 'utf8',
+			}
+		);
+		const topLevel = path.resolve(String(gitRootStdout ?? '').trim());
+		if (!topLevel) {
+			return null;
+		}
+		const { stdout } = await execFileAsync(
+			'git',
+			['-c', 'core.quotepath=false', 'status', '--porcelain=v1'],
+			{
+				cwd: workspaceRoot,
+				windowsHide: true,
+				maxBuffer: 10 * 1024 * 1024,
+				encoding: 'utf8',
+			}
+		);
+		const orderedEntries: Array<{ repoRel: string; wsRel: string }> = [];
+		const seen = new Set<string>();
+		for (const line of String(stdout ?? '').split(/\r?\n/)) {
+			for (const entry of parseGitPorcelainEntriesForWorkspace(line, workspaceRoot, topLevel)) {
+				if (seen.has(entry.wsRel)) {
+					continue;
+				}
+				seen.add(entry.wsRel);
+				orderedEntries.push(entry);
+			}
+		}
+		const dirtyContentByWsPath = new Map<string, string | null>();
+		for (const entry of orderedEntries) {
+			const fullPath = resolveWorkspacePath(entry.wsRel, workspaceRoot);
+			dirtyContentByWsPath.set(entry.wsRel, readUtf8TextFileIfExists(fullPath));
+		}
+		return { topLevel, orderedEntries, dirtyContentByWsPath };
+	} catch {
+		return null;
+	}
+}
+
+async function readGitHeadTextOrNull(gitTopLevel: string, repoRel: string): Promise<string | null> {
+	try {
+		const { stdout } = await execFileAsync(
+			'git',
+			['-c', 'core.quotepath=false', 'show', `HEAD:${repoRel}`],
+			{
+				cwd: gitTopLevel,
+				windowsHide: true,
+				maxBuffer: 10 * 1024 * 1024,
+				encoding: 'utf8',
+			}
+		);
+		const content = String(stdout ?? '');
+		return content.includes('\u0000') ? null : content;
+	} catch {
+		return null;
+	}
+}
+
+async function recordBashWorkspaceSnapshots(
+	workspaceRoot: string,
+	hooks: ToolExecutionHooks,
+	beforeState: BashGitDirtyState | null
+): Promise<void> {
+	if (!hooks.beforeWrite && !hooks.afterWrite) {
+		return;
+	}
+	const afterState = await captureBashGitDirtyState(workspaceRoot);
+	const gitTopLevel = afterState?.topLevel ?? beforeState?.topLevel;
+	if (!gitTopLevel) {
+		return;
+	}
+	const orderedEntries: Array<{ repoRel: string; wsRel: string }> = [];
+	const seen = new Set<string>();
+	const pushUnique = (entry: { repoRel: string; wsRel: string }) => {
+		if (seen.has(entry.wsRel)) {
+			return;
+		}
+		seen.add(entry.wsRel);
+		orderedEntries.push(entry);
+	};
+	for (const entry of afterState?.orderedEntries ?? []) {
+		pushUnique(entry);
+	}
+	for (const entry of beforeState?.orderedEntries ?? []) {
+		pushUnique(entry);
+	}
+	for (const entry of orderedEntries) {
+		const previousContent = beforeState?.dirtyContentByWsPath.has(entry.wsRel)
+			? (beforeState.dirtyContentByWsPath.get(entry.wsRel) ?? null)
+			: await readGitHeadTextOrNull(gitTopLevel, entry.repoRel);
+		const fullPath = resolveWorkspacePath(entry.wsRel, workspaceRoot);
+		const nextContent = readUtf8TextFileIfExists(fullPath);
+		if ((previousContent ?? null) === (nextContent ?? null)) {
+			continue;
+		}
+		await hooks.beforeWrite?.({ path: entry.wsRel, previousContent });
+		if (nextContent !== null) {
+			await hooks.afterWrite?.({ path: entry.wsRel, previousContent, nextContent });
+		} else if (previousContent !== null) {
+			await hooks.afterWrite?.({ path: entry.wsRel, previousContent, nextContent: '' });
+		}
+	}
+}
+
 async function executeCommand(call: ToolCall, execCtx: ToolExecutionContext): Promise<ToolResult> {
 	throwIfToolAbortRequested(execCtx.signal, call.name, 'command:start');
 	const root = requireWorkspace(execCtx);
@@ -1015,6 +1190,7 @@ async function executeCommand(call: ToolCall, execCtx: ToolExecutionContext): Pr
 	const args = isWin
 		? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psCommand]
 		: ['-lc', command];
+	const beforeGitState = await captureBashGitDirtyState(root);
 
 	try {
 		const { stdout, stderr } = await execFileAsync(shell, args, {
@@ -1025,6 +1201,7 @@ async function executeCommand(call: ToolCall, execCtx: ToolExecutionContext): Pr
 			encoding: 'utf8',
 			signal: execCtx.signal,
 		});
+		await recordBashWorkspaceSnapshots(root, hooks, beforeGitState);
 		let output = '';
 		if (stdout) output += stdout;
 		if (stderr) output += (output ? '\n--- stderr ---\n' : '') + stderr;
@@ -1037,6 +1214,7 @@ async function executeCommand(call: ToolCall, execCtx: ToolExecutionContext): Pr
 		if (e instanceof Error && e.name === 'AbortError') {
 			throw e;
 		}
+		await recordBashWorkspaceSnapshots(root, hooks, beforeGitState);
 		const err = e as { stdout?: string; stderr?: string; message?: string; code?: number };
 		let output = '';
 		if (err.stdout) output += err.stdout;

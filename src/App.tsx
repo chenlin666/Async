@@ -30,7 +30,6 @@ import {
 	writePersistedAgentFileChanges,
 } from './agentFileChangesPersist';
 import { normalizeWorkspaceRelPath, workspaceRelPathsEqual } from './agentFileChangesFromGit';
-import { computeMergedAgentFileChanges } from './agentFileChangesCompute';
 import type { SettingsNavId, SettingsPageProps } from './SettingsPage';
 import {
 	applyThemePresetToAppearance,
@@ -712,9 +711,34 @@ function AppMainWorkspaceInner() {
 		clearAgentReviewForThread,
 		resetAgentReviewState,
 	} = useAgentFileReview();
+	const [agentSnapshotPaths, setAgentSnapshotPaths] = useState<Set<string>>(new Set());
 
 	const agentReviewPendingByThreadRef = useRef(agentReviewPendingByThread);
 	agentReviewPendingByThreadRef.current = agentReviewPendingByThread;
+	const refreshAgentSnapshotPaths = useCallback(async (): Promise<Set<string>> => {
+		if (!shell || !currentId) {
+			const empty = new Set<string>();
+			setAgentSnapshotPaths(empty);
+			return empty;
+		}
+		try {
+			const result = (await shell.invoke('agent:listSnapshotPaths', currentId)) as {
+				ok?: boolean;
+				paths?: string[];
+			};
+			const next = new Set(
+				(result?.ok && Array.isArray(result.paths) ? result.paths : [])
+					.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+					.map((item) => normalizeWorkspaceRelPath(item))
+			);
+			setAgentSnapshotPaths(next);
+			return next;
+		} catch {
+			const empty = new Set<string>();
+			setAgentSnapshotPaths(empty);
+			return empty;
+		}
+	}, [shell, currentId]);
 
 	const {
 		setParsedPlan,
@@ -1663,11 +1687,12 @@ function AppMainWorkspaceInner() {
 				}
 				await loadMessages(cid);
 				await refreshGit();
+				await refreshAgentSnapshotPaths();
 			} finally {
 				setAgentReviewBusy(false);
 			}
 		},
-		[shell, loadMessages, refreshGit]
+		[shell, loadMessages, refreshAgentSnapshotPaths, refreshGit]
 	);
 
 	const onApplyAgentPatchesAll = useCallback(async () => {
@@ -1696,10 +1721,11 @@ function AppMainWorkspaceInner() {
 			}));
 			await loadMessages(cid);
 			await refreshGit();
+			await refreshAgentSnapshotPaths();
 		} finally {
 			setAgentReviewBusy(false);
 		}
-	}, [shell, loadMessages, refreshGit]);
+	}, [shell, loadMessages, refreshAgentSnapshotPaths, refreshGit]);
 
 	useEffect(() => {
 		if (!shell) {
@@ -3018,12 +3044,12 @@ function AppMainWorkspaceInner() {
 						| { ok: true; hasSnapshot: true; previousContent: string | null }
 						| { ok?: false };
 					if (snapshotResult?.ok && snapshotResult.hasSnapshot) {
-						const previousContent = snapshotResult.previousContent ?? '';
+						const previousContent = snapshotResult.previousContent;
 						const { createTwoFilesPatch } = await import('diff');
 						previewDiff = createTwoFilesPatch(
-							`a/${normalizedRel}`,
+							previousContent === null ? '/dev/null' : `a/${normalizedRel}`,
 							`b/${normalizedRel}`,
-							previousContent,
+							previousContent ?? '',
 							content,
 							'',
 							'',
@@ -3033,7 +3059,7 @@ function AppMainWorkspaceInner() {
 						readError = null;
 						voidShellDebugLog('agent-file-preview:open:snapshot', {
 							relPath: normalizedRel,
-							previousLength: previousContent.length,
+							previousLength: (previousContent ?? '').length,
 							contentLength: content.length,
 							diffLength: previewDiff.length,
 							hunkCount: (await buildAgentFilePreviewHunks(previewDiff)).length,
@@ -3417,6 +3443,7 @@ function AppMainWorkspaceInner() {
 				if (result.cleared) {
 					dismissAgentChangedFile(agentFilePreview.relPath);
 				}
+				await refreshAgentSnapshotPaths();
 				await openAgentSidebarFilePreview(
 					agentFilePreview.relPath,
 					agentFilePreview.revealLine,
@@ -3432,6 +3459,7 @@ function AppMainWorkspaceInner() {
 			dismissAgentChangedFile,
 			flashComposerAttachErr,
 			openAgentSidebarFilePreview,
+			refreshAgentSnapshotPaths,
 			shell,
 		]
 	);
@@ -3471,6 +3499,7 @@ function AppMainWorkspaceInner() {
 					dismissAgentChangedFile(agentFilePreview.relPath);
 				}
 				await refreshGit();
+				await refreshAgentSnapshotPaths();
 				await openAgentSidebarFilePreview(
 					agentFilePreview.relPath,
 					agentFilePreview.revealLine,
@@ -3487,6 +3516,7 @@ function AppMainWorkspaceInner() {
 			flashComposerAttachErr,
 			markAgentConversationChangeReverted,
 			openAgentSidebarFilePreview,
+			refreshAgentSnapshotPaths,
 			refreshGit,
 			shell,
 			t,
@@ -4374,6 +4404,13 @@ function AppMainWorkspaceInner() {
 		restoreFileChangesState(currentId, messages, messagesThreadId);
 	}, [currentId, messages, messagesThreadId, restoreFileChangesState]);
 
+	useEffect(() => {
+		if (awaitingReply) {
+			return;
+		}
+		void refreshAgentSnapshotPaths();
+	}, [refreshAgentSnapshotPaths, messagesThreadId, awaitingReply]);
+
 	/**
 	 * Plan：切回线程或 loadMessages 完成后，若最后一条仍是带 QUESTIONS 的助手消息则恢复弹窗。
 	 * 降级为 useEffect（不涉及 DOM 测量/同步布局），消除 messages 变化引起的额外同步 render 轮次。
@@ -4440,6 +4477,7 @@ function AppMainWorkspaceInner() {
 				/* ignore */
 			}
 		}
+		await refreshAgentSnapshotPaths();
 		setDismissedFiles(new Set());
 		setFileChangesDismissed(true);
 		const last = [...messagesRef.current].reverse().find((m) => m.role === 'assistant');
@@ -4451,61 +4489,114 @@ function AppMainWorkspaceInner() {
 			revertedFilesRef.current,
 			revertedChangeKeysRef.current
 		);
-	}, [shell, currentId]);
+	}, [shell, currentId, refreshAgentSnapshotPaths]);
 
 	const onRevertAllEdits = useCallback(async () => {
-		if (!shell || composerMode !== 'agent' || !currentId) return;
-		const gp = agentGitPackRef.current;
-		const revertedPaths = new Set(
-			computeMergedAgentFileChanges(
-				displayMessagesRef.current,
-				composerMode,
-				t,
-				dismissedFilesRef.current,
-				{ gitStatusOk: gp.gitStatusOk, gitChangedPaths: gp.gitChangedPaths, diffPreviews: gp.diffPreviews },
-				null
-			).map((file) => file.path)
-		);
+		if (!shell || (composerMode !== 'agent' && composerMode !== 'team') || !currentId) return;
 		try {
-			const result = (await shell.invoke('agent:revertLastTurn', currentId)) as { ok?: boolean; reverted?: number };
-			if ((result.reverted ?? 0) > 0) {
-				void refreshGit();
+			const result = (await shell.invoke('agent:revertLastTurn', currentId)) as {
+				ok?: boolean;
+				error?: string;
+				reverted?: number;
+				revertedPaths?: string[];
+				failed?: { path: string; error: string }[];
+			};
+			if (!result?.ok) {
+				flashComposerAttachErr(result?.error ?? 'Unable to revert these changes.');
+				return;
+			}
+			const revertedNow = Array.isArray(result.revertedPaths)
+				? result.revertedPaths.map((item) => normalizeWorkspaceRelPath(item))
+				: [];
+			const failed = Array.isArray(result.failed) ? result.failed : [];
+			if (revertedNow.length === 0 && failed.length === 0) {
+				flashComposerAttachErr('No revert snapshot is available for these changes.');
+				await refreshAgentSnapshotPaths();
+				return;
+			}
+			if (revertedNow.length > 0) {
+				await refreshGit();
+			}
+			const nextRevertedPaths = new Set(revertedFilesRef.current);
+			for (const relPath of revertedNow) {
+				nextRevertedPaths.add(relPath);
+			}
+			const nextDismissed = failed.length > 0 ? new Set(revertedNow) : new Set<string>();
+			const remainingSnapshotPaths = await refreshAgentSnapshotPaths();
+			const dismissAll = remainingSnapshotPaths.size === 0 && failed.length === 0;
+			setRevertedFiles(nextRevertedPaths);
+			setRevertedChangeKeys(new Set());
+			setDismissedFiles(nextDismissed);
+			setFileChangesDismissed(dismissAll);
+			const last = [...messagesRef.current].reverse().find((m) => m.role === 'assistant');
+			writePersistedAgentFileChanges(
+				currentId,
+				last?.content ?? '',
+				dismissAll,
+				nextDismissed,
+				nextRevertedPaths,
+				new Set()
+			);
+			if (failed.length > 0) {
+				flashComposerAttachErr(
+					`Some changes could not be reverted: ${failed.map((item) => item.path).join(', ')}`
+				);
 			}
 		} catch {
-			/* IPC error — still dismiss panel to unblock the user */
+			flashComposerAttachErr('Unable to revert these changes.');
 		}
-		setRevertedFiles(revertedPaths);
-		setRevertedChangeKeys(new Set());
-		setDismissedFiles(new Set());
-		setFileChangesDismissed(true);
-		const last = [...messagesRef.current].reverse().find((m) => m.role === 'assistant');
-		writePersistedAgentFileChanges(
-			currentId,
-			last?.content ?? '',
-			true,
-			new Set(),
-			revertedPaths,
-			new Set()
-		);
-	}, [shell, composerMode, currentId, refreshGit, t]);
+	}, [shell, composerMode, currentId, flashComposerAttachErr, refreshAgentSnapshotPaths, refreshGit]);
 
 	const onKeepFileEdit = useCallback(async (relPath: string) => {
 		if (!shell || !currentId) return;
 		try {
-			await shell.invoke('agent:keepFile', currentId, relPath);
-		} catch { /* ignore */ }
+			const result = (await shell.invoke('agent:keepFile', currentId, relPath)) as { ok?: boolean };
+			if (!result?.ok) {
+				flashComposerAttachErr('Unable to keep this change.');
+				return;
+			}
+		} catch {
+			flashComposerAttachErr('Unable to keep this change.');
+			return;
+		}
+		await refreshAgentSnapshotPaths();
 		dismissAgentChangedFile(relPath);
-	}, [dismissAgentChangedFile, shell, currentId]);
+	}, [dismissAgentChangedFile, flashComposerAttachErr, shell, currentId, refreshAgentSnapshotPaths]);
 
 	const onRevertFileEdit = useCallback(async (relPath: string) => {
 		if (!shell || !currentId) return;
 		try {
-			await shell.invoke('agent:revertFile', currentId, relPath);
-			void refreshGit();
-		} catch { /* ignore */ }
+			const result = (await shell.invoke('agent:revertFile', currentId, relPath)) as {
+				ok?: boolean;
+				reverted?: boolean;
+				error?: string;
+			};
+			if (!result?.ok) {
+				flashComposerAttachErr(result?.error ?? 'Unable to revert this change.');
+				return;
+			}
+			if (!result.reverted) {
+				flashComposerAttachErr('No revert snapshot is available for this file.');
+				await refreshAgentSnapshotPaths();
+				return;
+			}
+			await refreshGit();
+			await refreshAgentSnapshotPaths();
+		} catch {
+			flashComposerAttachErr('Unable to revert this change.');
+			return;
+		}
 		markAgentConversationChangeReverted(null, relPath);
 		dismissAgentChangedFile(relPath);
-	}, [dismissAgentChangedFile, markAgentConversationChangeReverted, shell, currentId, refreshGit]);
+	}, [
+		dismissAgentChangedFile,
+		flashComposerAttachErr,
+		markAgentConversationChangeReverted,
+		shell,
+		currentId,
+		refreshAgentSnapshotPaths,
+		refreshGit,
+	]);
 
 	const syncMessagesScrollIndicators = useCallback(() => {
 		const el = messagesViewportRef.current;
@@ -5433,6 +5524,7 @@ function AppMainWorkspaceInner() {
 		toolApprovalRequest,
 		respondToolApproval,
 		dismissedFiles,
+		snapshotPaths: agentSnapshotPaths,
 		fileChangesDismissed,
 		onKeepAllEdits,
 		onRevertAllEdits,
@@ -5487,6 +5579,10 @@ function AppMainWorkspaceInner() {
 		onCommitAndPush,
 		teamSession,
 		onSelectTeamExpert: onSelectTeamTask,
+		workspaceRoot: workspace,
+		onOpenTeamAgentFile: onAgentConversationOpenFile,
+		revertedPaths: revertedFiles,
+		revertedChangeKeys,
 	});
 
 	const editorMainPanelProps = useEditorMainPanelProps({
@@ -5540,6 +5636,10 @@ function AppMainWorkspaceInner() {
 		teamSession,
 		selectedTeamTaskId: teamSession?.selectedTaskId ?? null,
 		onSelectTeamTask,
+		workspaceRoot: workspace,
+		onOpenTeamAgentFile: onAgentConversationOpenFile,
+		revertedPaths: revertedFiles,
+		revertedChangeKeys,
 	});
 
 	const editorLeftSidebarProps = useMemo(

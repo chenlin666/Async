@@ -131,6 +131,7 @@ export type AgentChatPanelProps = {
 	respondToolApproval: (allow: boolean) => void;
 	/** 逐文件忽略改动条；与 Git 合并后的列表在面板内计算，避免 Git fullStatus 拖垮 useAgentChatPanelProps */
 	dismissedFiles: ReadonlySet<string>;
+	snapshotPaths: ReadonlySet<string>;
 	fileChangesDismissed: boolean;
 	onKeepAllEdits: () => void;
 	onRevertAllEdits: () => void;
@@ -263,6 +264,7 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 	toolApprovalRequest,
 	respondToolApproval,
 	dismissedFiles,
+	snapshotPaths,
 	fileChangesDismissed,
 	onKeepAllEdits,
 	onRevertAllEdits,
@@ -306,9 +308,10 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 				t,
 				dismissedFiles,
 				{ gitStatusOk, gitChangedPaths, diffPreviews },
-				segmentCacheRef
+				segmentCacheRef,
+				snapshotPaths
 			),
-		[displayMessages, composerMode, t, dismissedFiles, gitStatusOk, gitChangedPaths, diffPreviews]
+		[displayMessages, composerMode, t, dismissedFiles, gitStatusOk, gitChangedPaths, diffPreviews, snapshotPaths]
 	);
 
 	const isEditorRail = layout === 'editor-rail';
@@ -1049,7 +1052,7 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 				/>
 			) : null}
 			{hasConversation &&
-			composerMode === 'agent' &&
+			(composerMode === 'agent' || composerMode === 'team') &&
 			agentFileChanges.length > 0 &&
 			!awaitingReply &&
 			!fileChangesDismissed ? (
