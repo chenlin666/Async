@@ -17,7 +17,6 @@ export type ResolvedTeamExpertProfiles = {
 	experts: TeamExpertRuntimeProfile[];
 	teamLead: TeamExpertRuntimeProfile | null;
 	reviewer: TeamExpertRuntimeProfile | null;
-	researcher: TeamExpertRuntimeProfile | null;
 	specialists: TeamExpertRuntimeProfile[];
 	planReviewer: TeamExpertRuntimeProfile | null;
 	deliveryReviewer: TeamExpertRuntimeProfile | null;
@@ -106,13 +105,11 @@ export function resolveTeamExpertProfiles(
 		out.find((expert) => expert.assignmentKey === 'reviewer') ??
 		out.find((expert) => expert.roleType === 'reviewer') ??
 		null;
-	const researcher = out.find((expert) => expert.assignmentKey === 'researcher') ?? null;
-	const specialists = out.filter((expert) => expert.id !== teamLead?.id && expert.id !== reviewer?.id && expert.id !== researcher?.id);
+	const specialists = out.filter((expert) => expert.id !== teamLead?.id && expert.id !== reviewer?.id);
 	return {
 		experts: out,
 		teamLead,
 		reviewer,
-		researcher,
 		specialists,
 		planReviewer: resolveOptionalReviewer(team?.planReviewer, baseTools) ?? reviewer,
 		deliveryReviewer: resolveOptionalReviewer(team?.deliveryReviewer, baseTools) ?? reviewer,

@@ -966,7 +966,6 @@ export const messagesEn: Record<string, string> = {
 	'settings.team.useDefaults': 'Include built-in default team',
 	'settings.team.requirePlanApproval': 'Require user approval before execution',
 	'settings.team.enablePreflightReview': 'Enable reviewer preflight assessment',
-	'settings.team.enableResearchPhase': 'Enable researcher investigation before planning',
 	'settings.team.empty': 'No custom team roles yet.',
 	'settings.team.roleName': 'Role name',
 	'settings.team.roleType': 'Role type',

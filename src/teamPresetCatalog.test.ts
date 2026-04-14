@@ -7,7 +7,6 @@ describe('getTeamPresetDefaults', () => {
 		expect(getTeamPresetDefaults('engineering')).toMatchObject({
 			requirePlanApproval: true,
 			enablePreflightReview: false,
-			enableResearchPhase: false,
 		});
 	});
 });

@@ -19,6 +19,8 @@ const INVOKE_CHANNELS = new Set([
 	'lsp:ts:stop',
 	'lsp:ts:definition',
 	'lsp:ts:diagnostics',
+	'workspace:memory:stats',
+	'workspace:memory:rebuild',
 	'settings:get',
 	'settings:set',
 	'usageStats:get',

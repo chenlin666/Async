@@ -963,7 +963,6 @@ export const messagesZhCN: Record<string, string> = {
 	'settings.team.useDefaults': '包含内置默认团队',
 	'settings.team.requirePlanApproval': '执行前需要用户确认计划',
 	'settings.team.enablePreflightReview': '启用评审专家做需求预审',
-	'settings.team.enableResearchPhase': '启用调研员在规划前调研需求',
 	'settings.team.empty': '暂无自定义 Team 角色。',
 	'settings.team.roleName': '角色名称',
 	'settings.team.roleType': '角色类型',
