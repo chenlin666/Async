@@ -104,6 +104,7 @@ type ChatStreamPayloadCore =
 			type: 'plan_question_request';
 			requestId: string;
 			question: { text: string; options: { id: string; label: string }[] };
+			teamRoleScope?: TeamRoleScope;
 	  }
 	| {
 			threadId: string;
@@ -122,7 +123,7 @@ type ChatStreamPayloadCore =
 	| {
 			threadId: string;
 			type: 'team_phase';
-			phase: 'planning' | 'preflight' | 'proposing' | 'executing' | 'reviewing' | 'delivering' | 'cancelled';
+			phase: 'researching' | 'planning' | 'preflight' | 'proposing' | 'executing' | 'reviewing' | 'delivering' | 'cancelled';
 	  }
 	| {
 			threadId: string;

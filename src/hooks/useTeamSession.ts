@@ -10,6 +10,7 @@ import { flattenAssistantTextPartsForSearch } from '../agentStructuredMessage';
 import { extractTeamLeadNarrative } from '../teamWorkflowText';
 
 export type TeamSessionPhase =
+	| 'researching'
 	| 'planning'
 	| 'preflight'
 	| 'proposing'
@@ -310,6 +311,19 @@ function mutateRoleWorkflowPayload(
 			if (isLead) {
 				session.leaderMessage = nextMessage.content;
 			}
+			return true;
+		}
+		case 'plan_question_request': {
+			const q = payload.question;
+			const optionLines = q.options.map((o) => `- ${o.label}`).join('\n');
+			const content = `**${q.text}**\n\n${optionLines}`;
+			const nextMessage: ChatMessage = { role: 'assistant', content };
+			const lastMessage = workflow.messages[workflow.messages.length - 1];
+			if (!(lastMessage?.role === nextMessage.role && lastMessage?.content === nextMessage.content)) {
+				workflow.messages = [...workflow.messages, nextMessage];
+			}
+			workflow.awaitingReply = true;
+			workflow.lastUpdatedAt = Date.now();
 			return true;
 		}
 		default:

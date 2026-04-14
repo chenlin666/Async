@@ -36,7 +36,7 @@ export type TeamSessionSnapshotTask = {
 };
 
 export type TeamSessionSnapshot = {
-	phase: 'planning' | 'executing' | 'reviewing' | 'delivering';
+	phase: 'researching' | 'planning' | 'executing' | 'reviewing' | 'delivering';
 	tasks: TeamSessionSnapshotTask[];
 	planSummary: string;
 	leaderMessage: string;

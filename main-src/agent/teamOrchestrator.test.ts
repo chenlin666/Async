@@ -237,14 +237,13 @@ describe('runTeamSession clarification gates', () => {
 			},
 		});
 
+		let secondPlanningMessagesText = '';
 		runAgentLoopMock
 			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
 				handlers.onDone('MODE: CLARIFY\n请先明确优化目标。');
 			})
 			.mockImplementationOnce(async (_settings, messagesArg, _options, handlers) => {
-				const lastUser = [...messagesArg].reverse().find((message) => message.role === 'user');
-				expect(String(lastUser?.content ?? '')).toContain('[TEAM CLARIFICATION ANSWER]');
-				expect(String(lastUser?.content ?? '')).toContain('代码质量与架构');
+				secondPlanningMessagesText = messagesArg.map((message) => String(message.content ?? '')).join('\n');
 				handlers.onDone(`MODE: PLAN
 我会按你选择的代码质量方向分配专家。
 
@@ -276,6 +275,8 @@ describe('runTeamSession clarification gates', () => {
 				text: expect.stringContaining('你想优先从哪个方向优化这个项目'),
 			}),
 		});
+		expect(secondPlanningMessagesText).toContain('[TEAM CLARIFICATION ANSWER]');
+		expect(secondPlanningMessagesText).toContain('代码质量与架构');
 		expect(events.some((evt) => evt.type === 'team_task_created')).toBe(true);
 		expect(doneCalls).toHaveLength(1);
 		expect(doneCalls[0]?.text).not.toContain('MODE:');

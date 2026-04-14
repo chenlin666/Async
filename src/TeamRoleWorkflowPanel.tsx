@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef } from 'react';
 import { ChatMarkdown } from './ChatMarkdown';
+import { TeamRoleAvatar } from './TeamRoleAvatar';
 import type { TFunction } from './i18n';
 import type { ChatMessage } from './threadTypes';
 import type { TeamSessionState } from './hooks/useTeamSession';
@@ -216,9 +217,7 @@ export const TeamRoleWorkflowPanel = memo(function TeamRoleWorkflowPanel({
 			<header className="ref-team-role-shell-head">
 				<div className="ref-team-role-shell-main">
 					<div className="ref-team-role-shell-expert">
-						<span className={`ref-team-expert-avatar ref-team-expert-avatar--${item.roleType}`}>
-							{item.expertName.slice(0, 1).toUpperCase()}
-						</span>
+						<TeamRoleAvatar roleType={item.roleType} assignmentKey={item.expertAssignmentKey} />
 						<div className="ref-team-role-shell-title-stack">
 							<div className="ref-team-role-shell-title-row">
 								<span className="ref-team-role-shell-role">

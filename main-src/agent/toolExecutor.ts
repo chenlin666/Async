@@ -18,7 +18,7 @@ import type { McpToolResult } from '../mcp/mcpTypes.js';
 import type { NestedAgentStreamEmit } from '../ipc/nestedAgentStream.js';
 import { appendSubagentTranscript } from '../threadStore.js';
 import { assembleAgentToolPool } from './agentToolPool.js';
-import { executeAskPlanQuestionTool } from './planQuestionTool.js';
+import { executeAskPlanQuestionTool, type TeamPlanQuestionRoleScope } from './planQuestionTool.js';
 import type { ComposerMode } from '../llm/composerMode.js';
 import { buildSubagentSystemAppend, findConfiguredSubagent, resolveSubagentProfile } from './subagentProfile.js';
 import { shouldRunAgentInBackground } from './agentForkPolicy.js';
@@ -273,6 +273,8 @@ export type ToolExecutionContext = {
 	workspaceLspManager?: WorkspaceLspManager | null;
 	threadId?: string | null;
 	signal?: AbortSignal;
+	/** Team 子循环：随 ask_plan_question 一并下发，供聊天区挂到对应角色 */
+	teamToolRoleScope?: TeamPlanQuestionRoleScope;
 };
 
 function throwIfToolAbortRequested(signal: AbortSignal | undefined, toolName: string, phase: string): void {
@@ -316,7 +318,10 @@ export async function executeTool(
 		case 'TodoWrite':
 			return executeTodoWrite(call, execCtx);
 		case 'ask_plan_question':
-			return await executeAskPlanQuestionTool(call);
+			return await executeAskPlanQuestionTool(
+				call,
+				execCtx.teamToolRoleScope ? { teamRoleScope: execCtx.teamToolRoleScope } : undefined
+			);
 		default:
 			if (getMcpManager().isMcpTool(call.name)) {
 				return await executeMcpAgentTool(call, execCtx);

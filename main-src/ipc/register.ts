@@ -317,54 +317,6 @@ function readWorkspaceTextFileIfExists(relPath: string, workspaceRoot: string | 
 	}
 }
 
-function getAgentSnapshots(threadId: string, create = false): Map<string, string | null> | null {
-	const id = String(threadId ?? '');
-	if (!id) {
-		return null;
-	}
-	const existing = agentRevertSnapshotsByThread.get(id);
-	if (existing || !create) {
-		return existing ?? null;
-	}
-	const created = new Map<string, string | null>();
-	agentRevertSnapshotsByThread.set(id, created);
-	return created;
-}
-
-function listAgentSnapshotPaths(threadId: string): string[] {
-	const snapshots = getAgentSnapshots(threadId, false);
-	return snapshots ? [...snapshots.keys()] : [];
-}
-
-function recordAgentSnapshot(threadId: string, relPath: string, previousContent: string | null): boolean {
-	const normalizedThreadId = String(threadId ?? '');
-	const normalizedRelPath = String(relPath ?? '').trim();
-	if (!normalizedThreadId || !normalizedRelPath) {
-		return false;
-	}
-	const snapshots = getAgentSnapshots(normalizedThreadId, true);
-	if (!snapshots || snapshots.has(normalizedRelPath)) {
-		return false;
-	}
-	snapshots.set(normalizedRelPath, previousContent);
-	return true;
-}
-
-function seedAgentSnapshotFromWorkspace(threadId: string, relPath: string, workspaceRoot: string | null): boolean {
-	const normalizedRelPath = String(relPath ?? '').trim();
-	const previousContent = readWorkspaceTextFileIfExists(normalizedRelPath, workspaceRoot);
-	const recorded = recordAgentSnapshot(threadId, normalizedRelPath, previousContent);
-	if (recorded && threadId) {
-		touchFileInThread(
-			threadId,
-			normalizedRelPath,
-			previousContent === null ? 'created' : 'modified',
-			previousContent === null
-		);
-	}
-	return recorded;
-}
-
 function contentsEqual(a: string | null, b: string | null): boolean {
 	return (a ?? null) === (b ?? null);
 }
@@ -497,12 +449,12 @@ function runChatStream(
 				thinkingLevel,
 			};
 			if (mode === 'team') {
-				phaseRef.current = 'runTeamSession';
 				setPlanQuestionRuntime({
 					threadId,
 					signal: ac.signal,
 					emit: (evt) => send({ threadId, ...evt }),
 				});
+				phaseRef.current = 'runTeamSession';
 				try {
 					await runTeamSession({
 						settings,
@@ -515,20 +467,6 @@ function runChatStream(
 						thinkingLevel,
 						workspaceRoot,
 						workspaceLspManager,
-						toolHooks: {
-							beforeWrite: ({ path, previousContent }) => {
-								if (!recordAgentSnapshot(threadId, path, previousContent)) {
-									touchFileInThread(threadId, path, 'modified', false);
-									return;
-								}
-								touchFileInThread(
-									threadId,
-									path,
-									previousContent === null ? 'created' : 'modified',
-									previousContent === null
-								);
-							},
-						},
 						emit: (evt) => send(evt),
 						onDone: (full, usage, teamSnapshot) => {
 							updateLastAssistant(threadId, full);
@@ -664,10 +602,12 @@ function runChatStream(
 						threadId,
 						toolHooks: {
 							beforeWrite: ({ path, previousContent }) => {
-								if (!recordAgentSnapshot(threadId, path, previousContent)) {
+								const snapshots = agentRevertSnapshotsByThread.get(threadId);
+								if (!snapshots || snapshots.has(path)) {
 									touchFileInThread(threadId, path, 'modified', false);
 									return;
 								}
+								snapshots.set(path, previousContent);
 								touchFileInThread(
 									threadId,
 									path,
@@ -1607,17 +1547,7 @@ export function registerIpc(): void {
 		if (!threadId || !chunk) {
 			return { applied: [] as string[], failed: [{ path: '(invalid)', reason: '参数无效' }] };
 		}
-		const workspaceRoot = senderWorkspaceRoot(event);
-		const relPath = listAgentDiffChunks(chunk)[0]?.relPath ?? null;
-		const seeded = relPath ? seedAgentSnapshotFromWorkspace(threadId, relPath, workspaceRoot) : false;
-		const ar = applyAgentDiffChunk(chunk, workspaceRoot);
-		if (seeded && relPath && ar.applied.length === 0) {
-			const snapshots = getAgentSnapshots(threadId, false);
-			snapshots?.delete(relPath);
-			if (snapshots && snapshots.size === 0) {
-				agentRevertSnapshotsByThread.delete(threadId);
-			}
-		}
+		const ar = applyAgentDiffChunk(chunk, senderWorkspaceRoot(event));
 		const statsDir = activeUsageStatsDir();
 		if (statsDir && ar.applied.length > 0) {
 			const { add, del } = countDiffLinesInChunk(chunk);
@@ -1648,35 +1578,7 @@ export function registerIpc(): void {
 					succeededIds: [] as string[],
 				};
 			}
-			const workspaceRoot = senderWorkspaceRoot(event);
-			const seededPaths = new Set<string>();
-			for (const item of items) {
-				const relPath = listAgentDiffChunks(item.chunk)[0]?.relPath ?? null;
-				if (relPath && seedAgentSnapshotFromWorkspace(threadId, relPath, workspaceRoot)) {
-					seededPaths.add(relPath);
-				}
-			}
-			const ar = applyAgentPatchItems(items, workspaceRoot);
-			if (seededPaths.size > 0) {
-				const succeededIds = new Set(ar.succeededIds ?? []);
-				const succeededPaths = new Set(
-					items
-						.filter((item) => succeededIds.has(item.id))
-						.map((item) => listAgentDiffChunks(item.chunk)[0]?.relPath ?? '')
-						.filter(Boolean)
-				);
-				const snapshots = getAgentSnapshots(threadId, false);
-				if (snapshots) {
-					for (const relPath of seededPaths) {
-						if (!succeededPaths.has(relPath)) {
-							snapshots.delete(relPath);
-						}
-					}
-					if (snapshots.size === 0) {
-						agentRevertSnapshotsByThread.delete(threadId);
-					}
-				}
-			}
+			const ar = applyAgentPatchItems(items, senderWorkspaceRoot(event));
 			const statsDir = activeUsageStatsDir();
 			if (statsDir && ar.succeededIds.length > 0) {
 				const ok = new Set(ar.succeededIds);
@@ -1762,13 +1664,7 @@ export function registerIpc(): void {
 				if (scope === 'project' && !root) {
 					return { ok: false as const, error: 'no-workspace' as const };
 				}
-				const prepared = prepareUserTurnForChat(
-					skillIn.userNote,
-					agentForTurn,
-					root,
-					workspaceFiles,
-					settings.language === 'en' ? 'en' : 'zh-CN'
-				);
+				const prepared = prepareUserTurnForChat(skillIn.userNote, agentForTurn, root, workspaceFiles);
 				const lang = settings.language === 'en' ? 'en' : 'zh-CN';
 				const visible = formatSkillCreatorUserBubble(scope, lang, skillIn.userNote);
 				const skillBlock = buildSkillCreatorSystemAppend(scope, lang, root);
@@ -1808,13 +1704,7 @@ export function registerIpc(): void {
 				const creatorAgentMode: ComposerMode = 'agent';
 				const ruleScope: AgentRuleScope =
 					ruleIn.ruleScope === 'glob' || ruleIn.ruleScope === 'manual' ? ruleIn.ruleScope : 'always';
-				const prepared = prepareUserTurnForChat(
-					ruleIn.userNote,
-					agentForTurn,
-					root,
-					workspaceFiles,
-					settings.language === 'en' ? 'en' : 'zh-CN'
-				);
+				const prepared = prepareUserTurnForChat(ruleIn.userNote, agentForTurn, root, workspaceFiles);
 				const lang = settings.language === 'en' ? 'en' : 'zh-CN';
 				const visible = formatRuleCreatorUserBubble(ruleScope, ruleIn.globPattern, lang, ruleIn.userNote);
 				const ruleBlock = buildRuleCreatorSystemAppend(ruleScope, ruleIn.globPattern, lang, root);
@@ -1861,13 +1751,7 @@ export function registerIpc(): void {
 				if (scope === 'project' && !root) {
 					return { ok: false as const, error: 'no-workspace' as const };
 				}
-				const prepared = prepareUserTurnForChat(
-					subIn.userNote,
-					agentForTurn,
-					root,
-					workspaceFiles,
-					settings.language === 'en' ? 'en' : 'zh-CN'
-				);
+				const prepared = prepareUserTurnForChat(subIn.userNote, agentForTurn, root, workspaceFiles);
 				const lang = settings.language === 'en' ? 'en' : 'zh-CN';
 				const visible = formatSubagentCreatorUserBubble(scope, lang, subIn.userNote);
 				const subBlock = buildSubagentCreatorSystemAppend(scope, lang, root);
@@ -1906,8 +1790,7 @@ export function registerIpc(): void {
 				text,
 				agentForTurn,
 				root,
-				workspaceFiles,
-				settings.language === 'en' ? 'en' : 'zh-CN'
+				workspaceFiles
 			);
 
 			let finalSystemAppend = agentSystemAppend;
@@ -2008,13 +1891,7 @@ export function registerIpc(): void {
 				throwIfAbortRequested(preflightAc.signal, threadId, 'editResend ensureWorkspaceFileIndex');
 				const projectAgent = readWorkspaceAgentProjectSlice(root);
 				const agentForTurn = mergeAgentWithProjectSlice(settings.agent, projectAgent);
-				const { userText, agentSystemAppend, atPaths } = prepareUserTurnForChat(
-					trimmed,
-					agentForTurn,
-					root,
-					workspaceFiles,
-					settings.language === 'en' ? 'en' : 'zh-CN'
-				);
+				const { userText, agentSystemAppend, atPaths } = prepareUserTurnForChat(trimmed, agentForTurn, root, workspaceFiles);
 
 				let finalSystemAppend = agentSystemAppend;
 				if (root && (mode === 'plan' || mode === 'ask' || mode === 'team')) {
@@ -2174,58 +2051,30 @@ export function registerIpc(): void {
 		return { ok: true as const };
 	});
 
-	ipcMain.handle('agent:listSnapshotPaths', (_e, threadId: string) => {
-		return { ok: true as const, paths: listAgentSnapshotPaths(threadId) };
-	});
-
 	ipcMain.handle('agent:revertLastTurn', (event, threadId: string) => {
 		const root = senderWorkspaceRoot(event);
 		if (!root) {
-			return {
-				ok: false as const,
-				error: 'no-workspace' as const,
-				reverted: 0,
-				revertedPaths: [] as string[],
-				failed: [] as { path: string; error: string }[],
-			};
+			return { ok: false as const, error: 'no-workspace' as const };
 		}
-		const snapshots = getAgentSnapshots(threadId, false);
+		const snapshots = agentRevertSnapshotsByThread.get(threadId);
 		if (!snapshots || snapshots.size === 0) {
-			return {
-				ok: true as const,
-				reverted: 0,
-				revertedPaths: [] as string[],
-				failed: [] as { path: string; error: string }[],
-			};
+			return { ok: true as const, reverted: 0 };
 		}
 
-		const revertedPaths: string[] = [];
-		const failed: { path: string; error: string }[] = [];
 		for (const [relPath, previousContent] of Array.from(snapshots.entries()).reverse()) {
-			try {
-				const full = resolveWorkspacePath(relPath, root);
-				if (previousContent === null) {
-					if (fs.existsSync(full)) {
-						fs.unlinkSync(full);
-					}
-				} else {
-					fs.mkdirSync(path.dirname(full), { recursive: true });
-					fs.writeFileSync(full, previousContent, 'utf8');
+			const full = resolveWorkspacePath(relPath, root);
+			if (previousContent === null) {
+				if (fs.existsSync(full)) {
+					fs.unlinkSync(full);
 				}
-				snapshots.delete(relPath);
-				revertedPaths.push(relPath);
-			} catch (error) {
-				failed.push({
-					path: relPath,
-					error: error instanceof Error ? error.message : String(error),
-				});
+				continue;
 			}
+			fs.mkdirSync(path.dirname(full), { recursive: true });
+			fs.writeFileSync(full, previousContent, 'utf8');
 		}
 
-		if (snapshots.size === 0) {
-			agentRevertSnapshotsByThread.delete(threadId);
-		}
-		return { ok: true as const, reverted: revertedPaths.length, revertedPaths, failed };
+		agentRevertSnapshotsByThread.delete(threadId);
+		return { ok: true as const, reverted: snapshots.size };
 	});
 
 	ipcMain.handle('agent:keepFile', (_e, threadId: string, relPath: string) => {
@@ -2236,17 +2085,17 @@ export function registerIpc(): void {
 		return { ok: true as const };
 	});
 
-	ipcMain.handle('agent:getFileSnapshot', (_e, threadId: string, relPath: string) => {
-		const snapshots = getAgentSnapshots(String(threadId ?? ''), false);
-		if (!snapshots || !snapshots.has(relPath)) {
-			return { ok: true as const, hasSnapshot: false as const };
-		}
+ipcMain.handle('agent:getFileSnapshot', (_e, threadId: string, relPath: string) => {
+	const snapshots = agentRevertSnapshotsByThread.get(String(threadId ?? ''));
+	if (!snapshots || !snapshots.has(relPath)) {
+		return { ok: true as const, hasSnapshot: false as const };
+	}
 		return {
 			ok: true as const,
 			hasSnapshot: true as const,
-			previousContent: snapshots.get(relPath) ?? null,
-		};
-	});
+		previousContent: snapshots.get(relPath) ?? null,
+	};
+});
 
 ipcMain.handle(
 	'agent:seedFileSnapshot',
@@ -2270,7 +2119,9 @@ ipcMain.handle(
 			/^new file mode\s/m.test(diff) || /^---\s+\/dev\/null$/m.test(diff)
 				? null
 				: baseline;
-		recordAgentSnapshot(threadId, relPath, previousContent);
+		const snapshots = agentRevertSnapshotsByThread.get(threadId) ?? new Map<string, string | null>();
+		snapshots.set(relPath, previousContent);
+		agentRevertSnapshotsByThread.set(threadId, snapshots);
 		return {
 			ok: true as const,
 			seeded: true as const,
@@ -2368,25 +2219,17 @@ ipcMain.handle(
 		if (!root) {
 			return { ok: false as const, error: 'no-workspace' as const };
 		}
-		const snapshots = getAgentSnapshots(threadId, false);
+		const snapshots = agentRevertSnapshotsByThread.get(threadId);
 		if (!snapshots || !snapshots.has(relPath)) {
 			return { ok: true as const, reverted: false };
 		}
 		const previousContent = snapshots.get(relPath)!;
-		try {
-			const full = resolveWorkspacePath(relPath, root);
-			if (previousContent === null) {
-				if (fs.existsSync(full)) fs.unlinkSync(full);
-			} else {
-				fs.mkdirSync(path.dirname(full), { recursive: true });
-				fs.writeFileSync(full, previousContent, 'utf8');
-			}
-		} catch (error) {
-			return {
-				ok: false as const,
-				error: error instanceof Error ? error.message : String(error),
-				reverted: false as const,
-			};
+		const full = resolveWorkspacePath(relPath, root);
+		if (previousContent === null) {
+			if (fs.existsSync(full)) fs.unlinkSync(full);
+		} else {
+			fs.mkdirSync(path.dirname(full), { recursive: true });
+			fs.writeFileSync(full, previousContent, 'utf8');
 		}
 		snapshots.delete(relPath);
 		if (snapshots.size === 0) agentRevertSnapshotsByThread.delete(threadId);

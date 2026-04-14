@@ -16412,7 +16412,8 @@ select.ref-settings-native-select:focus {
 .ref-team-expert-avatar--frontend  { background: #3b82f6; }
 .ref-team-expert-avatar--backend   { background: #f97316; }
 .ref-team-expert-avatar--qa        { background: #22c55e; }
-.ref-team-expert-avatar--reviewer  { background: #ec4899; }
+.ref-team-expert-avatar--reviewer   { background: #ec4899; }
+.ref-team-expert-avatar--researcher { background: #06b6d4; }
 .ref-team-expert-avatar--custom    { background: #6b7280; }
 
 .ref-team-avatar-sm {

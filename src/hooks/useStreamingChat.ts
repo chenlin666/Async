@@ -460,6 +460,17 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 			}
 
 			const visible = payload.threadId === rt.currentIdRef.current;
+			/* plan_question_request 可能带 teamRoleScope；须先弹出 UI，再写入对应专家工作流 */
+			if (payload.type === 'plan_question_request') {
+				if (visible) {
+					rt.setPlanQuestion(payload.question);
+					rt.setPlanQuestionRequestId(payload.requestId);
+				}
+				if ('teamRoleScope' in payload && payload.teamRoleScope) {
+					rt.applyTeamPayload(payload);
+				}
+				return;
+			}
 			if ('teamRoleScope' in payload && payload.teamRoleScope) {
 				rt.applyTeamPayload(payload);
 				return;
@@ -651,11 +662,6 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 						command: payload.command,
 						path: payload.path,
 					});
-				}
-			} else if (payload.type === 'plan_question_request') {
-				if (visible) {
-					rt.setPlanQuestion(payload.question);
-					rt.setPlanQuestionRequestId(payload.requestId);
 				}
 			} else if (payload.type === 'agent_mistake_limit') {
 				if (visible) {

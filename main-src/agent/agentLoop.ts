@@ -45,6 +45,7 @@ import {
 	type AgentToolDef,
 	type ToolCall,
 } from './agentTools.js';
+import type { TeamPlanQuestionRoleScope } from './planQuestionTool.js';
 import { executeTool, type ToolExecutionHooks } from './toolExecutor.js';
 import type { WorkspaceLspManager } from '../lsp/workspaceLspManager.js';
 import { getMcpManager } from '../mcp/index.js';
@@ -209,6 +210,10 @@ export type AgentLoopOptions = {
 	workspaceLspManager?: WorkspaceLspManager | null;
 	/** 当前会话线程 ID，用于 TodoWrite 等按线程隔离状态的工具 */
 	threadId?: string | null;
+	/**
+	 * Team 子循环：与流式 `teamRoleScope` 对齐，供 `ask_plan_question` 把澄清题挂到对应角色工作流。
+	 */
+	teamToolRoleScope?: TeamPlanQuestionRoleScope;
 	/**
 	 * Anthropic：与 Claude Code fork 的 `skipCacheWrite` 一致，prompt cache 断点挂在倒数第二条消息，避免无后续读取的尾部写入 KVCC。
 	 */
@@ -585,6 +590,7 @@ async function runOpenAILoop(
 			workspaceLspManager: options.workspaceLspManager ?? null,
 			threadId: options.threadId ?? null,
 			signal: options.signal,
+			teamToolRoleScope: options.teamToolRoleScope,
 		});
 		console.log(`[AgentLoop] tool=${tc.name} — executeTool done (${Date.now() - execStart}ms, error=${result.isError})`);
 		if (mistakeLimitEnabled) {
@@ -1002,6 +1008,7 @@ async function runAnthropicLoop(
 			workspaceLspManager: options.workspaceLspManager ?? null,
 			threadId: options.threadId ?? null,
 			signal: options.signal,
+			teamToolRoleScope: options.teamToolRoleScope,
 		});
 		console.log(`[AgentLoop/A] tool=${tu.name} — executeTool done (${Date.now() - execStart}ms, error=${result.isError})`);
 		if (mistakeLimitEnabled) {

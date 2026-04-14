@@ -1,6 +1,19 @@
 import type { ToolCall, ToolResult } from './agentTools.js';
 import { getPlanQuestionRuntime } from './planQuestionRuntime.js';
 
+/** 与渲染进程 `TeamRoleScope` 一致，用于 Team 模式下把澄清题挂到对应角色工作流 */
+export type TeamPlanQuestionRoleScope = {
+	teamTaskId: string;
+	teamExpertId: string;
+	teamRoleKind: 'specialist' | 'reviewer' | 'lead';
+	teamExpertName: string;
+	teamRoleType: string;
+};
+
+export type PlanQuestionEmitExtras = {
+	teamRoleScope?: TeamPlanQuestionRoleScope;
+};
+
 export type PlanQuestionWire = {
 	text: string;
 	options: { id: string; label: string }[];
@@ -102,7 +115,10 @@ export function normalizePlanQuestionArgs(
 /**
  * 规划澄清专用：阻塞直到用户在 UI 中选择或跳过；结果作为 tool_result 回到模型。
  */
-export async function executeAskPlanQuestionTool(call: ToolCall): Promise<ToolResult> {
+export async function executeAskPlanQuestionTool(
+	call: ToolCall,
+	emitExtras?: PlanQuestionEmitExtras
+): Promise<ToolResult> {
 	const rt = getPlanQuestionRuntime();
 	if (!rt) {
 		return {
@@ -124,6 +140,7 @@ export async function executeAskPlanQuestionTool(call: ToolCall): Promise<ToolRe
 		type: 'plan_question_request',
 		requestId,
 		question: norm.q,
+		...(emitExtras?.teamRoleScope ? { teamRoleScope: emitExtras.teamRoleScope } : {}),
 	});
 
 	return await new Promise<ToolResult>((resolve) => {
