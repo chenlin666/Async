@@ -78,6 +78,8 @@ export type ThreadPlan = {
 	title: string;
 	steps: PlanStep[];
 	updatedAt: number;
+	sourcePath?: string;
+	sourceRelPath?: string;
 };
 
 type ThreadBucket = {

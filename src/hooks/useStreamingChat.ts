@@ -24,6 +24,11 @@ import { flattenAssistantTextPartsForSearch } from '../agentStructuredMessage';
 import { clearPersistedAgentFileChanges } from '../agentFileChangesPersist';
 import { translateChatError, type TFunction } from '../i18n';
 import type { ChatMessage } from '../threadTypes';
+import {
+	normalizePlanDraftSubmission,
+	planDraftToParsedPlan,
+	planDraftToThreadPlan,
+} from '../planDraft';
 
 export type StreamingToast = { key: number; ok: boolean; text: string } | null;
 
@@ -599,6 +604,40 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 					}
 				}
 			} else if (payload.type === 'tool_call') {
+				if (
+					visible &&
+					!payload.parentToolCallId &&
+					payload.name === 'plan_submit_draft' &&
+					rt.shell
+				) {
+					try {
+						const parsedArgs = JSON.parse(payload.args) as Record<string, unknown>;
+						const normalized = normalizePlanDraftSubmission(parsedArgs);
+						if (normalized.ok) {
+							const parsedPlan = planDraftToParsedPlan(normalized.draft);
+							rt.setParsedPlan(parsedPlan);
+							void (async () => {
+								const filename = generatePlanFilename(parsedPlan.name);
+								const result = (await rt.shell!.invoke('plan:save', { filename, content: toPlanMd(parsedPlan) })) as
+									| { ok: true; path: string; relPath?: string }
+									| { ok: false };
+								if (result.ok) {
+									rt.setPlanFilePath(result.path);
+									rt.setPlanFileRelPath(result.relPath ?? null);
+								}
+								await rt.shell!.invoke('plan:saveStructured', {
+									threadId: payload.threadId,
+									plan: planDraftToThreadPlan(normalized.draft, {
+										path: result.ok ? result.path : null,
+										relPath: result.ok ? result.relPath ?? null : null,
+									}),
+								});
+							})();
+						}
+					} catch {
+						// Ignore malformed draft args; the tool result path will surface the error.
+					}
+				}
 				if (
 					visible &&
 					!payload.parentToolCallId &&

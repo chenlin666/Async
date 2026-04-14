@@ -19,6 +19,7 @@ import type { NestedAgentStreamEmit } from '../ipc/nestedAgentStream.js';
 import { appendSubagentTranscript } from '../threadStore.js';
 import { assembleAgentToolPool } from './agentToolPool.js';
 import { executeAskPlanQuestionTool, type TeamPlanQuestionRoleScope } from './planQuestionTool.js';
+import { executePlanSubmitDraftTool } from './planDraftTool.js';
 import { executeTeamPlanDecideTool } from './teamPlanDecideTool.js';
 import { executeTeamEscalateToLeadTool } from './teamEscalateTool.js';
 import { executeTeamPeerRequestTool } from './teamPeerRequestTool.js';
@@ -326,6 +327,8 @@ export async function executeTool(
 				call,
 				execCtx.teamToolRoleScope ? { teamRoleScope: execCtx.teamToolRoleScope } : undefined
 			);
+		case 'plan_submit_draft':
+			return await executePlanSubmitDraftTool(call, execCtx.threadId);
 		case 'team_plan_decide':
 			return await executeTeamPlanDecideTool(call, execCtx.teamToolRoleScope?.teamTaskId);
 		case 'team_escalate_to_lead':

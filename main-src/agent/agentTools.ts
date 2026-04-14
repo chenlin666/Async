@@ -45,7 +45,7 @@ export function agentToolsForComposerMode(
 	all: AgentToolDef[] = AGENT_TOOLS
 ): AgentToolDef[] {
 	if (mode === 'plan') {
-		return all.filter((d) => isReadOnlyAgentTool(d.name) || d.name === 'ask_plan_question');
+		return all.filter((d) => isReadOnlyAgentTool(d.name) || d.name === 'ask_plan_question' || d.name === 'plan_submit_draft');
 	}
 	return all.filter((d) => d.name !== 'ask_plan_question');
 }
@@ -393,6 +393,77 @@ export const AGENT_TOOLS: AgentToolDef[] = [
 				},
 			},
 			required: ['question', 'options'],
+		},
+	},
+	{
+		name: 'plan_submit_draft',
+		description:
+			'Submit the structured plan draft for Plan mode. Must be called exactly once when the plan is ready.',
+		parameters: {
+			type: 'object',
+			properties: {
+				title: { type: 'string', description: 'Concise plan title.' },
+				goal: { type: 'string', description: 'One or two sentence goal summary.' },
+				scopeContext: {
+					type: 'array',
+					items: { type: 'string' },
+					description: 'Key scope or context bullets.',
+				},
+				executionOverview: {
+					type: 'array',
+					items: { type: 'string' },
+					description: 'High-level sequencing or milestone bullets.',
+				},
+				implementationSteps: {
+					type: 'array',
+					items: {
+						type: 'object',
+						properties: {
+							title: { type: 'string' },
+							description: { type: 'string' },
+						},
+						required: ['title', 'description'],
+					},
+					description: 'Ordered implementation steps.',
+				},
+				todos: {
+					type: 'array',
+					items: {
+						type: 'object',
+						properties: {
+							id: { type: 'string' },
+							content: { type: 'string' },
+							status: { type: 'string', enum: ['pending', 'completed'] },
+						},
+						required: ['content'],
+					},
+					description: 'Checklist items for the plan.',
+				},
+				filesToChange: {
+					type: 'array',
+					items: {
+						type: 'object',
+						properties: {
+							path: { type: 'string' },
+							action: { type: 'string', enum: ['Edit', 'New', 'Delete'] },
+							description: { type: 'string' },
+						},
+						required: ['path', 'action', 'description'],
+					},
+					description: 'Planned file changes.',
+				},
+				risksAndEdgeCases: {
+					type: 'array',
+					items: { type: 'string' },
+					description: 'Important risks and edge cases.',
+				},
+				openQuestions: {
+					type: 'array',
+					items: { type: 'string' },
+					description: 'Outstanding open questions.',
+				},
+			},
+			required: ['title', 'goal', 'implementationSteps', 'todos'],
 		},
 	},
 ];

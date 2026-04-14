@@ -112,6 +112,7 @@ import {
 	abortPlanQuestionWaitersForThread,
 	resolvePlanQuestionTool,
 } from '../agent/planQuestionTool.js';
+import { setPlanDraftRuntime } from '../agent/planDraftTool.js';
 import {
 	abortTeamPlanApprovalForThread,
 	resolveTeamPlanApproval,
@@ -744,6 +745,11 @@ function runChatStream(
 						signal: ac.signal,
 						emit: (evt) => send({ threadId, ...evt }),
 					});
+					setPlanDraftRuntime(threadId, {
+						onDraft: () => {
+							// Renderer persists the visible draft from tool arguments and keeps the review UI in sync.
+						},
+					});
 				}
 				const expandMode = mode as import('../llm/composerMode.js').ComposerMode;
 				const doAtExpand = modeExpandsWorkspaceFileContext(expandMode);
@@ -837,6 +843,7 @@ function runChatStream(
 				clearDelegateContext();
 				if (mode === 'plan') {
 					setPlanQuestionRuntime(null);
+					setPlanDraftRuntime(threadId, null);
 				}
 			}
 			return;
