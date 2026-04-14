@@ -17,6 +17,8 @@ import { buildReviewerTaskPacket, buildSpecialistTaskPacket, runTeamSession, typ
 import type { TeamExpertRuntimeProfile } from './teamExpertProfiles.js';
 import { executeAskPlanQuestionTool, resolvePlanQuestionTool } from './planQuestionTool.js';
 import { setPlanQuestionRuntime } from './planQuestionRuntime.js';
+import { executeTeamPlanDecideTool, type TeamPlanDecision } from './teamPlanDecideTool.js';
+import { executeTeamEscalateToLeadTool } from './teamEscalateTool.js';
 
 function makeExpert(
 	id: string,
@@ -89,6 +91,47 @@ async function runSession(params: {
 		onError: (message) => errorCalls.push(message),
 	});
 	return { events, doneCalls, errorCalls };
+}
+
+async function submitTeamPlanDecision(
+	handlers: {
+		onToolResult: (name: string, result: string, success: boolean, toolCallId: string) => void;
+		onDone: (text: string) => void;
+	},
+	decision: TeamPlanDecision,
+	narrative?: string
+) {
+	const toolCallId = `team-plan-${decision.mode.toLowerCase()}`;
+	const result = await executeTeamPlanDecideTool({
+		id: toolCallId,
+		name: 'team_plan_decide',
+		arguments: decision as unknown as Record<string, unknown>,
+	}, 'team-lead');
+	handlers.onToolResult('team_plan_decide', String(result.content ?? ''), !result.isError, toolCallId);
+	handlers.onDone(narrative ?? decision.replyToUser ?? '');
+}
+
+async function submitTeamEscalation(
+	taskId: string,
+	handlers: {
+		onToolResult: (name: string, result: string, success: boolean, toolCallId: string) => void;
+	},
+	escalation: {
+		reason: string;
+		proposedChange: string;
+		blockingEvidence?: string[];
+	}
+) {
+	const toolCallId = 'team-escalation';
+	const result = await executeTeamEscalateToLeadTool(
+		{
+			id: toolCallId,
+			name: 'team_escalate_to_lead',
+			arguments: escalation as Record<string, unknown>,
+		},
+		taskId
+	);
+	handlers.onToolResult('team_escalate_to_lead', String(result.content ?? ''), !result.isError, toolCallId);
 }
 
 beforeEach(() => {
@@ -183,7 +226,11 @@ describe('buildReviewerTaskPacket', () => {
 describe('runTeamSession clarification gates', () => {
 	it('stops immediately when the lead returns CLARIFY', async () => {
 		runAgentLoopMock.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
-			handlers.onDone('MODE: CLARIFY\n请先明确你要优化的是性能、代码质量还是用户体验，以及对应的模块范围。');
+			await submitTeamPlanDecision(handlers, {
+				mode: 'CLARIFY',
+				tasks: [],
+				replyToUser: '请先明确你要优化的是性能、代码质量还是用户体验，以及对应的模块范围。',
+			});
 		});
 
 		const experts = [
@@ -204,7 +251,7 @@ describe('runTeamSession clarification gates', () => {
 
 	it('offers ask_plan_question to the team lead during planning', async () => {
 		runAgentLoopMock.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
-			handlers.onDone('MODE: CLARIFY\n请先明确优化目标。');
+			handlers.onDone('请先明确优化目标。');
 		});
 
 		const experts = [
@@ -217,7 +264,7 @@ describe('runTeamSession clarification gates', () => {
 		});
 
 		const options = runAgentLoopMock.mock.calls[0]?.[2] as { toolPoolOverride?: Array<{ name: string }> } | undefined;
-		expect(options?.toolPoolOverride?.map((tool) => tool.name)).toEqual(['ask_plan_question']);
+		expect(options?.toolPoolOverride?.map((tool) => tool.name)).toEqual(['ask_plan_question', 'team_plan_decide']);
 	});
 
 	it('propagates ask_plan_question answers into downstream team context', async () => {
@@ -255,18 +302,20 @@ describe('runTeamSession clarification gates', () => {
 				});
 				expect(answer.isError).toBe(false);
 				handlers.onToolResult('ask_plan_question', String(answer.content ?? ''), true, 'lead-q1');
-				handlers.onDone(`MODE: PLAN
-我会按你选择的代码质量方向分配专家。
-
-\`\`\`json
-[
-  {
-    "expert": "frontend",
-    "task": "Review frontend architecture and identify maintainability improvements",
-    "acceptanceCriteria": ["List actionable quality improvements"]
-  }
-]
-\`\`\``);
+				await submitTeamPlanDecision(
+					handlers,
+					{
+						mode: 'PLAN',
+						tasks: [
+							{
+								expert: 'frontend',
+								task: 'Review frontend architecture and identify maintainability improvements',
+								acceptanceCriteria: ['List actionable quality improvements'],
+							},
+						],
+					},
+					'我会按你选择的代码质量方向分配专家。'
+				);
 			})
 			.mockImplementationOnce(async (_settings, messagesArg, _options, handlers) => {
 				specialistPacketText = messagesArg.map((message) => String(message.content ?? '')).join('\n');
@@ -317,22 +366,24 @@ describe('runTeamSession clarification gates', () => {
 		let secondTurnMessages = '';
 		runAgentLoopMock
 			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
-				handlers.onDone('MODE: CLARIFY\n请先明确你要优化的是哪个模块，以及你希望达成的结果。');
+				handlers.onDone('请先明确你要优化的是哪个模块，以及你希望达成的结果。');
 			})
 			.mockImplementationOnce(async (_settings, messagesArg, _options, handlers) => {
 				secondTurnMessages = messagesArg.map((message) => String(message.content ?? '')).join('\n');
-				handlers.onDone(`MODE: PLAN
-我会围绕聊天区 team 模式来分配专家。
-
-\`\`\`json
-[
-  {
-    "expert": "frontend",
-    "task": "Audit the team chat timeline rendering order",
-    "acceptanceCriteria": ["Explain why the cards are ordered incorrectly"]
-  }
-]
-\`\`\``);
+				await submitTeamPlanDecision(
+					handlers,
+					{
+						mode: 'PLAN',
+						tasks: [
+							{
+								expert: 'frontend',
+								task: 'Audit the team chat timeline rendering order',
+								acceptanceCriteria: ['Explain why the cards are ordered incorrectly'],
+							},
+						],
+					},
+					'我会围绕聊天区 team 模式来分配专家。'
+				);
 			})
 			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
 				handlers.onDone('已完成聊天区 team 时间线审查。');
@@ -384,29 +435,31 @@ describe('runTeamSession clarification gates', () => {
 				handlers.onDone(
 					JSON.stringify({
 						_asyncAssistant: 1,
-						v: 1,
-						parts: [
-							{
-								type: 'text',
-								text: 'MODE: CLARIFY\n请先明确你想优化的是 team 模式里的哪个问题。',
-							},
-						],
-					})
-				);
+					v: 1,
+					parts: [
+						{
+							type: 'text',
+							text: '请先明确你想优化的是 team 模式里的哪个问题。',
+						},
+					],
+				})
+			);
 			})
 			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
-				handlers.onDone(`MODE: PLAN
-我会围绕 team 模式问题分配专家。
-
-\`\`\`json
-[
-  {
-    "expert": "frontend",
-    "task": "Audit the team-mode clarify UI path",
-    "acceptanceCriteria": ["Explain why raw structured payload leaked into the dialog"]
-  }
-]
-\`\`\``);
+				await submitTeamPlanDecision(
+					handlers,
+					{
+						mode: 'PLAN',
+						tasks: [
+							{
+								expert: 'frontend',
+								task: 'Audit the team-mode clarify UI path',
+								acceptanceCriteria: ['Explain why raw structured payload leaked into the dialog'],
+							},
+						],
+					},
+					'我会围绕 team 模式问题分配专家。'
+				);
 			})
 			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
 				handlers.onDone('已完成 team 模式澄清链路审查。');
@@ -435,18 +488,20 @@ describe('runTeamSession clarification gates', () => {
 	it('hard-stops when preflight review needs clarification even without plan approval', async () => {
 		runAgentLoopMock
 			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
-				handlers.onDone(`MODE: PLAN
-我先整理一个执行方案。
-
-\`\`\`json
-[
-  {
-    "expert": "frontend",
-    "task": "Audit renderer hotspots",
-    "acceptanceCriteria": ["List the top bottlenecks"]
-  }
-]
-\`\`\``);
+				await submitTeamPlanDecision(
+					handlers,
+					{
+						mode: 'PLAN',
+						tasks: [
+							{
+								expert: 'frontend',
+								task: 'Audit renderer hotspots',
+								acceptanceCriteria: ['List the top bottlenecks'],
+							},
+						],
+					},
+					'我先整理一个执行方案。'
+				);
 			})
 			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
 				handlers.onDone(`### Verdict: NEEDS_CLARIFICATION
@@ -499,5 +554,72 @@ describe('runTeamSession clarification gates', () => {
 		expect(doneCalls).toHaveLength(1);
 		expect(doneCalls[0]?.text).toContain('当前需求还不够具体，我先不分派专家');
 		expect(events.some((evt) => evt.type === 'team_task_created')).toBe(false);
+	});
+
+	it('replans remaining work after a specialist escalates to the planner', async () => {
+		runAgentLoopMock
+			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
+				await submitTeamPlanDecision(
+					handlers,
+					{
+						mode: 'PLAN',
+						tasks: [
+							{
+								expert: 'backend',
+								task: 'Modify the missing foo service directly',
+								acceptanceCriteria: ['Update the foo service implementation'],
+							},
+						],
+					},
+					'我先让后端同学处理这个问题。'
+				);
+			})
+			.mockImplementationOnce(async (_settings, _messages, optionsArg, handlers) => {
+				const specialistOptions = optionsArg as { teamToolRoleScope?: { teamTaskId: string } };
+				await submitTeamEscalation(specialistOptions.teamToolRoleScope?.teamTaskId ?? '', handlers, {
+					reason: 'The planned foo service does not exist in the repository.',
+					proposedChange: 'Replan the task around the actual renderer-side workflow instead of editing a missing backend service.',
+					blockingEvidence: ['No symbol named foo service was found.'],
+				});
+			})
+			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
+				await submitTeamPlanDecision(
+					handlers,
+					{
+						mode: 'PLAN',
+						tasks: [
+							{
+								expert: 'frontend',
+								task: 'Inspect the renderer workflow that actually owns this behavior',
+								acceptanceCriteria: ['Identify the real code path to change'],
+							},
+						],
+					},
+					'后端同学发现前提有误，我改成重新分派前端链路检查。'
+				);
+			})
+			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
+				handlers.onDone('已完成修订后的前端链路审查。');
+			});
+
+		const experts = [
+			makeExpertConfig('team_lead', 'Team Lead', 'team_lead'),
+			makeExpertConfig('frontend', 'Frontend', 'frontend'),
+			makeExpertConfig('backend', 'Backend', 'backend'),
+		];
+		const { events, doneCalls, errorCalls } = await runSession({
+			userRequest: '请帮我修一下 team 模式的错误假设分派',
+			experts,
+		});
+
+		expect(errorCalls).toEqual([]);
+		expect(events).toContainEqual(
+			expect.objectContaining({
+				type: 'team_plan_revised',
+				reason: 'The planned foo service does not exist in the repository.',
+			})
+		);
+		expect(doneCalls).toHaveLength(1);
+		expect(doneCalls[0]?.text).toContain('已完成修订后的前端链路审查。');
 	});
 });

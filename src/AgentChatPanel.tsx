@@ -26,6 +26,7 @@ import { ToolApprovalInlineCard, type ToolApprovalPayload } from './ToolApproval
 import { AgentMistakeLimitDialog, type MistakeLimitPayload } from './AgentMistakeLimitDialog';
 import { PlanReviewPanel } from './PlanReviewPanel';
 import { TeamPlanReviewPanel } from './TeamPlanReviewPanel';
+import { TeamPlanRevisionCard } from './TeamPlanRevisionCard';
 import { TeamRoleAvatar } from './TeamRoleAvatar';
 import { ComposerThoughtBlock } from './ComposerThoughtBlock';
 import { UserMessageRich } from './UserMessageRich';
@@ -910,6 +911,19 @@ export const AgentChatPanel = memo(function AgentChatPanel({
 								onApprove={(fb) => onTeamPlanApprove(entry.proposal.proposalId, fb)}
 								onReject={(fb) => onTeamPlanReject(entry.proposal.proposalId, fb)}
 							/>
+						</div>
+					</div>
+				);
+			}
+			if (entry.kind === 'plan_revision') {
+				return (
+					<div
+						key={`row-${conversationRenderKey}-${entry.id}`}
+						className="ref-msg-row-measure ref-msg-row-measure--team-plan"
+						data-msg-index={String(nextSyntheticIndex())}
+					>
+						<div className="ref-msg-slot ref-msg-slot--assistant ref-msg-slot--team-plan">
+							<TeamPlanRevisionCard revision={entry.revision} />
 						</div>
 					</div>
 				);

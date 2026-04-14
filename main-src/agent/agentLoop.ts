@@ -84,6 +84,9 @@ const READ_TOOLS_SKIP_INPUT_DELTA = new Set([
 	'ListMcpResourcesTool',
 	'ReadMcpResourceTool',
 	'ask_plan_question',
+	'team_plan_decide',
+	'team_escalate_to_lead',
+	'team_request_from_peer',
 	'Agent',
 	'Task',
 ]);

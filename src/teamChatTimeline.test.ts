@@ -21,6 +21,7 @@ function buildSession(overrides: Partial<TeamSessionState> = {}): TeamSessionSta
 		preflightSummary: '',
 		preflightVerdict: null,
 		planProposal: null,
+		planRevisions: [],
 		pendingQuestion: null,
 		pendingQuestionRequestId: null,
 		selectedTaskId: null,
@@ -121,12 +122,12 @@ describe('teamChatTimeline', () => {
 
 		expect(
 			shouldHideTeamPlanProposalSummary(
-				buildProposal('MODE: CLARIFY\n请先明确你想优化的是性能、代码质量还是用户体验。'),
+				buildProposal('请先明确你想优化的是性能、代码质量还是用户体验。'),
 				seenLeaderTexts
 			)
 		).toBe(true);
-		expect(
-			normalizeTeamLeaderText('MODE: CLARIFY\n请先明确你想优化的是性能、代码质量还是用户体验。')
-		).toBe('请先明确你想优化的是性能、代码质量还是用户体验。');
+		expect(normalizeTeamLeaderText('请先明确你想优化的是性能、代码质量还是用户体验。')).toBe(
+			'请先明确你想优化的是性能、代码质量还是用户体验。'
+		);
 	});
 });

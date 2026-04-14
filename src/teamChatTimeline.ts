@@ -1,5 +1,6 @@
 import type {
 	TeamPlanProposalState,
+	TeamPlanRevisionState,
 	TeamSessionState,
 	TeamTimelineEntry,
 } from './hooks/useTeamSession';
@@ -44,6 +45,11 @@ export type TeamConversationTimelineEntry =
 	  }
 	| {
 			id: string;
+			kind: 'plan_revision';
+			revision: TeamPlanRevisionState;
+	  }
+	| {
+			id: string;
 			kind: 'task_card';
 			item: TeamWorkflowListItem;
 	  };
@@ -79,6 +85,7 @@ export function buildTeamConversationTimeline(
 	const trailingAssistant = lastVisibleAssistantContent(displayMessages);
 	const hideTerminalDuplicate = session.phase === 'delivering' && session.tasks.length === 0;
 	let hasPlanProposalEntry = false;
+	let seenRevisionIds = new Set<string>();
 
 	const pushLeaderEntry = (id: string, rawContent: string) => {
 		const content = normalizeLeaderText(rawContent);
@@ -117,6 +124,19 @@ export function buildTeamConversationTimeline(
 			hasPlanProposalEntry = true;
 			continue;
 		}
+		if (timelineEntry.kind === 'plan_revision') {
+			const revision = session.planRevisions.find((item) => item.revisionId === timelineEntry.revisionId);
+			if (!revision || seenRevisionIds.has(revision.revisionId)) {
+				continue;
+			}
+			seenRevisionIds.add(revision.revisionId);
+			entries.push({
+				id: timelineEntry.id,
+				kind: 'plan_revision',
+				revision,
+			});
+			continue;
+		}
 		const item = itemsById.get(timelineEntry.taskId);
 		if (!item || seenTaskIds.has(item.id)) {
 			continue;
@@ -135,6 +155,18 @@ export function buildTeamConversationTimeline(
 			kind: 'plan_proposal',
 			proposal: session.planProposal,
 			hideSummary: shouldHideTeamPlanProposalSummary(session.planProposal, seenLeaderTexts),
+		});
+	}
+
+	for (const revision of session.planRevisions) {
+		if (seenRevisionIds.has(revision.revisionId)) {
+			continue;
+		}
+		seenRevisionIds.add(revision.revisionId);
+		entries.push({
+			id: `team-plan-revision-${revision.revisionId}`,
+			kind: 'plan_revision',
+			revision,
 		});
 	}
 

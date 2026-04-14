@@ -19,6 +19,9 @@ import type { NestedAgentStreamEmit } from '../ipc/nestedAgentStream.js';
 import { appendSubagentTranscript } from '../threadStore.js';
 import { assembleAgentToolPool } from './agentToolPool.js';
 import { executeAskPlanQuestionTool, type TeamPlanQuestionRoleScope } from './planQuestionTool.js';
+import { executeTeamPlanDecideTool } from './teamPlanDecideTool.js';
+import { executeTeamEscalateToLeadTool } from './teamEscalateTool.js';
+import { executeTeamPeerRequestTool } from './teamPeerRequestTool.js';
 import type { ComposerMode } from '../llm/composerMode.js';
 import { buildSubagentSystemAppend, findConfiguredSubagent, resolveSubagentProfile } from './subagentProfile.js';
 import { shouldRunAgentInBackground } from './agentForkPolicy.js';
@@ -322,6 +325,12 @@ export async function executeTool(
 				call,
 				execCtx.teamToolRoleScope ? { teamRoleScope: execCtx.teamToolRoleScope } : undefined
 			);
+		case 'team_plan_decide':
+			return await executeTeamPlanDecideTool(call, execCtx.teamToolRoleScope?.teamTaskId);
+		case 'team_escalate_to_lead':
+			return await executeTeamEscalateToLeadTool(call, execCtx.teamToolRoleScope?.teamTaskId);
+		case 'team_request_from_peer':
+			return await executeTeamPeerRequestTool(call, execCtx.teamToolRoleScope?.teamTaskId);
 		default:
 			if (getMcpManager().isMcpTool(call.name)) {
 				return await executeMcpAgentTool(call, execCtx);

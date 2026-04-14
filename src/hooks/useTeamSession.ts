@@ -8,7 +8,7 @@ import {
 } from '../liveAgentBlocks';
 import { flattenAssistantTextPartsForSearch } from '../agentStructuredMessage';
 import type { PlanQuestion } from '../planParser';
-import { extractTeamLeadNarrative, stripTeamModeMarkers } from '../teamWorkflowText';
+import { extractTeamLeadNarrative } from '../teamWorkflowText';
 
 export type TeamSessionPhase =
 	| 'researching'
@@ -29,6 +29,12 @@ export type TeamPlanProposedTask = {
 	acceptanceCriteria?: string[];
 };
 
+export type TeamPlanRevisedTask = TeamPlanProposedTask & {
+	id: string;
+	expertId: string;
+	expertAssignmentKey?: string;
+};
+
 export type TeamPlanProposalState = {
 	proposalId: string;
 	summary: string;
@@ -39,6 +45,17 @@ export type TeamPlanProposalState = {
 	awaitingApproval: boolean;
 	decision?: 'approved' | 'rejected';
 };
+
+export type TeamPlanRevisionState = {
+	revisionId: string;
+	summary: string;
+	reason: string;
+	tasks: TeamPlanRevisedTask[];
+	addedTaskIds: string[];
+	removedTaskIds: string[];
+	keptTaskIds: string[];
+};
+
 export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'revision';
 export type TeamRoleType = 'team_lead' | 'frontend' | 'backend' | 'qa' | 'reviewer' | 'custom';
 export type TeamTimelineEntry =
@@ -51,6 +68,11 @@ export type TeamTimelineEntry =
 			id: string;
 			kind: 'plan_proposal';
 			proposalId: string;
+	  }
+	| {
+			id: string;
+			kind: 'plan_revision';
+			revisionId: string;
 	  }
 	| {
 			id: string;
@@ -120,6 +142,7 @@ export type TeamSessionState = {
 	preflightSummary: string;
 	preflightVerdict: 'ok' | 'needs_clarification' | null;
 	planProposal: TeamPlanProposalState | null;
+	planRevisions: TeamPlanRevisionState[];
 	pendingQuestion: PlanQuestion | null;
 	pendingQuestionRequestId: string | null;
 	selectedTaskId: string | null;
@@ -142,6 +165,7 @@ function emptySession(): TeamSessionState {
 		preflightSummary: '',
 		preflightVerdict: null,
 		planProposal: null,
+		planRevisions: [],
 		pendingQuestion: null,
 		pendingQuestionRequestId: null,
 		selectedTaskId: null,
@@ -156,11 +180,11 @@ const MAX_TASK_LOGS = 50;
 const FLUSH_INTERVAL_MS = 250;
 
 function normalizeTeamSummary(raw: string, fallback = ''): string {
-	const flattened = stripTeamModeMarkers(flattenAssistantTextPartsForSearch(raw)).trim();
+	const flattened = flattenAssistantTextPartsForSearch(raw).trim();
 	if (flattened) {
 		return flattened;
 	}
-	const trimmed = stripTeamModeMarkers(raw).trim();
+	const trimmed = String(raw ?? '').trim();
 	return trimmed || fallback;
 }
 
@@ -203,6 +227,20 @@ function ensurePlanProposalTimelineEntry(session: TeamSessionState, proposalId: 
 			id: `team-plan-proposal-${proposalId}`,
 			kind: 'plan_proposal',
 			proposalId,
+		},
+	];
+}
+
+function ensurePlanRevisionTimelineEntry(session: TeamSessionState, revisionId: string): void {
+	if (session.timelineEntries.some((entry) => entry.kind === 'plan_revision' && entry.revisionId === revisionId)) {
+		return;
+	}
+	session.timelineEntries = [
+		...session.timelineEntries,
+		{
+			id: `team-plan-revision-${revisionId}`,
+			kind: 'plan_revision',
+			revisionId,
 		},
 	];
 }
@@ -371,9 +409,7 @@ function mutateRoleWorkflowPayload(
 			return true;
 		case 'done': {
 			const leaderNarrative = isLead ? extractTeamLeadNarrative(payload.text) : '';
-			const leaderFallback = isLead
-				? stripTeamModeMarkers(payload.text).trim()
-				: '';
+			const leaderFallback = isLead ? String(payload.text ?? '').trim() : '';
 			const nextMessage: ChatMessage = {
 				role: 'assistant',
 				content: isLead
@@ -487,6 +523,13 @@ function snapshotSession(session: TeamSessionState): TeamSessionState {
 		planProposal: session.planProposal
 			? { ...session.planProposal, tasks: session.planProposal.tasks.map((t) => ({ ...t })) }
 			: null,
+		planRevisions: session.planRevisions.map((revision) => ({
+			...revision,
+			tasks: revision.tasks.map((task) => ({ ...task })),
+			addedTaskIds: [...revision.addedTaskIds],
+			removedTaskIds: [...revision.removedTaskIds],
+			keptTaskIds: [...revision.keptTaskIds],
+		})),
 		pendingQuestion: session.pendingQuestion
 			? {
 					text: session.pendingQuestion.text,
@@ -678,6 +721,56 @@ export function useTeamSession() {
 					};
 					ensurePlanProposalTimelineEntry(session, payload.proposalId);
 					break;
+				case 'team_plan_revised': {
+					const revision: TeamPlanRevisionState = {
+						revisionId: payload.revisionId,
+						summary: extractTeamLeadNarrative(payload.summary) || normalizeTeamSummary(payload.summary),
+						reason: payload.reason,
+						tasks: payload.tasks.map((task) => ({
+							id: task.id,
+							expertId: task.expertId,
+							expert: task.expert,
+							expertAssignmentKey: task.expertAssignmentKey,
+							expertName: task.expertName,
+							roleType: (task.roleType as TeamRoleType) || 'custom',
+							task: task.task,
+							dependencies: task.dependencies ?? [],
+							acceptanceCriteria: task.acceptanceCriteria ?? [],
+						})),
+						addedTaskIds: [...payload.addedTaskIds],
+						removedTaskIds: [...payload.removedTaskIds],
+						keptTaskIds: [...payload.keptTaskIds],
+					};
+					session.planRevisions = [...session.planRevisions, revision];
+					ensurePlanRevisionTimelineEntry(session, payload.revisionId);
+
+					const existingById = new Map(session.tasks.map((task) => [task.id, task]));
+					const revisedTaskIds = new Set(revision.tasks.map((task) => task.id));
+					const settledTasks = session.tasks.filter(
+						(task) => !revisedTaskIds.has(task.id) && ['completed', 'failed', 'revision'].includes(task.status)
+					);
+					const revisedTasks: TeamTask[] = revision.tasks.map((task) => {
+						const existing = existingById.get(task.id);
+						return {
+							id: task.id,
+							expertId: task.expertId,
+							expertAssignmentKey: task.expertAssignmentKey,
+							expertName: task.expertName,
+							roleType: task.roleType,
+							description: task.task,
+							status: existing?.status === 'in_progress' ? 'in_progress' : 'pending',
+							dependencies: task.dependencies ?? [],
+							acceptanceCriteria: task.acceptanceCriteria ?? [],
+							result: undefined,
+							logs: existing?.logs ?? [],
+						};
+					});
+					session.tasks = [...settledTasks, ...revisedTasks];
+					if (!session.selectedTaskId || !session.tasks.some((task) => task.id === session.selectedTaskId)) {
+						session.selectedTaskId = revisedTasks[0]?.id ?? settledTasks[0]?.id ?? null;
+					}
+					break;
+				}
 				case 'team_plan_decision':
 					if (session.planProposal && session.planProposal.proposalId === payload.proposalId) {
 						session.planProposal = {
@@ -863,6 +956,7 @@ export function useTeamSession() {
 				preflightSummary: '',
 				preflightVerdict: null,
 				planProposal: null,
+				planRevisions: [],
 				pendingQuestion: null,
 				pendingQuestionRequestId: null,
 				selectedTaskId: snapshot.tasks[0]?.id ?? null,

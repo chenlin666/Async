@@ -146,6 +146,10 @@ export type TeamSettings = {
 	enablePreflightReview?: boolean;
 	/** 规划前先让调研员调研代码库、澄清需求；默认值随 preset 决定 */
 	enableResearchPhase?: boolean;
+	/** 可选的规划评审专家；为空时复用 reviewer */
+	planReviewer?: TeamExpertConfig | null;
+	/** 可选的交付评审专家；为空时复用 reviewer */
+	deliveryReviewer?: TeamExpertConfig | null;
 };
 
 export type ShellSettings = {
@@ -233,7 +237,9 @@ const defaultSettings: ShellSettings = {
 		experts: [],
 		requirePlanApproval: true,
 		enablePreflightReview: false,
-		enableResearchPhase: true,
+		enableResearchPhase: false,
+		planReviewer: null,
+		deliveryReviewer: null,
 	},
 };
 

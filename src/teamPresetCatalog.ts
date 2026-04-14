@@ -494,7 +494,7 @@ export function getTeamPresetDefaults(
 			return {
 				requirePlanApproval: true,
 				enablePreflightReview: false,
-				enableResearchPhase: true,
+				enableResearchPhase: false,
 			};
 		case 'planning':
 		case 'design':
@@ -502,7 +502,7 @@ export function getTeamPresetDefaults(
 			return {
 				requirePlanApproval: true,
 				enablePreflightReview: true,
-				enableResearchPhase: true,
+				enableResearchPhase: false,
 			};
 	}
 }

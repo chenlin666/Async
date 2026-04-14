@@ -200,6 +200,27 @@ type ChatStreamPayloadCore =
 			type: 'team_plan_decision';
 			proposalId: string;
 			approved: boolean;
+	  }
+	| {
+			threadId: string;
+			type: 'team_plan_revised';
+			revisionId: string;
+			summary: string;
+			reason: string;
+			tasks: Array<{
+				id: string;
+				expertId: string;
+				expert: string;
+				expertAssignmentKey?: string;
+				expertName: string;
+				roleType: 'team_lead' | 'frontend' | 'backend' | 'qa' | 'reviewer' | 'custom';
+				task: string;
+				dependencies?: string[];
+				acceptanceCriteria?: string[];
+			}>;
+			addedTaskIds: string[];
+			removedTaskIds: string[];
+			keptTaskIds: string[];
 	  };
 
 export type ChatStreamPayload = ChatStreamPayloadCore & ChatStreamNonce;

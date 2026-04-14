@@ -687,7 +687,8 @@ export function useStreamingChatSubscription(runtime: StreamingSubscriptionRunti
 				payload.type === 'team_plan_summary' ||
 				payload.type === 'team_preflight_review' ||
 				payload.type === 'team_plan_proposed' ||
-				payload.type === 'team_plan_decision'
+				payload.type === 'team_plan_decision' ||
+				payload.type === 'team_plan_revised'
 			) {
 				rt.applyTeamPayload(payload);
 			} else if (payload.type === 'done') {
