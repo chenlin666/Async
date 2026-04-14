@@ -691,7 +691,16 @@ function AppMainWorkspaceInner() {
 		setStreaming,
 		setAwaitingReply,
 	} = useStreamingChat();
-	const { applyTeamPayload, getTeamSession, setSelectedTask, abortTeamSession, startTeamSession, restoreTeamSession, markTeamPlanProposalDecided } = useTeamSession();
+	const {
+		applyTeamPayload,
+		getTeamSession,
+		setSelectedTask,
+		clearPendingQuestion: clearTeamPendingQuestion,
+		abortTeamSession,
+		startTeamSession,
+		restoreTeamSession,
+		markTeamPlanProposalDecided,
+	} = useTeamSession();
 	const {
 		agentReviewPendingByThread,
 		setAgentReviewPendingByThread,
@@ -2612,9 +2621,23 @@ function AppMainWorkspaceInner() {
 		return onAbortRef.current();
 	}, [currentId, abortTeamSession]);
 
+	const getCurrentPlanQuestionState = useCallback(() => {
+		if (composerMode === 'team') {
+			const liveTeamSession = getTeamSession(currentIdRef.current);
+			return {
+				question: liveTeamSession?.pendingQuestion ?? null,
+				requestId: liveTeamSession?.pendingQuestionRequestId ?? null,
+			};
+		}
+		return {
+			question: planQuestion,
+			requestId: planQuestionRequestId,
+		};
+	}, [composerMode, getTeamSession, planQuestion, planQuestionRequestId, currentIdRef]);
+
 	const formatPlanQuestionReply = useCallback(
 		(answer: string) => {
-			const questionText = planQuestion?.text?.trim();
+			const questionText = getCurrentPlanQuestionState().question?.text?.trim();
 			const normalizedAnswer = answer.trim();
 			if (!questionText) {
 				return `我选择：${normalizedAnswer}`;
@@ -2627,13 +2650,17 @@ function AppMainWorkspaceInner() {
 				normalizedAnswer,
 			].join('\n');
 		},
-		[planQuestion]
+		[getCurrentPlanQuestionState]
 	);
 
 	const onPlanQuestionSubmit = useCallback(
 		(answer: string) => {
-			const rid = planQuestionRequestId;
+			const { requestId: rid } = getCurrentPlanQuestionState();
+			const threadId = currentIdRef.current;
 			const reply = formatPlanQuestionReply(answer);
+			if (composerMode === 'team' && threadId) {
+				clearTeamPendingQuestion(threadId);
+			}
 			if (rid && shell) {
 				setPlanQuestion(null);
 				setPlanQuestionRequestId(null);
@@ -2646,13 +2673,27 @@ function AppMainWorkspaceInner() {
 			setPlanQuestionRequestId(null);
 			void onSend(reply);
 		},
-		[formatPlanQuestionReply, planQuestionRequestId, shell, setPlanQuestion, setPlanQuestionRequestId, onSend]
+		[
+			clearTeamPendingQuestion,
+			composerMode,
+			currentIdRef,
+			formatPlanQuestionReply,
+			getCurrentPlanQuestionState,
+			shell,
+			setPlanQuestion,
+			setPlanQuestionRequestId,
+			onSend,
+		]
 	);
 
 	const onPlanQuestionSkip = useCallback(() => {
 		recordPlanQuestionDismissed();
-		const rid = planQuestionRequestId;
+		const { requestId: rid } = getCurrentPlanQuestionState();
+		const threadId = currentIdRef.current;
 		const skipText = t('plan.q.skipUserMessage');
+		if (composerMode === 'team' && threadId) {
+			clearTeamPendingQuestion(threadId);
+		}
 		if (rid && shell) {
 			setPlanQuestion(null);
 			setPlanQuestionRequestId(null);
@@ -2664,7 +2705,16 @@ function AppMainWorkspaceInner() {
 		setPlanQuestion(null);
 		setPlanQuestionRequestId(null);
 		void onSend(skipText);
-	}, [t, onSend, shell, planQuestionRequestId, recordPlanQuestionDismissed]);
+	}, [
+		t,
+		onSend,
+		shell,
+		composerMode,
+		currentIdRef,
+		clearTeamPendingQuestion,
+		getCurrentPlanQuestionState,
+		recordPlanQuestionDismissed,
+	]);
 
 
 	const onPlanBuild = useCallback(
@@ -3678,6 +3728,15 @@ function AppMainWorkspaceInner() {
 	const showPlanFileEditorChrome =
 		hasConversation && !!currentId && isPlanMdPath(filePath.trim());
 	const teamSession = useMemo(() => getTeamSession(currentId), [getTeamSession, currentId]);
+	const activePlanQuestion = useMemo(
+		() =>
+			resendFromUserIndex !== null
+				? null
+				: composerMode === 'team'
+					? teamSession?.pendingQuestion ?? null
+					: planQuestion,
+		[composerMode, teamSession, planQuestion, resendFromUserIndex]
+	);
 	const hasActiveTeamSidebarContent = useMemo(
 		() => composerMode === 'team' && buildTeamWorkflowItems(teamSession).length > 0,
 		[composerMode, teamSession]
@@ -5474,7 +5533,7 @@ function AppMainWorkspaceInner() {
 		onApplyAgentPatchOne,
 		onApplyAgentPatchesAll,
 		onDiscardAgentReview,
-		planQuestion,
+		planQuestion: activePlanQuestion,
 		onPlanQuestionSubmit,
 		onPlanQuestionSkip,
 		wizardPending,

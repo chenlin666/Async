@@ -5,6 +5,7 @@ import type { WorkspaceLspManager } from '../lsp/workspaceLspManager.js';
 import { runAgentLoop, type AgentLoopHandlers, type AgentLoopOptions } from './agentLoop.js';
 import { assembleAgentToolPool } from './agentToolPool.js';
 import { AGENT_TOOLS, type AgentToolDef } from './agentTools.js';
+import { executeAskPlanQuestionTool } from './planQuestionTool.js';
 import { resolveTeamExpertProfiles, type TeamExpertRuntimeProfile } from './teamExpertProfiles.js';
 import { resolveModelRequest, type ResolvedModelRequest } from '../llm/modelResolve.js';
 import { getTeamPreset, getTeamPresetDefaults } from '../../src/teamPresetCatalog.js';
@@ -225,11 +226,17 @@ function buildReviewerWorkflowTask(
 }
 
 function normalizeTeamAgentSummary(raw: string, fallback: string): string {
-	const flattened = flattenAssistantTextPartsForSearch(raw).trim();
+	const flattened = stripLeadModeMarker(flattenAssistantTextPartsForSearch(raw))
+		.replace(/\bMODE\s*:\s*(?:ANSWER|PLAN|CLARIFY)\b/gi, '')
+		.replace(/\n[ \t]+\n/g, '\n\n')
+		.trim();
 	if (flattened) {
 		return flattened;
 	}
-	const trimmed = raw.trim();
+	const trimmed = stripLeadModeMarker(raw)
+		.replace(/\bMODE\s*:\s*(?:ANSWER|PLAN|CLARIFY)\b/gi, '')
+		.replace(/\n[ \t]+\n/g, '\n\n')
+		.trim();
 	return trimmed || fallback;
 }
 
@@ -359,7 +366,7 @@ function isStreamingModeMarkerPrefix(text: string): boolean {
 }
 
 function extractTeamLeadNarrative(text: string): string {
-	const raw = String(text ?? '');
+	const raw = flattenAssistantTextPartsForSearch(String(text ?? ''));
 	if (isStreamingModeMarkerPrefix(raw)) {
 		return '';
 	}
@@ -367,7 +374,10 @@ function extractTeamLeadNarrative(text: string): string {
 	if (!normalized) {
 		return '';
 	}
-	const withoutMode = stripLeadModeMarker(normalized);
+	const withoutMode = stripLeadModeMarker(normalized)
+		.replace(/\bMODE\s*:\s*(?:ANSWER|PLAN|CLARIFY)\b/gi, '')
+		.replace(/\n[ \t]+\n/g, '\n\n')
+		.trim();
 	const withoutFence = stripFencedBlocks(withoutMode);
 	const withoutJson = stripTrailingRawJson(withoutFence || withoutMode);
 	return (withoutJson || withoutFence || withoutMode).replace(/\n{3,}/g, '\n\n').trim();
@@ -625,8 +635,7 @@ async function llmPlanTasks(params: {
 		},
 	];
 
-	let planText = '';
-	let visiblePlanText = '';
+	let planningMessages = planMessages;
 	const clarificationAnswers: string[] = [];
 	const teamLeadScope = createTeamRoleScope(
 		{
@@ -675,78 +684,135 @@ async function llmPlanTasks(params: {
 		}
 	}
 
-	const handlers: AgentLoopHandlers = {
-		onTextDelta: (text) => {
-			planText += text;
-			const nextVisible = extractTeamLeadNarrative(planText);
-			if (!nextVisible || nextVisible === visiblePlanText) {
-				return;
-			}
-			const deltaText = nextVisible.startsWith(visiblePlanText)
-				? nextVisible.slice(visiblePlanText.length)
-				: nextVisible;
-			visiblePlanText = nextVisible;
-			if (deltaText) {
-				emit({ threadId, type: 'delta', text: deltaText, teamRoleScope: teamLeadScope });
-			}
-		},
-		onToolInputDelta: ({ name, partialJson, index }) => {
-			emit({ threadId, type: 'tool_input_delta', name, partialJson, index, teamRoleScope: teamLeadScope });
-		},
-		onThinkingDelta: (text) => {
-			emit({ threadId, type: 'thinking_delta', text, teamRoleScope: teamLeadScope });
-		},
-		onToolProgress: ({ name, phase, detail }) => {
-			emit({ threadId, type: 'tool_progress', name, phase, detail, teamRoleScope: teamLeadScope });
-		},
-		onToolCall: (name, args, toolCallId) => {
+	for (let attempt = 0; attempt < 3; attempt++) {
+		let planText = '';
+		let visiblePlanText = '';
+		const clarificationCountBeforeTurn = clarificationAnswers.length;
+		const handlers: AgentLoopHandlers = {
+			onTextDelta: (text) => {
+				planText += text;
+				const nextVisible = extractTeamLeadNarrative(planText);
+				if (!nextVisible || nextVisible === visiblePlanText) {
+					return;
+				}
+				const deltaText = nextVisible.startsWith(visiblePlanText)
+					? nextVisible.slice(visiblePlanText.length)
+					: nextVisible;
+				visiblePlanText = nextVisible;
+				if (deltaText) {
+					emit({ threadId, type: 'delta', text: deltaText, teamRoleScope: teamLeadScope });
+				}
+			},
+			onToolInputDelta: ({ name, partialJson, index }) => {
+				emit({ threadId, type: 'tool_input_delta', name, partialJson, index, teamRoleScope: teamLeadScope });
+			},
+			onThinkingDelta: (text) => {
+				emit({ threadId, type: 'thinking_delta', text, teamRoleScope: teamLeadScope });
+			},
+			onToolProgress: ({ name, phase, detail }) => {
+				emit({ threadId, type: 'tool_progress', name, phase, detail, teamRoleScope: teamLeadScope });
+			},
+			onToolCall: (name, args, toolCallId) => {
+				emit({
+					threadId,
+					type: 'tool_call',
+					name,
+					args: JSON.stringify(args),
+					toolCallId,
+					teamRoleScope: teamLeadScope,
+				});
+			},
+			onToolResult: (name, result, success, toolCallId) => {
+				if (name === 'ask_plan_question' && success) {
+					const answer = String(result ?? '').trim();
+					if (answer && !clarificationAnswers.includes(answer)) {
+						clarificationAnswers.push(answer);
+					}
+				}
+				emit({
+					threadId,
+					type: 'tool_result',
+					name,
+					result,
+					success,
+					toolCallId,
+					teamRoleScope: teamLeadScope,
+				});
+			},
+			onDone: (text, usage) => {
+				planText = text;
+				const finalMode = parseLeadMode(text);
+				const finalVisible =
+					extractTeamLeadNarrative(text) ||
+					(finalMode === 'CLARIFY' ? buildTeamClarificationIntro(hasCjk) : '') ||
+					visiblePlanText ||
+					buildFallbackTeamLeadNarrative(hasCjk);
+				visiblePlanText = finalVisible;
+				emit({ threadId, type: 'done', text: finalVisible, usage, teamRoleScope: teamLeadScope });
+			},
+			onError: () => {},
+		};
+
+		await runAgentLoop(settings, planningMessages, options, handlers);
+		const mode = parseLeadMode(planText);
+		const planSummary = extractTeamLeadNarrative(planText) || buildFallbackTeamLeadNarrative(hasCjk);
+		const usedClarificationTool = clarificationAnswers.length > clarificationCountBeforeTurn;
+
+		if (mode === 'CLARIFY' && planningTools.length > 0 && !usedClarificationTool && !signal.aborted) {
+			const fallbackToolCallId = `team-fallback-clarify-${randomUUID()}`;
+			const fallbackArgs = {
+				question: planSummary || buildClarificationNeededNarrative(hasCjk),
+				freeform: true,
+				options: [{ id: 'custom', label: hasCjk ? '请补充说明' : 'Please add more detail' }],
+			};
 			emit({
 				threadId,
 				type: 'tool_call',
-				name,
-				args: JSON.stringify(args),
-				toolCallId,
+				name: 'ask_plan_question',
+				args: JSON.stringify(fallbackArgs),
+				toolCallId: fallbackToolCallId,
 				teamRoleScope: teamLeadScope,
 			});
-		},
-		onToolResult: (name, result, success, toolCallId) => {
-			if (name === 'ask_plan_question' && success) {
-				const answer = String(result ?? '').trim();
-				if (answer && !clarificationAnswers.includes(answer)) {
-					clarificationAnswers.push(answer);
-				}
-			}
+			const fallbackResult = await executeAskPlanQuestionTool(
+				{
+					id: fallbackToolCallId,
+					name: 'ask_plan_question',
+					arguments: fallbackArgs,
+				},
+				{ teamRoleScope: teamLeadScope }
+			);
 			emit({
 				threadId,
 				type: 'tool_result',
-				name,
-				result,
-				success,
-				toolCallId,
+				name: 'ask_plan_question',
+				result: String(fallbackResult.content ?? ''),
+				success: !fallbackResult.isError,
+				toolCallId: fallbackToolCallId,
 				teamRoleScope: teamLeadScope,
 			});
-		},
-		onDone: (text, usage) => {
-			planText = text;
-			const finalMode = parseLeadMode(text);
-			const finalVisible =
-				extractTeamLeadNarrative(text) ||
-				(finalMode === 'CLARIFY' ? buildTeamClarificationIntro(hasCjk) : '') ||
-				visiblePlanText ||
-				buildFallbackTeamLeadNarrative(hasCjk);
-			visiblePlanText = finalVisible;
-			emit({ threadId, type: 'done', text: finalVisible, usage, teamRoleScope: teamLeadScope });
-		},
-		onError: () => {},
-	};
+			const answer = String(fallbackResult.content ?? '').trim();
+			if (!fallbackResult.isError && answer) {
+				if (!clarificationAnswers.includes(answer)) {
+					clarificationAnswers.push(answer);
+				}
+				planningMessages = appendTeamClarificationMessage(planningMessages, answer);
+				continue;
+			}
+		}
 
-	await runAgentLoop(settings, planMessages, options, handlers);
-	const tasks = parsePlannedTasks(planText);
-	const mode = parseLeadMode(planText);
+		const tasks = parsePlannedTasks(planText);
+		return {
+			tasks: mode === 'PLAN' ? tasks : [],
+			planSummary,
+			mode,
+			clarificationAnswers,
+		};
+	}
+
 	return {
-		tasks: mode === 'PLAN' ? tasks : [],
-		planSummary: extractTeamLeadNarrative(planText) || buildFallbackTeamLeadNarrative(hasCjk),
-		mode,
+		tasks: [],
+		planSummary: buildClarificationNeededNarrative(hasCjk),
+		mode: 'CLARIFY',
 		clarificationAnswers,
 	};
 }

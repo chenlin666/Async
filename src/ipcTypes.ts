@@ -103,7 +103,7 @@ type ChatStreamPayloadCore =
 			threadId: string;
 			type: 'plan_question_request';
 			requestId: string;
-			question: { text: string; options: { id: string; label: string }[] };
+			question: { text: string; options: { id: string; label: string }[]; freeform?: boolean };
 			teamRoleScope?: TeamRoleScope;
 	  }
 	| {

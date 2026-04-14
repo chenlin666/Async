@@ -52,4 +52,25 @@ MODE: CLARIFY
 
 		expect(extractTeamLeadNarrative(summary)).toBe('我会先安排前端和后端分别处理各自的改动。');
 	});
+
+	it('removes inline MODE markers that leak into the narrative body', () => {
+		const input = `我先总结调研结果。\nMODE: CLARIFY MODE: CLARIFY\n请先明确你想优化的模块和目标。`;
+
+		expect(extractTeamLeadNarrative(input)).toBe('我先总结调研结果。\n\n请先明确你想优化的模块和目标。');
+	});
+
+	it('unwraps structured assistant payloads before extracting the narrative', () => {
+		const input = JSON.stringify({
+			_asyncAssistant: 1,
+			v: 1,
+			parts: [
+				{
+					type: 'text',
+					text: 'MODE: CLARIFY\n请先明确你想优化的模块和目标。',
+				},
+			],
+		});
+
+		expect(extractTeamLeadNarrative(input)).toBe('请先明确你想优化的模块和目标。');
+	});
 });

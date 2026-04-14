@@ -7,7 +7,8 @@ import {
 	type LiveAgentBlocksState,
 } from '../liveAgentBlocks';
 import { flattenAssistantTextPartsForSearch } from '../agentStructuredMessage';
-import { extractTeamLeadNarrative } from '../teamWorkflowText';
+import type { PlanQuestion } from '../planParser';
+import { extractTeamLeadNarrative, stripTeamModeMarkers } from '../teamWorkflowText';
 
 export type TeamSessionPhase =
 	| 'researching'
@@ -119,6 +120,8 @@ export type TeamSessionState = {
 	preflightSummary: string;
 	preflightVerdict: 'ok' | 'needs_clarification' | null;
 	planProposal: TeamPlanProposalState | null;
+	pendingQuestion: PlanQuestion | null;
+	pendingQuestionRequestId: string | null;
 	selectedTaskId: string | null;
 	reviewerTaskId: string | null;
 	roleWorkflowByTaskId: Record<string, TeamRoleWorkflowState>;
@@ -139,6 +142,8 @@ function emptySession(): TeamSessionState {
 		preflightSummary: '',
 		preflightVerdict: null,
 		planProposal: null,
+		pendingQuestion: null,
+		pendingQuestionRequestId: null,
 		selectedTaskId: null,
 		reviewerTaskId: null,
 		roleWorkflowByTaskId: {},
@@ -151,11 +156,11 @@ const MAX_TASK_LOGS = 50;
 const FLUSH_INTERVAL_MS = 250;
 
 function normalizeTeamSummary(raw: string, fallback = ''): string {
-	const flattened = flattenAssistantTextPartsForSearch(raw).trim();
+	const flattened = stripTeamModeMarkers(flattenAssistantTextPartsForSearch(raw)).trim();
 	if (flattened) {
 		return flattened;
 	}
-	const trimmed = raw.trim();
+	const trimmed = stripTeamModeMarkers(raw).trim();
 	return trimmed || fallback;
 }
 
@@ -217,6 +222,11 @@ function ensureTaskTimelineEntry(session: TeamSessionState, taskId: string): voi
 			taskId,
 		},
 	];
+}
+
+function clearPendingQuestionState(session: TeamSessionState): void {
+	session.pendingQuestion = null;
+	session.pendingQuestionRequestId = null;
 }
 
 function ensureRoleWorkflow(
@@ -346,6 +356,9 @@ function mutateRoleWorkflowPayload(
 			workflow.lastUpdatedAt = Date.now();
 			return true;
 		case 'tool_result':
+			if (payload.name === 'ask_plan_question') {
+				clearPendingQuestionState(session);
+			}
 			workflow.liveBlocks = applyLiveAgentChatPayload(workflow.liveBlocks, {
 				type: 'tool_result',
 				name: payload.name,
@@ -399,6 +412,12 @@ function mutateRoleWorkflowPayload(
 			const q = payload.question;
 			const optionLines = q.options.map((o) => `- ${o.label}`).join('\n');
 			const content = `**${q.text}**\n\n${optionLines}`;
+			session.pendingQuestion = {
+				text: q.text,
+				options: q.options.map((o) => ({ ...o })),
+				...(q.freeform ? { freeform: true } : {}),
+			};
+			session.pendingQuestionRequestId = payload.requestId;
 			if (!isLead) {
 				const nextMessage: ChatMessage = { role: 'assistant', content };
 				const lastMessage = workflow.messages[workflow.messages.length - 1];
@@ -463,6 +482,14 @@ function snapshotSession(session: TeamSessionState): TeamSessionState {
 		planProposal: session.planProposal
 			? { ...session.planProposal, tasks: session.planProposal.tasks.map((t) => ({ ...t })) }
 			: null,
+		pendingQuestion: session.pendingQuestion
+			? {
+					text: session.pendingQuestion.text,
+					options: session.pendingQuestion.options.map((option) => ({ ...option })),
+					...(session.pendingQuestion.freeform ? { freeform: true } : {}),
+				}
+			: null,
+		pendingQuestionRequestId: session.pendingQuestionRequestId,
 		roleWorkflowByTaskId,
 		timelineEntries: session.timelineEntries.map((entry) => ({ ...entry })),
 	};
@@ -549,6 +576,9 @@ export function useTeamSession() {
 			switch (payload.type) {
 				case 'team_phase':
 					session.phase = payload.phase;
+					if (payload.phase === 'delivering' || payload.phase === 'cancelled') {
+						clearPendingQuestionState(session);
+					}
 					break;
 				case 'team_task_created': {
 					const created: TeamTask = {
@@ -725,6 +755,10 @@ export function useTeamSession() {
 				};
 				changed = true;
 			}
+			if (session.pendingQuestion || session.pendingQuestionRequestId) {
+				clearPendingQuestionState(session);
+				changed = true;
+			}
 			if (changed) {
 				session.updatedAt = Date.now();
 				scheduleFlush(threadId, true);
@@ -743,6 +777,22 @@ export function useTeamSession() {
 				awaitingApproval: false,
 				decision: approved ? 'approved' : 'rejected',
 			};
+			session.updatedAt = Date.now();
+			scheduleFlush(threadId, true);
+		},
+		[scheduleFlush]
+	);
+
+	const clearPendingQuestion = useCallback(
+		(threadId: string) => {
+			const session = sessionsRef.current[threadId];
+			if (!session) {
+				return;
+			}
+			if (!session.pendingQuestion && !session.pendingQuestionRequestId) {
+				return;
+			}
+			clearPendingQuestionState(session);
 			session.updatedAt = Date.now();
 			scheduleFlush(threadId, true);
 		},
@@ -805,6 +855,8 @@ export function useTeamSession() {
 				preflightSummary: '',
 				preflightVerdict: null,
 				planProposal: null,
+				pendingQuestion: null,
+				pendingQuestionRequestId: null,
 				selectedTaskId: snapshot.tasks[0]?.id ?? null,
 				reviewerTaskId: null,
 				roleWorkflowByTaskId: {},
@@ -844,6 +896,7 @@ export function useTeamSession() {
 			startTeamSession,
 			setSelectedTask,
 			clearTeamSession,
+			clearPendingQuestion,
 			abortTeamSession,
 			getTeamSession,
 			restoreTeamSession,
@@ -855,6 +908,7 @@ export function useTeamSession() {
 			startTeamSession,
 			setSelectedTask,
 			clearTeamSession,
+			clearPendingQuestion,
 			abortTeamSession,
 			getTeamSession,
 			restoreTeamSession,

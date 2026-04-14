@@ -1,3 +1,5 @@
+import { flattenAssistantTextPartsForSearch } from './agentStructuredMessage';
+
 function normalizeNarrativeText(text: string): string {
 	return text.replace(/\n{3,}/g, '\n\n').trim();
 }
@@ -30,16 +32,26 @@ function stripTrailingRawJson(text: string): string {
 const TEAM_LEAD_MODE_MARKER_RE = /^\s*(?:[*_`>#-]+\s*)*MODE\s*:\s*(?:ANSWER|PLAN|CLARIFY)\s*(?:[*_`]+)?\s*\n?/i;
 const TEAM_LEAD_MODE_MARKER_LINE_RE =
 	/^\s*(?:[*_`>#-]+\s*)*MODE\s*:\s*(?:ANSWER|PLAN|CLARIFY)\s*(?:[*_`]+)?\s*$/gim;
+const TEAM_LEAD_MODE_MARKER_INLINE_RE = /\bMODE\s*:\s*(?:ANSWER|PLAN|CLARIFY)\b/gi;
+
+export function stripTeamModeMarkers(text: string): string {
+	return String(text ?? '')
+		.replace(TEAM_LEAD_MODE_MARKER_RE, '')
+		.replace(TEAM_LEAD_MODE_MARKER_LINE_RE, '')
+		.replace(TEAM_LEAD_MODE_MARKER_INLINE_RE, '')
+		.replace(/[ \t]{2,}/g, ' ')
+		.replace(/\n[ \t]+\n/g, '\n\n')
+		.replace(/\n{3,}/g, '\n\n')
+		.trim();
+}
 
 export function extractTeamLeadNarrative(summary: string): string {
-	const text = String(summary ?? '').trim();
+	const text = flattenAssistantTextPartsForSearch(String(summary ?? '')).trim();
 	if (!text) {
 		return '';
 	}
 
-	const withoutMode = text
-		.replace(TEAM_LEAD_MODE_MARKER_RE, '')
-		.replace(TEAM_LEAD_MODE_MARKER_LINE_RE, '');
+	const withoutMode = stripTeamModeMarkers(text);
 	const withoutFence = stripFencedBlocks(withoutMode);
 	const withoutRawJson = stripTrailingRawJson(withoutFence || withoutMode);
 

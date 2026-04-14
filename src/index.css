@@ -6540,6 +6540,35 @@ html[data-theme-switching='true'] .ref-editor-welcome-panel {
 	margin-left: auto;
 }
 
+.ref-capsule-bar.is-awaiting-reply .ref-capsule-bar-start,
+.ref-capsule-bar.is-awaiting-reply .ref-editor-rail-bar-left {
+	grid-column: 1;
+	justify-self: start;
+	min-width: 0;
+}
+
+.ref-capsule-bar.is-awaiting-reply .ref-capsule-bar-end,
+.ref-capsule-bar.is-awaiting-reply .ref-editor-rail-bar-right {
+	grid-column: 3;
+	justify-self: end;
+	margin-left: 0;
+	min-width: 0;
+}
+
+.ref-capsule-stop-slot {
+	grid-column: 2;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	justify-self: center;
+	align-self: center;
+	min-width: 0;
+}
+
+.ref-capsule-bar.is-awaiting-reply .is-idle-hidden {
+	pointer-events: none;
+}
+
 .ref-agent-stream-tool {
 	margin-top: 10px;
 	padding: 10px 12px;
@@ -7041,6 +7070,12 @@ html[data-theme-switching='true'] .ref-editor-welcome-panel {
 	border-top: 1px solid var(--void-border-soft);
 }
 
+.ref-capsule-bar.is-awaiting-reply {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+	align-items: center;
+}
+
 .ref-plus-anchor {
 	display: inline-flex;
 	flex-shrink: 0;
@@ -7311,11 +7346,13 @@ html[data-theme-switching='true'] .ref-editor-welcome-panel {
 	line-height: 0;
 	width: 42px;
 	height: 42px;
+	padding: 0;
 	border: none;
 	border-radius: var(--void-pill);
 	background: var(--void-fg-0);
 	color: var(--void-bg-0);
 	cursor: pointer;
+	box-sizing: border-box;
 	flex-shrink: 0;
 	transition: filter 0.12s ease, transform 0.12s ease;
 }
@@ -7336,7 +7373,10 @@ html[data-theme-switching='true'] .ref-editor-welcome-panel {
 
 .ref-send-icon {
 	display: block;
+	width: 16px;
+	height: 16px;
 	margin: 0;
+	flex-shrink: 0;
 }
 
 .ref-quick-actions {
@@ -17156,8 +17196,7 @@ select.ref-settings-native-select:focus {
 	margin-bottom: 18px;
 }
 
-.ref-settings-team-hero,
-.ref-settings-team-config-card {
+.ref-settings-team-hero {
 	display: grid;
 	gap: 14px;
 	padding: 16px;
@@ -17253,13 +17292,6 @@ select.ref-settings-native-select:focus {
 	color: var(--void-fg-2);
 }
 
-.ref-settings-team-config-grid {
-	display: grid;
-	grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
-	gap: 12px;
-	align-items: end;
-}
-
 .ref-settings-team-inline-check {
 	display: inline-flex;
 	align-items: center;
@@ -17270,12 +17302,6 @@ select.ref-settings-native-select:focus {
 
 .ref-settings-team-inline-check input {
 	margin: 0;
-}
-
-.ref-settings-team-actions {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 10px;
 }
 
 .ref-settings-team-role-card {

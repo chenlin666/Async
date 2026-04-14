@@ -42,19 +42,9 @@ export function SettingsTeamPanel({ value, onChange, modelEntries, modelProvider
 	const experts = value.experts ?? [];
 	const roleList = experts.length > 0 ? experts : buildTeamPresetExperts(value.presetId);
 	const currentPreset = getTeamPreset(value.presetId);
-	const presetDefaults = getTeamPresetDefaults(value.presetId);
 
 	const [editingRole, setEditingRole] = useState<TeamExpertConfig | null>(null);
 
-	const restoreDefaults = () => {
-		onChange({
-			useDefaults: true,
-			presetId: 'engineering',
-			experts: [],
-			presetExpertSnapshots: undefined,
-			...getTeamPresetDefaults('engineering'),
-		});
-	};
 	const applyPreset = (nextPresetId: TeamPresetId) => {
 		const currentPresetId = (value.presetId ?? 'engineering') as TeamPresetId;
 		if (nextPresetId === currentPresetId) {
@@ -174,75 +164,6 @@ export function SettingsTeamPanel({ value, onChange, modelEntries, modelProvider
 							</button>
 						);
 					})}
-				</section>
-
-				<section className="ref-settings-team-config-card">
-					<div className="ref-settings-team-config-grid">
-						<label className="ref-settings-team-inline-check">
-							<input
-								type="checkbox"
-								checked={value.useDefaults !== false}
-								onChange={(e) => onChange({ ...value, useDefaults: e.target.checked })}
-							/>
-							<span>{t('settings.team.useDefaults')}</span>
-						</label>
-						<label className="ref-settings-team-inline-check">
-							<input
-								type="checkbox"
-								checked={value.requirePlanApproval ?? presetDefaults.requirePlanApproval}
-								onChange={(e) => onChange({ ...value, requirePlanApproval: e.target.checked })}
-							/>
-							<span>{t('settings.team.requirePlanApproval')}</span>
-						</label>
-						<label className="ref-settings-team-inline-check">
-							<input
-								type="checkbox"
-								checked={value.enablePreflightReview ?? presetDefaults.enablePreflightReview}
-								onChange={(e) => onChange({ ...value, enablePreflightReview: e.target.checked })}
-							/>
-							<span>{t('settings.team.enablePreflightReview')}</span>
-						</label>
-						<label className="ref-settings-team-inline-check">
-							<input
-								type="checkbox"
-								checked={value.enableResearchPhase ?? presetDefaults.enableResearchPhase}
-								onChange={(e) => onChange({ ...value, enableResearchPhase: e.target.checked })}
-							/>
-							<span>{t('settings.team.enableResearchPhase')}</span>
-						</label>
-					</div>
-					<div className="ref-settings-team-actions">
-						<button
-							type="button"
-							className="ref-settings-add-model"
-							onClick={() => setEditingRole(newRole())}
-						>
-							{t('settings.team.addRole')}
-						</button>
-						<button
-							type="button"
-							className="ref-settings-add-model"
-							onClick={() => {
-								const pid = (value.presetId ?? 'engineering') as TeamPresetId;
-								const snaps = { ...(value.presetExpertSnapshots ?? {}) };
-								delete snaps[pid];
-								onChange({
-									...value,
-									experts: buildTeamPresetExperts(pid),
-									presetExpertSnapshots: snaps,
-								});
-							}}
-						>
-							{t('settings.team.applyPresetRoles')}
-						</button>
-						<button
-							type="button"
-							className="ref-settings-remove-model"
-							onClick={restoreDefaults}
-						>
-							{t('settings.team.restoreDefaults')}
-						</button>
-					</div>
 				</section>
 
 				{roleList.length === 0 ? <p className="ref-settings-proxy-hint">{t('settings.team.empty')}</p> : null}

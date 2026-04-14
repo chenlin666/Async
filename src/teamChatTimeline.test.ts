@@ -21,6 +21,8 @@ function buildSession(overrides: Partial<TeamSessionState> = {}): TeamSessionSta
 		preflightSummary: '',
 		preflightVerdict: null,
 		planProposal: null,
+		pendingQuestion: null,
+		pendingQuestionRequestId: null,
 		selectedTaskId: null,
 		reviewerTaskId: null,
 		roleWorkflowByTaskId: {},

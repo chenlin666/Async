@@ -17,6 +17,7 @@ export type PlanQuestionEmitExtras = {
 export type PlanQuestionWire = {
 	text: string;
 	options: { id: string; label: string }[];
+	freeform?: boolean;
 };
 
 const waiters = new Map<string, (payload: { skipped?: boolean; answerText?: string }) => void>();
@@ -56,10 +57,29 @@ export function normalizePlanQuestionArgs(
 	raw: Record<string, unknown>
 ): { ok: true; q: PlanQuestionWire } | { ok: false; error: string } {
 	const question = String(raw.question ?? '').trim();
+	const freeform = raw.freeform === true;
 	if (!question) {
 		return { ok: false, error: 'Error: question is required for ask_plan_question.' };
 	}
 	const optRaw = raw.options;
+	if (freeform) {
+		const customLabel =
+			Array.isArray(optRaw) && optRaw.length > 0
+				? String(
+						(typeof optRaw[0] === 'string'
+							? optRaw[0]
+							: (optRaw[0] as Record<string, unknown> | null | undefined)?.label) ?? ''
+					).trim()
+				: '';
+		return {
+			ok: true,
+			q: {
+				text: question,
+				options: [{ id: 'custom', label: customLabel || defaultOtherLabel(question) }],
+				freeform: true,
+			},
+		};
+	}
 	if (!Array.isArray(optRaw) || optRaw.length < 3) {
 		return {
 			ok: false,

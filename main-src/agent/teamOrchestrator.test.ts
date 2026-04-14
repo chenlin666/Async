@@ -297,6 +297,141 @@ describe('runTeamSession clarification gates', () => {
 		expect(doneCalls[0]?.text).not.toContain('MODE:');
 	});
 
+	it('falls back to a freeform clarification dialog when the lead returns CLARIFY without using the tool', async () => {
+		const questionEvents: Array<Record<string, unknown>> = [];
+		setPlanQuestionRuntime({
+			threadId: 'thread-test',
+			signal: new AbortController().signal,
+			emit: (evt) => {
+				questionEvents.push(evt);
+				if (evt.type === 'plan_question_request') {
+					queueMicrotask(() => {
+						resolvePlanQuestionTool(String(evt.requestId), {
+							answerText: '请先聚焦聊天区里 team 模式的渲染顺序问题。',
+						});
+					});
+				}
+			},
+		});
+
+		let secondTurnMessages = '';
+		runAgentLoopMock
+			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
+				handlers.onDone('MODE: CLARIFY\n请先明确你要优化的是哪个模块，以及你希望达成的结果。');
+			})
+			.mockImplementationOnce(async (_settings, messagesArg, _options, handlers) => {
+				secondTurnMessages = messagesArg.map((message) => String(message.content ?? '')).join('\n');
+				handlers.onDone(`MODE: PLAN
+我会围绕聊天区 team 模式来分配专家。
+
+\`\`\`json
+[
+  {
+    "expert": "frontend",
+    "task": "Audit the team chat timeline rendering order",
+    "acceptanceCriteria": ["Explain why the cards are ordered incorrectly"]
+  }
+]
+\`\`\``);
+			})
+			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
+				handlers.onDone('已完成聊天区 team 时间线审查。');
+			});
+
+		const experts = [
+			makeExpertConfig('team_lead', 'Team Lead', 'team_lead'),
+			makeExpertConfig('frontend', 'Frontend', 'frontend'),
+		];
+		const { doneCalls, errorCalls } = await runSession({
+			userRequest: '请帮我看看这个项目接下来怎么优化',
+			experts,
+		});
+
+		expect(errorCalls).toEqual([]);
+		expect(questionEvents).toHaveLength(1);
+		expect(questionEvents[0]).toMatchObject({
+			type: 'plan_question_request',
+			question: expect.objectContaining({
+				freeform: true,
+				text: expect.stringContaining('请先明确'),
+			}),
+		});
+		expect(secondTurnMessages).toContain('[TEAM CLARIFICATION ANSWER]');
+		expect(secondTurnMessages).toContain('聊天区里 team 模式的渲染顺序问题');
+		expect(doneCalls).toHaveLength(1);
+		expect(doneCalls[0]?.text).not.toContain('MODE:');
+	});
+
+	it('unwraps structured lead output before opening the fallback clarification dialog', async () => {
+		const questionEvents: Array<Record<string, unknown>> = [];
+		setPlanQuestionRuntime({
+			threadId: 'thread-test',
+			signal: new AbortController().signal,
+			emit: (evt) => {
+				questionEvents.push(evt);
+				if (evt.type === 'plan_question_request') {
+					queueMicrotask(() => {
+						resolvePlanQuestionTool(String(evt.requestId), {
+							answerText: '请聚焦 team leader 的澄清交互。',
+						});
+					});
+				}
+			},
+		});
+
+		runAgentLoopMock
+			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
+				handlers.onDone(
+					JSON.stringify({
+						_asyncAssistant: 1,
+						v: 1,
+						parts: [
+							{
+								type: 'text',
+								text: 'MODE: CLARIFY\n请先明确你想优化的是 team 模式里的哪个问题。',
+							},
+						],
+					})
+				);
+			})
+			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
+				handlers.onDone(`MODE: PLAN
+我会围绕 team 模式问题分配专家。
+
+\`\`\`json
+[
+  {
+    "expert": "frontend",
+    "task": "Audit the team-mode clarify UI path",
+    "acceptanceCriteria": ["Explain why raw structured payload leaked into the dialog"]
+  }
+]
+\`\`\``);
+			})
+			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
+				handlers.onDone('已完成 team 模式澄清链路审查。');
+			});
+
+		const experts = [
+			makeExpertConfig('team_lead', 'Team Lead', 'team_lead'),
+			makeExpertConfig('frontend', 'Frontend', 'frontend'),
+		];
+		const { errorCalls } = await runSession({
+			userRequest: '请帮我看看 team 模式应该怎么优化',
+			experts,
+		});
+
+		expect(errorCalls).toEqual([]);
+		expect(questionEvents).toHaveLength(1);
+		expect(questionEvents[0]).toMatchObject({
+			type: 'plan_question_request',
+			question: expect.objectContaining({
+				text: '请先明确你想优化的是 team 模式里的哪个问题。',
+				freeform: true,
+			}),
+		});
+	});
+
 	it('hard-stops when preflight review needs clarification even without plan approval', async () => {
 		runAgentLoopMock
 			.mockImplementationOnce(async (_settings, _messages, _options, handlers) => {
