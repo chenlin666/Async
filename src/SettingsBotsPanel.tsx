@@ -14,9 +14,13 @@ type Props = {
 	value: BotIntegrationConfig[];
 	onChange: (next: BotIntegrationConfig[]) => void;
 	modelEntries: UserModelEntry[];
+	shell: NonNullable<Window['asyncShell']> | null;
 };
 
 type EditorMode = 'create' | 'edit';
+type BotConnectionUiState =
+	| { status: 'loading' }
+	| { status: 'done'; ok: boolean; message: string };
 
 const PLATFORM_META: Record<BotPlatform, { accent: string }> = {
 	telegram: { accent: '#2aabee' },
@@ -585,10 +589,11 @@ function BotEditorModal(props: BotEditorModalProps) {
 	return typeof document !== 'undefined' ? createPortal(modal, document.body) : null;
 }
 
-export function SettingsBotsPanel({ value, onChange, modelEntries }: Props) {
+export function SettingsBotsPanel({ value, onChange, modelEntries, shell }: Props) {
 	const { t } = useI18n();
 	const [editorMode, setEditorMode] = useState<EditorMode | null>(null);
 	const [draft, setDraft] = useState<BotIntegrationConfig | null>(null);
+	const [connectionStateById, setConnectionStateById] = useState<Record<string, BotConnectionUiState>>({});
 
 	const activeCount = value.filter((item) => item.enabled !== false).length;
 	const restrictedCount = value.filter((item) => countAllowedChats(item) > 0).length;
@@ -630,6 +635,47 @@ export function SettingsBotsPanel({ value, onChange, modelEntries }: Props) {
 		onChange(value.filter((item) => item.id !== id));
 		if (draft?.id === id) {
 			closeEditor();
+		}
+		setConnectionStateById((prev) => {
+			const next = { ...prev };
+			delete next[id];
+			return next;
+		});
+	};
+
+	const runConnectionTest = async (item: BotIntegrationConfig) => {
+		if (!shell) {
+			setConnectionStateById((prev) => ({
+				...prev,
+				[item.id]: { status: 'done', ok: false, message: t('settings.bots.test.unavailable') },
+			}));
+			return;
+		}
+		setConnectionStateById((prev) => ({ ...prev, [item.id]: { status: 'loading' } }));
+		try {
+			const result = (await shell.invoke('settings:testBotConnection', item)) as { ok?: boolean; message?: string };
+			setConnectionStateById((prev) => ({
+				...prev,
+				[item.id]: {
+					status: 'done',
+					ok: result.ok === true,
+					message:
+						typeof result.message === 'string' && result.message.trim()
+							? result.message.trim()
+							: result.ok
+								? t('settings.bots.test.success')
+								: t('settings.bots.test.failure'),
+				},
+			}));
+		} catch (error) {
+			setConnectionStateById((prev) => ({
+				...prev,
+				[item.id]: {
+					status: 'done',
+					ok: false,
+					message: error instanceof Error ? error.message : String(error ?? t('settings.bots.test.failure')),
+				},
+			}));
 		}
 	};
 
@@ -714,51 +760,71 @@ export function SettingsBotsPanel({ value, onChange, modelEntries }: Props) {
 							const meta = PLATFORM_META[current.platform];
 							const summary = botCardSummary(current, t);
 							const modelText = modelLabel(current.defaultModelId, modelEntries, t);
+							const enabled = current.enabled !== false;
+							const connectionState = connectionStateById[current.id];
 							return (
 								<article
 									key={current.id}
-									className={`ref-settings-bot-card ${current.enabled !== false ? 'is-enabled' : 'is-disabled'}`}
+									className={`ref-settings-bot-card ${enabled ? 'is-enabled' : 'is-disabled'}`}
 									style={{ '--bot-accent': meta.accent } as CSSProperties}
 								>
 									<div className="ref-settings-bot-card-head">
 										<div className="ref-settings-bot-card-main">
 											<div className="ref-settings-bot-card-mark">{platformIcon(current.platform)}</div>
-										<div className="ref-settings-bot-card-copy">
-											<div className="ref-settings-bot-card-kicker">
-												{t('settings.bots.card.number', { count: index + 1 })} · {platformLabel(current.platform, t)}
+											<div className="ref-settings-bot-card-copy">
+												<div className="ref-settings-bot-card-kicker">
+													{t('settings.bots.card.number', { count: index + 1 })} · {platformLabel(current.platform, t)}
+												</div>
+												<h4 className="ref-settings-bot-card-title">
+													{current.name.trim() || `${platformLabel(current.platform, t)} ${t('settings.nav.bots')}`}
+												</h4>
+												<p className="ref-settings-bot-card-subtitle">
+													{platformDescription(current.platform, t)}
+												</p>
 											</div>
-											<h4 className="ref-settings-bot-card-title">
-												{current.name.trim() || `${platformLabel(current.platform, t)} ${t('settings.nav.bots')}`}
-											</h4>
-											<p className="ref-settings-bot-card-subtitle">
-												{platformDescription(current.platform, t)}
-											</p>
+										</div>
+										<div className="ref-settings-bot-card-controls">
+											<button
+												type="button"
+												role="switch"
+												aria-checked={enabled}
+												className={`ref-settings-bot-switch ${enabled ? 'is-on' : 'is-off'}`}
+												onClick={() => toggleEnabled(current.id)}
+											>
+												<span className="ref-settings-bot-switch-track" aria-hidden>
+													<span className="ref-settings-bot-switch-thumb" />
+												</span>
+												<span className="ref-settings-bot-switch-copy">
+													<strong>{enabled ? t('settings.bots.switch.on') : t('settings.bots.switch.off')}</strong>
+													<small>{t('settings.bots.switch.hint')}</small>
+												</span>
+											</button>
+											<div className="ref-settings-bot-card-actions">
+												<button
+													type="button"
+													className={`ref-settings-bot-chip-btn ${connectionState?.status === 'loading' ? 'is-active' : ''}`}
+													onClick={() => void runConnectionTest(current)}
+													disabled={connectionState?.status === 'loading' || !shell}
+												>
+													{connectionState?.status === 'loading' ? t('settings.bots.action.testing') : t('settings.bots.action.test')}
+												</button>
+												<button
+													type="button"
+													className="ref-settings-bot-chip-btn"
+													onClick={() => openEdit(current)}
+												>
+													{t('settings.bots.action.edit')}
+												</button>
+												<button
+													type="button"
+													className="ref-settings-bot-chip-btn is-danger"
+													onClick={() => removeOne(current.id)}
+												>
+													{t('settings.bots.action.remove')}
+												</button>
+											</div>
 										</div>
 									</div>
-									<div className="ref-settings-bot-card-actions">
-										<button
-												type="button"
-											className={`ref-settings-bot-chip-btn ${current.enabled !== false ? 'is-active' : ''}`}
-											onClick={() => toggleEnabled(current.id)}
-										>
-											{current.enabled !== false ? t('settings.bots.action.enabled') : t('settings.bots.action.paused')}
-										</button>
-										<button
-											type="button"
-											className="ref-settings-bot-chip-btn"
-											onClick={() => openEdit(current)}
-										>
-											{t('settings.bots.action.edit')}
-										</button>
-										<button
-											type="button"
-											className="ref-settings-bot-chip-btn is-danger"
-											onClick={() => removeOne(current.id)}
-										>
-											{t('settings.bots.action.remove')}
-										</button>
-									</div>
-								</div>
 
 									<div className="ref-settings-bot-badges">
 										<span className="ref-settings-bot-badge">{t(`composer.mode.${current.defaultMode ?? 'agent'}`)}</span>
@@ -767,20 +833,48 @@ export function SettingsBotsPanel({ value, onChange, modelEntries }: Props) {
 										<span className="ref-settings-bot-badge">{summary.users}</span>
 									</div>
 
+									{connectionState ? (
+										<div
+											className={`ref-settings-bot-connection ${
+												connectionState.status === 'loading'
+													? 'is-loading'
+													: connectionState.ok
+														? 'is-success'
+														: 'is-error'
+											}`}
+										>
+											<span className="ref-settings-bot-connection-dot" aria-hidden />
+											<div className="ref-settings-bot-connection-copy">
+												<strong>
+													{connectionState.status === 'loading'
+														? t('settings.bots.test.running')
+														: connectionState.ok
+															? t('settings.bots.test.success')
+															: t('settings.bots.test.failure')}
+												</strong>
+												<span>
+													{connectionState.status === 'loading'
+														? t('settings.bots.test.runningHint')
+														: connectionState.message}
+												</span>
+											</div>
+										</div>
+									) : null}
+
 									<div className="ref-settings-bot-overview">
-									<div className="ref-settings-bot-overview-item">
-										<span>{t('settings.bots.overview.groups')}</span>
-										<strong>{summary.chats}</strong>
+										<div className="ref-settings-bot-overview-item">
+											<span>{t('settings.bots.overview.groups')}</span>
+											<strong>{summary.chats}</strong>
+										</div>
+										<div className="ref-settings-bot-overview-item">
+											<span>{t('settings.bots.overview.users')}</span>
+											<strong>{summary.users}</strong>
+										</div>
+										<div className="ref-settings-bot-overview-item">
+											<span>{t('settings.bots.overview.prompt')}</span>
+											<strong>{summary.prompt}</strong>
+										</div>
 									</div>
-									<div className="ref-settings-bot-overview-item">
-										<span>{t('settings.bots.overview.users')}</span>
-										<strong>{summary.users}</strong>
-									</div>
-									<div className="ref-settings-bot-overview-item">
-										<span>{t('settings.bots.overview.prompt')}</span>
-										<strong>{summary.prompt}</strong>
-									</div>
-								</div>
 								</article>
 							);
 						})}

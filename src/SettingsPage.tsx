@@ -719,6 +719,7 @@ export function SettingsPage({
 									value={botIntegrations}
 									onChange={onChangeBotIntegrations}
 									modelEntries={modelEntries}
+									shell={shell}
 								/>
 							</Suspense>
 						) : null}

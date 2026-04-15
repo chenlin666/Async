@@ -85,6 +85,15 @@ export function createProxyAgent(proxyUrl?: string): InstanceType<typeof HttpsPr
 	return new HttpsProxyAgent(trimmed);
 }
 
+export function electronProxyRulesFromUrl(proxyUrl: string): string {
+	const parsed = new URL(proxyUrl);
+	const scheme = parsed.protocol.replace(/:$/, '').toLowerCase();
+	if (scheme === 'http' || scheme === 'https') {
+		return `http=${parsed.host};https=${parsed.host}`;
+	}
+	return `${scheme}://${parsed.host}`;
+}
+
 type JsonPrimitive = string | number | boolean;
 
 type JsonRequestOptions = {

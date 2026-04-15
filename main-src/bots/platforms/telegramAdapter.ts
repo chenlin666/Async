@@ -1,6 +1,7 @@
+import { session, type Session } from 'electron';
 import type { BotIntegrationConfig } from '../../botSettingsTypes.js';
 import type { BotPlatformAdapter, PlatformMessageHandler } from './common.js';
-import { requestJson, resolveIntegrationProxyUrl, splitPlainText } from './common.js';
+import { electronProxyRulesFromUrl, resolveIntegrationProxyUrl, splitPlainText } from './common.js';
 
 type TelegramUpdate = {
 	update_id: number;
@@ -20,25 +21,52 @@ export class TelegramBotAdapter implements BotPlatformAdapter {
 	private offset = 0;
 	private botUsername = '';
 	private stopRequested = false;
+	private readonly sessionPartition: string;
+	private electronSession: Session | null = null;
 
-	constructor(private readonly integration: BotIntegrationConfig) {}
+	constructor(private readonly integration: BotIntegrationConfig) {
+		this.sessionPartition = `async-bot-telegram-${integration.id}`;
+	}
 
 	private get token(): string {
 		return this.integration.telegram?.botToken?.trim() ?? '';
 	}
 
+	private async getElectronSession(): Promise<Session> {
+		if (this.electronSession) {
+			return this.electronSession;
+		}
+		const ses = session.fromPartition(this.sessionPartition);
+		const proxyUrl = resolveIntegrationProxyUrl(this.integration);
+		if (proxyUrl) {
+			await ses.setProxy({
+				mode: 'fixed_servers',
+				proxyRules: electronProxyRulesFromUrl(proxyUrl),
+			});
+		} else {
+			await ses.setProxy({ mode: 'direct' });
+		}
+		try {
+			await ses.closeAllConnections();
+		} catch {
+			/* ignore */
+		}
+		this.electronSession = ses;
+		return ses;
+	}
+
 	private async api<T>(method: string, body?: Record<string, unknown>): Promise<T> {
-		const data = await requestJson<{ ok?: boolean; result?: T; description?: string }>(
-			`https://api.telegram.org/bot${this.token}/${method}`,
-			{
-				method: body ? 'POST' : 'GET',
-				headers: body ? { 'content-type': 'application/json' } : undefined,
-				body,
-				timeoutMs: body ? 40_000 : 20_000,
-				proxyUrl: resolveIntegrationProxyUrl(this.integration),
-				signal: this.abortController?.signal,
-			}
-		);
+		const ses = await this.getElectronSession();
+		const response = await ses.fetch(`https://api.telegram.org/bot${this.token}/${method}`, {
+			method: body ? 'POST' : 'GET',
+			headers: body ? { 'content-type': 'application/json' } : undefined,
+			body: body ? JSON.stringify(body) : undefined,
+			signal: this.abortController?.signal,
+		});
+		if (!response.ok) {
+			throw new Error(`Telegram API ${method} failed: ${response.status}`);
+		}
+		const data = (await response.json()) as { ok?: boolean; result?: T; description?: string };
 		if (!data.ok) {
 			throw new Error(data.description || `Telegram API ${method} failed`);
 		}
@@ -58,21 +86,21 @@ export class TelegramBotAdapter implements BotPlatformAdapter {
 		void (async () => {
 			while (!controller.signal.aborted) {
 				try {
-					const updates = await requestJson<{ ok?: boolean; result?: TelegramUpdate[]; description?: string }>(
-						`https://api.telegram.org/bot${this.token}/getUpdates`,
-						{
-							method: 'POST',
-							headers: { 'content-type': 'application/json' },
-							body: {
-								timeout: 30,
-								offset: this.offset,
-								allowed_updates: ['message'],
-							},
-							timeoutMs: 40_000,
-							proxyUrl: resolveIntegrationProxyUrl(this.integration),
-							signal: controller.signal,
-						}
-					);
+					const ses = await this.getElectronSession();
+					const response = await ses.fetch(`https://api.telegram.org/bot${this.token}/getUpdates`, {
+						method: 'POST',
+						headers: { 'content-type': 'application/json' },
+						body: JSON.stringify({
+							timeout: 30,
+							offset: this.offset,
+							allowed_updates: ['message'],
+						}),
+						signal: controller.signal,
+					});
+					if (!response.ok) {
+						throw new Error(`Telegram API getUpdates failed: ${response.status}`);
+					}
+					const updates = (await response.json()) as { ok?: boolean; result?: TelegramUpdate[]; description?: string };
 					if (!updates.ok) {
 						throw new Error(updates.description || 'Telegram API getUpdates failed');
 					}
@@ -161,5 +189,13 @@ export class TelegramBotAdapter implements BotPlatformAdapter {
 		this.stopRequested = true;
 		this.abortController?.abort();
 		this.abortController = null;
+		if (this.electronSession) {
+			try {
+				await this.electronSession.closeAllConnections();
+			} catch {
+				/* ignore */
+			}
+		}
+		this.electronSession = null;
 	}
 }

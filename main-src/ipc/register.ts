@@ -52,6 +52,8 @@ import { checkForUpdates, downloadUpdate, quitAndInstall, getStatus, type AutoUp
 import { getMcpManager, destroyMcpManager } from '../mcp';
 import type { McpServerConfig } from '../mcp';
 import { syncBotControllerFromSettings } from '../bots/botController.js';
+import { testBotIntegrationConnection } from '../bots/botConnectivity.js';
+import type { BotIntegrationConfig } from '../botSettingsTypes.js';
 import {
 	appendMessage,
 	createThread,
@@ -1444,6 +1446,15 @@ export function registerIpc(): void {
 			}
 		}
 		return next;
+	});
+
+	ipcMain.handle('settings:testBotConnection', async (_e, rawIntegration: unknown) => {
+		const integration = rawIntegration as BotIntegrationConfig | null | undefined;
+		if (!integration || typeof integration !== 'object' || typeof integration.id !== 'string' || typeof integration.platform !== 'string') {
+			return { ok: false as const, message: 'Invalid bot integration payload.' };
+		}
+		const lang = getSettings().language === 'en' ? 'en' : 'zh-CN';
+		return await testBotIntegrationConnection(integration, lang);
 	});
 
 	ipcMain.handle(
