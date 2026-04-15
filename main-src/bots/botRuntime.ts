@@ -208,9 +208,32 @@ function describeBotToolActivity(name: string, args: Record<string, unknown>): s
 			}
 			return task ? `派发内部会话：${task.slice(0, 60)}` : '派发内部会话';
 		}
+		case 'send_local_attachment':
+			return '发送本地附件给用户';
 		default:
 			return undefined;
 	}
+}
+
+function resolveBotLocalAttachmentPath(session: BotSessionState, requested: string): string {
+	const raw = requested.trim();
+	if (!raw) {
+		throw new Error('file_path 不能为空。');
+	}
+	if (path.isAbsolute(raw)) {
+		if (!fs.existsSync(raw) || !fs.statSync(raw).isFile()) {
+			throw new Error('目标附件不存在，或不是文件。');
+		}
+		return raw;
+	}
+	if (!session.workspaceRoot) {
+		throw new Error('当前没有工作区，无法解析相对附件路径。');
+	}
+	const resolved = path.resolve(session.workspaceRoot, raw);
+	if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+		throw new Error('目标附件不存在，或不是文件。');
+	}
+	return resolved;
 }
 
 function collectAvailableWorkspaceRoots(integration: BotIntegrationConfig): string[] {
@@ -304,6 +327,7 @@ type RunBotOrchestratorArgs = {
 	onStreamDelta?: (fullText: string) => void;
 	onToolStatus?: (name: string, state: 'running' | 'completed' | 'error', detail?: string) => void;
 	onTodoUpdate?: (todos: BotTodoListItem[]) => void;
+	onSendAttachment?: (filePath: string) => Promise<string>;
 };
 
 type RunBotAsyncTaskArgs = {
@@ -378,6 +402,20 @@ const BOT_TOOL_DEFS: AgentToolDef[] = [
 				},
 			},
 			required: ['task'],
+		},
+	},
+	{
+		name: 'send_local_attachment',
+		description: 'Send a local image or file from disk back to the external user chat. Use this after you produce or locate a file the user wants to receive.',
+		parameters: {
+			type: 'object',
+			properties: {
+				file_path: {
+					type: 'string',
+					description: 'Absolute file path, or a path relative to the current workspace.',
+				},
+			},
+			required: ['file_path'],
 		},
 	},
 ];
@@ -455,6 +493,9 @@ export function buildBotOrchestratorPrompt(
 		language === 'en'
 			? 'When the user asks to search the web, open a page, read a webpage, take a screenshot, or close the built-in browser, use the Browser tool directly (for example: navigate, read_page, screenshot_page, close_sidebar).'
 			: '当用户要求搜索网页、打开页面、读取网页内容、截屏，或关闭内置浏览器时，直接使用 Browser 工具（例如：navigate、read_page、screenshot_page、close_sidebar）。',
+		language === 'en'
+			? 'If the user wants the screenshot or a local file to appear in the chat, do not stop at saving it locally. Use send_local_attachment to send the produced or located file back to the user.'
+			: '如果用户希望截图或本地文件直接出现在聊天窗口里，不要只停留在本地保存；拿到文件后继续调用 send_local_attachment 发回给用户。',
 		language === 'en'
 			? 'For user-visible replies on external platforms like Feishu, be explicit and reasonably detailed. For substantial work, summarize what was checked, what was done, key findings, affected areas, and the next step.'
 			: '在飞书这类外部平台上给用户回复时，要明确且信息量充足。只要工作不算特别轻，就总结：检查了什么、做了什么、关键发现、影响范围，以及下一步建议。',
@@ -928,6 +969,36 @@ export async function runBotOrchestratorTurn(args: RunBotOrchestratorArgs): Prom
 						'',
 						result,
 					].join('\n'),
+					isError: false,
+				};
+			} catch (error) {
+				return {
+					toolCallId: call.id,
+					name: call.name,
+					content: error instanceof Error ? error.message : String(error),
+					isError: true,
+				};
+			}
+		},
+		send_local_attachment: async (call) => {
+			if (!args.onSendAttachment) {
+				return {
+					toolCallId: call.id,
+					name: call.name,
+					content: '当前平台不支持发送附件。',
+					isError: true,
+				};
+			}
+			try {
+				const resolvedPath = resolveBotLocalAttachmentPath(
+					session,
+					String(call.arguments.file_path ?? '').trim()
+				);
+				const result = await args.onSendAttachment(resolvedPath);
+				return {
+					toolCallId: call.id,
+					name: call.name,
+					content: result,
 					isError: false,
 				};
 			} catch (error) {

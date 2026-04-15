@@ -1,12 +1,17 @@
 import type { BotIntegrationConfig } from '../botSettingsTypes.js';
 import type { ShellSettings } from '../settingsStore.js';
-import { extractBotReplyText } from '../../src/agentStructuredMessage.js';
+import { extractBotReplyImagePaths, extractBotReplyText } from '../../src/agentStructuredMessage.js';
 import { createBotWorkspaceLspManager, createInitialBotSession, runBotOrchestratorTurn, type BotSessionState } from './botRuntime.js';
 import { DiscordBotAdapter } from './platforms/discordAdapter.js';
 import { FeishuBotAdapter } from './platforms/feishuAdapter.js';
 import type { BotPlatformAdapter, PlatformInboundEnvelope, PlatformMessageHandler } from './platforms/common.js';
 import { SlackBotAdapter } from './platforms/slackAdapter.js';
 import { TelegramBotAdapter } from './platforms/telegramAdapter.js';
+import * as path from 'node:path';
+
+function looksLikeImagePath(filePath: string): boolean {
+	return /\.(png|jpe?g|webp|gif|bmp|ico|tiff?)$/i.test(path.extname(filePath));
+}
 
 function createAdapter(integration: BotIntegrationConfig): BotPlatformAdapter | null {
 	switch (integration.platform) {
@@ -92,6 +97,24 @@ class BotController {
 								stream.onTodoUpdate(todos);
 						  }
 						: undefined,
+					onSendAttachment:
+						message.replyImage || message.replyFile
+							? async (filePath) => {
+									if (looksLikeImagePath(filePath) && message.replyImage) {
+										await message.replyImage(filePath);
+										return `已发送图片：${filePath}`;
+									}
+									if (message.replyFile) {
+										await message.replyFile(filePath);
+										return `已发送文件：${filePath}`;
+									}
+									if (message.replyImage) {
+										await message.replyImage(filePath);
+										return `已发送图片：${filePath}`;
+									}
+									throw new Error('当前平台不支持发送附件。');
+							  }
+							: undefined,
 					onToolStatus: stream
 						? (name, state, detail) => {
 								stream.onToolStatus(name, state, detail);
@@ -99,10 +122,23 @@ class BotController {
 						: undefined,
 				});
 				const displayText = extractBotReplyText(text || '');
+				const imagePaths = extractBotReplyImagePaths(text || '');
 				if (stream) {
 					await stream!.onDone(displayText || '已完成，但没有返回可展示的文本结果。');
 				} else {
-					await message.reply(displayText || '已完成，但没有返回可展示的文本结果。');
+					if (displayText) {
+						await message.reply(displayText);
+					}
+				}
+				if (message.replyImage && imagePaths.length > 0) {
+					for (const imagePath of imagePaths) {
+						await message.replyImage(imagePath).catch((error) => {
+							console.warn('[bots] send image failed', error instanceof Error ? error.message : error);
+						});
+					}
+				}
+				if (!stream && !displayText && imagePaths.length === 0) {
+					await message.reply('已完成，但没有返回可展示的文本结果。');
 				}
 			} catch (error) {
 				const msg = error instanceof Error ? error.message : String(error);
