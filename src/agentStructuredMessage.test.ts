@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	budgetStructuredAssistantToolResults,
 	dedupeStructuredAssistantToolUseIds,
+	extractBotReplyImagePaths,
 	extractBotReplyText,
 	flattenAssistantTextPartsForSearch,
 	formatChatMessageForCompactionSummary,
@@ -334,5 +335,43 @@ describe('extractBotReplyText', () => {
 		});
 		// No text, no tool results → falls through to return raw
 		expect(extractBotReplyText(raw)).toBe(raw);
+	});
+});
+
+describe('extractBotReplyImagePaths', () => {
+	it('extracts screenshot image paths from nested run_async_task results', () => {
+		const innerPayload = stringifyAgentAssistantPayload({
+			_asyncAssistant: 1,
+			v: 1,
+			parts: [
+				{
+					type: 'tool',
+					toolUseId: 'tool_browser',
+					name: 'Browser',
+					args: { action: 'screenshot_page' },
+					result: JSON.stringify({
+						path: 'D:\\Temp\\capture.png',
+						format: 'png',
+					}),
+					success: true,
+				},
+			],
+		});
+		const outerRaw = stringifyAgentAssistantPayload({
+			_asyncAssistant: 1,
+			v: 1,
+			parts: [
+				{
+					type: 'tool',
+					toolUseId: 'call_run',
+					name: 'run_async_task',
+					args: { task: 'capture' },
+					result: `workspace=D:\\Project\nmode=agent\nmodel=model-1\n\n${innerPayload}`,
+					success: true,
+				},
+			],
+		});
+
+		expect(extractBotReplyImagePaths(outerRaw)).toEqual(['D:\\Temp\\capture.png']);
 	});
 });

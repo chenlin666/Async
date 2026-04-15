@@ -1,6 +1,8 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import * as lark from '@larksuiteoapi/node-sdk';
 import type { BotIntegrationConfig } from '../../botSettingsTypes.js';
-import type { BotPlatformAdapter, PlatformMessageHandler, StreamReplyCallbacks } from './common.js';
+import type { BotPlatformAdapter, BotTodoListItem, PlatformMessageHandler, StreamReplyCallbacks } from './common.js';
 import { createJsonHttpInstance, createProxyAgent, resolveIntegrationProxyUrl, splitPlainText } from './common.js';
 import { FeishuCardKitClient, FeishuStreamingSession } from './feishuCardKit.js';
 
@@ -39,6 +41,30 @@ function collectSenderIds(raw: { open_id?: string; user_id?: string; union_id?: 
 		.map((value) => String(value ?? '').trim())
 		.filter(Boolean);
 	return [...new Set(ids)];
+}
+
+function normalizeBotTodos(raw: BotTodoListItem[]): BotTodoListItem[] {
+	return raw
+		.map((todo) => ({
+			content: String(todo.content ?? '').trim(),
+			status:
+				todo.status === 'completed' || todo.status === 'in_progress' || todo.status === 'pending'
+					? todo.status
+					: 'pending',
+			activeForm: String(todo.activeForm ?? '').trim() || undefined,
+		}))
+		.filter((todo) => todo.content);
+}
+
+function feishuFileTypeForPath(filePath: string): 'opus' | 'mp4' | 'pdf' | 'doc' | 'xls' | 'ppt' | 'stream' {
+	const ext = path.extname(filePath).toLowerCase();
+	if (ext === '.opus') return 'opus';
+	if (ext === '.mp4') return 'mp4';
+	if (ext === '.pdf') return 'pdf';
+	if (ext === '.doc' || ext === '.docx') return 'doc';
+	if (ext === '.xls' || ext === '.xlsx' || ext === '.csv') return 'xls';
+	if (ext === '.ppt' || ext === '.pptx') return 'ppt';
+	return 'stream';
 }
 
 export function buildFeishuReplyPayload(messageId: string, text: string) {
@@ -167,9 +193,13 @@ export class FeishuBotAdapter implements BotPlatformAdapter {
 							if (session.isFailed) return;
 							session.update(fullText);
 						},
-						onToolStatus: (name, state) => {
+						onToolStatus: (name, state, detail) => {
 							if (session.isFailed) return;
-							session.setToolStatus(name, state);
+							session.setToolStatus(name, state, detail);
+						},
+						onTodoUpdate: (todos) => {
+							if (session.isFailed) return;
+							session.setTodos(normalizeBotTodos(todos));
 						},
 						onDone: async (fullText) => {
 							if (session.isFailed) {
@@ -197,6 +227,12 @@ export class FeishuBotAdapter implements BotPlatformAdapter {
 					reply: async (replyText) => {
 						await this.replyPlainText(messageId, replyText);
 					},
+					replyImage: async (filePath) => {
+						await this.replyImage(messageId, filePath);
+					},
+					replyFile: async (filePath) => {
+						await this.replyFile(messageId, filePath);
+					},
 					streamReply,
 				}).catch((error) => {
 					console.warn('[bots][feishu] async message handling failed', error instanceof Error ? error.message : error);
@@ -219,6 +255,59 @@ export class FeishuBotAdapter implements BotPlatformAdapter {
 		for (const chunk of splitPlainText(text, 8000)) {
 			await this.client.im.message.reply(buildFeishuReplyPayload(messageId, chunk));
 		}
+	}
+
+	private async replyImage(messageId: string, filePath: string): Promise<void> {
+		if (!this.client) return;
+		const fullPath = String(filePath ?? '').trim();
+		if (!fullPath) {
+			throw new Error('截图文件路径为空。');
+		}
+		const image = fs.readFileSync(fullPath);
+		const uploaded = await this.client.im.image.create({
+			data: {
+				image_type: 'message',
+				image,
+			},
+		});
+		const imageKey = String(uploaded?.image_key ?? '').trim();
+		if (!imageKey) {
+			throw new Error('飞书图片上传失败，未返回 image_key。');
+		}
+		await this.client.im.message.reply({
+			path: { message_id: messageId },
+			data: {
+				content: JSON.stringify({ image_key: imageKey }),
+				msg_type: 'image',
+			},
+		});
+	}
+
+	private async replyFile(messageId: string, filePath: string): Promise<void> {
+		if (!this.client) return;
+		const fullPath = String(filePath ?? '').trim();
+		if (!fullPath) {
+			throw new Error('文件路径为空。');
+		}
+		const file = fs.readFileSync(fullPath);
+		const uploaded = await this.client.im.file.create({
+			data: {
+				file_type: feishuFileTypeForPath(fullPath),
+				file_name: path.basename(fullPath),
+				file,
+			},
+		});
+		const fileKey = String(uploaded?.file_key ?? '').trim();
+		if (!fileKey) {
+			throw new Error('飞书文件上传失败，未返回 file_key。');
+		}
+		await this.client.im.message.reply({
+			path: { message_id: messageId },
+			data: {
+				content: JSON.stringify({ file_key: fileKey }),
+				msg_type: 'file',
+			},
+		});
 	}
 
 	async stop(): Promise<void> {

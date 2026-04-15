@@ -1,8 +1,7 @@
 import { app, BrowserWindow } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { AgentToolDef, ToolCall, ToolResult } from '../agent/agentTools.js';
-import { assembleAgentToolPool } from '../agent/agentToolPool.js';
+import { AGENT_TOOLS, type AgentToolDef, ToolCall, ToolResult } from '../agent/agentTools.js';
 import { runAgentLoop } from '../agent/agentLoop.js';
 import { compressForSend } from '../agent/conversationCompress.js';
 import { type ToolExecutionContext, type ToolExecutionHooks } from '../agent/toolExecutor.js';
@@ -37,6 +36,7 @@ import { mergeAgentWithProjectSlice, readWorkspaceAgentProjectSlice } from '../w
 import { resolveToolPermissionFromRules } from '../agent/toolPermissionModel.js';
 import { isSafeShellCommandForAutoApprove } from '../agent/toolApprovalGate.js';
 import { getShellPermissionMode } from '../../src/shellPermissionMode.js';
+import type { BotTodoListItem } from './platforms/common.js';
 
 export type BotInboundMessage = {
 	conversationKey: string;
@@ -163,6 +163,79 @@ function workerThreadMapKey(root: string | null | undefined, mode: BotComposerMo
 	return `${normalizeWorkspaceKey(root)}::${mode}`;
 }
 
+function extractBotTodosFromArgs(args: Record<string, unknown>): BotTodoListItem[] {
+	const rawTodos = args.todos;
+	if (!Array.isArray(rawTodos)) {
+		return [];
+	}
+	return rawTodos
+		.map((todo) => {
+			const item = todo && typeof todo === 'object' ? (todo as Record<string, unknown>) : {};
+			const statusRaw = String(item.status ?? '').trim();
+			const status =
+				statusRaw === 'completed' || statusRaw === 'in_progress' || statusRaw === 'pending'
+					? statusRaw
+					: 'pending';
+			return {
+				content: String(item.content ?? '').trim(),
+				status,
+				activeForm: String(item.activeForm ?? '').trim() || undefined,
+			} satisfies BotTodoListItem;
+		})
+		.filter((todo) => todo.content);
+}
+
+function describeBotToolActivity(name: string, args: Record<string, unknown>): string | undefined {
+	switch (name) {
+		case 'TodoWrite': {
+			const todos = extractBotTodosFromArgs(args);
+			const active = todos.find((todo) => todo.status === 'in_progress');
+			return active?.activeForm || active?.content || `更新任务列表（${todos.length} 项）`;
+		}
+		case 'Browser': {
+			const action = String(args.action ?? '').trim();
+			return action ? `浏览器：${action}` : '正在操作内置浏览器';
+		}
+		case 'Bash': {
+			const command = String(args.command ?? '').trim();
+			return command ? `执行命令：${command.slice(0, 80)}` : '执行命令';
+		}
+		case 'run_async_task': {
+			const task = String(args.task ?? '').trim();
+			const mode = String(args.mode ?? '').trim();
+			if (mode) {
+				return `派发内部会话（${mode}）`;
+			}
+			return task ? `派发内部会话：${task.slice(0, 60)}` : '派发内部会话';
+		}
+		case 'send_local_attachment':
+			return '发送本地附件给用户';
+		default:
+			return undefined;
+	}
+}
+
+function resolveBotLocalAttachmentPath(session: BotSessionState, requested: string): string {
+	const raw = requested.trim();
+	if (!raw) {
+		throw new Error('file_path 不能为空。');
+	}
+	if (path.isAbsolute(raw)) {
+		if (!fs.existsSync(raw) || !fs.statSync(raw).isFile()) {
+			throw new Error('目标附件不存在，或不是文件。');
+		}
+		return raw;
+	}
+	if (!session.workspaceRoot) {
+		throw new Error('当前没有工作区，无法解析相对附件路径。');
+	}
+	const resolved = path.resolve(session.workspaceRoot, raw);
+	if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+		throw new Error('目标附件不存在，或不是文件。');
+	}
+	return resolved;
+}
+
 function collectAvailableWorkspaceRoots(integration: BotIntegrationConfig): string[] {
 	const out: string[] = [];
 	const seen = new Set<string>();
@@ -252,7 +325,9 @@ type RunBotOrchestratorArgs = {
 	workspaceLspManager: WorkspaceLspManager;
 	signal: AbortSignal;
 	onStreamDelta?: (fullText: string) => void;
-	onToolStatus?: (name: string, state: 'running' | 'completed' | 'error') => void;
+	onToolStatus?: (name: string, state: 'running' | 'completed' | 'error', detail?: string) => void;
+	onTodoUpdate?: (todos: BotTodoListItem[]) => void;
+	onSendAttachment?: (filePath: string) => Promise<string>;
 };
 
 type RunBotAsyncTaskArgs = {
@@ -265,7 +340,8 @@ type RunBotAsyncTaskArgs = {
 	workspaceLspManager: WorkspaceLspManager;
 	signal: AbortSignal;
 	onInnerTextDelta?: (fullText: string) => void;
-	onInnerToolStatus?: (name: string, state: 'running' | 'completed' | 'error') => void;
+	onInnerToolStatus?: (name: string, state: 'running' | 'completed' | 'error', detail?: string) => void;
+	onInnerTodoUpdate?: (todos: BotTodoListItem[]) => void;
 };
 
 const BOT_TOOL_DEFS: AgentToolDef[] = [
@@ -328,7 +404,26 @@ const BOT_TOOL_DEFS: AgentToolDef[] = [
 			required: ['task'],
 		},
 	},
+	{
+		name: 'send_local_attachment',
+		description: 'Send a local image or file from disk back to the external user chat. Use this after you produce or locate a file the user wants to receive.',
+		parameters: {
+			type: 'object',
+			properties: {
+				file_path: {
+					type: 'string',
+					description: 'Absolute file path, or a path relative to the current workspace.',
+				},
+			},
+			required: ['file_path'],
+		},
+	},
 ];
+
+const BOT_LEADER_NATIVE_TOOL_NAMES = new Set([
+	'Browser',
+	'TodoWrite',
+]);
 
 
 function renderSessionSnapshot(
@@ -375,11 +470,11 @@ export function buildBotOrchestratorPrompt(
 			? 'You are the Async global leader bot. You directly manage the Async app, its tools, and its worker sessions.'
 			: '你是 Async 的全局 Leader Bot。你直接管理整个 Async 应用、它的工具能力以及内部 worker 会话。',
 		language === 'en'
-			? 'This leader loop has the full Async toolset available, including browser/app controls, file tools, shell, MCP, and the custom bot session tools below.'
-			: '这个 Leader 循环可直接使用完整的 Async 工具集，包括浏览器/应用控制、文件工具、Shell、MCP，以及下面的 bot 会话工具。',
+			? 'This leader loop is for app-level orchestration. It can directly use app/browser controls plus the custom bot session tools below.'
+			: '这个 Leader 循环用于应用级调度。它可以直接使用应用/浏览器控制工具，以及下面的 bot 会话工具。',
 		language === 'en'
-			? 'Do not treat every user message as a detached worker task. Use your own tools directly whenever you can solve the request yourself.'
-			: '不要把每条用户消息都当成需要派给 worker 的任务。只要你自己直接用工具就能解决，就优先直接处理。',
+			? 'Do not treat every user message as a detached worker task, but also do not directly inspect or modify workspace project files in the leader loop.'
+			: '不要把每条用户消息都当成需要派给 worker 的任务，但也不要在 Leader 循环里直接检查或修改工作区项目文件。',
 		language === 'en'
 			? 'Use run_async_task only when you intentionally want to start an internal worker session or a specialist workflow. When delegating, choose the worker mode yourself and summarize the result back to the user.'
 			: '只有当你明确想启动内部 worker 会话或专家工作流时，才使用 run_async_task。发生委派时，由你自己判断合适的 worker 模式，并把结果总结反馈给用户。',
@@ -387,8 +482,23 @@ export function buildBotOrchestratorPrompt(
 			? 'If the user asks about current model, workspace, browser state, git state, or other app state, inspect and answer directly instead of launching a worker by default.'
 			: '如果用户在问当前模型、工作区、浏览器状态、Git 状态或其他应用状态，优先直接检查并回答，而不是默认启动 worker。',
 		language === 'en'
+			? 'Any request about a workspace project, repository, source files, tests, builds, architecture, code changes, or reading/modifying files MUST go through run_async_task so the work is preserved in an internal Async conversation record.'
+			: '任何关于工作区项目、仓库、源文件、测试、构建、架构、代码修改，或读取/修改文件的请求，都必须通过 run_async_task 处理，这样工作会被保存在内部 Async 对话记录里。',
+		language === 'en'
+			? 'File-changing requests must never be performed directly by the leader loop. Always delegate them through run_async_task.'
+			: '涉及改文件的请求绝对不能由 Leader 循环直接执行，必须始终通过 run_async_task 委派处理。',
+		language === 'en'
+			? 'Choose worker mode automatically: use agent for direct project inspection/implementation/debugging, plan for plan-only analysis, team for larger or cross-cutting project work, and ask for lightweight Q&A that still needs a recorded worker conversation.'
+			: '自动判断 worker 模式：直接项目排查/实现/调试用 agent，只做方案分析用 plan，较大或跨领域项目工作用 team，需要保留记录的轻量问答可用 ask。',
+		language === 'en'
 			? 'When the user asks to search the web, open a page, read a webpage, take a screenshot, or close the built-in browser, use the Browser tool directly (for example: navigate, read_page, screenshot_page, close_sidebar).'
 			: '当用户要求搜索网页、打开页面、读取网页内容、截屏，或关闭内置浏览器时，直接使用 Browser 工具（例如：navigate、read_page、screenshot_page、close_sidebar）。',
+		language === 'en'
+			? 'If the user wants the screenshot or a local file to appear in the chat, do not stop at saving it locally. Use send_local_attachment to send the produced or located file back to the user.'
+			: '如果用户希望截图或本地文件直接出现在聊天窗口里，不要只停留在本地保存；拿到文件后继续调用 send_local_attachment 发回给用户。',
+		language === 'en'
+			? 'For user-visible replies on external platforms like Feishu, be explicit and reasonably detailed. For substantial work, summarize what was checked, what was done, key findings, affected areas, and the next step.'
+			: '在飞书这类外部平台上给用户回复时，要明确且信息量充足。只要工作不算特别轻，就总结：检查了什么、做了什么、关键发现、影响范围，以及下一步建议。',
 		language === 'en'
 			? `Current bot user: ${userName}`
 			: `当前外部用户：${userName}`,
@@ -600,7 +710,20 @@ async function runBotAsyncTask(args: RunBotAsyncTaskArgs): Promise<string> {
 							return;
 						}
 						if (evt.type === 'tool_call') {
-							args.onInnerToolStatus?.(evt.name, 'running');
+							let parsedArgs: Record<string, unknown> = {};
+							try {
+								parsedArgs = JSON.parse(evt.args) as Record<string, unknown>;
+							} catch {
+								parsedArgs = {};
+							}
+							if (evt.name === 'TodoWrite') {
+								args.onInnerTodoUpdate?.(extractBotTodosFromArgs(parsedArgs));
+							}
+							args.onInnerToolStatus?.(evt.name, 'running', describeBotToolActivity(evt.name, parsedArgs));
+							return;
+						}
+						if (evt.type === 'tool_progress') {
+							args.onInnerToolStatus?.(evt.name, 'running', evt.detail || evt.phase);
 							return;
 						}
 						if (evt.type === 'tool_result') {
@@ -667,8 +790,14 @@ async function runBotAsyncTask(args: RunBotAsyncTaskArgs): Promise<string> {
 							innerStreamFull += text;
 							args.onInnerTextDelta?.(innerStreamFull);
 						},
-						onToolCall: (name) => {
-							args.onInnerToolStatus?.(name, 'running');
+						onToolProgress: (payload) => {
+							args.onInnerToolStatus?.(payload.name, 'running', payload.detail || payload.phase);
+						},
+						onToolCall: (name, toolArgs) => {
+							if (name === 'TodoWrite') {
+								args.onInnerTodoUpdate?.(extractBotTodosFromArgs(toolArgs));
+							}
+							args.onInnerToolStatus?.(name, 'running', describeBotToolActivity(name, toolArgs));
 						},
 						onToolResult: (name, _result, success) => {
 							incrementThreadAgentToolCallCount(threadId);
@@ -828,6 +957,7 @@ export async function runBotOrchestratorTurn(args: RunBotOrchestratorArgs): Prom
 					signal,
 					onInnerTextDelta: args.onStreamDelta,
 					onInnerToolStatus: args.onToolStatus,
+					onInnerTodoUpdate: args.onTodoUpdate,
 				});
 				return {
 					toolCallId: call.id,
@@ -850,6 +980,36 @@ export async function runBotOrchestratorTurn(args: RunBotOrchestratorArgs): Prom
 				};
 			}
 		},
+		send_local_attachment: async (call) => {
+			if (!args.onSendAttachment) {
+				return {
+					toolCallId: call.id,
+					name: call.name,
+					content: '当前平台不支持发送附件。',
+					isError: true,
+				};
+			}
+			try {
+				const resolvedPath = resolveBotLocalAttachmentPath(
+					session,
+					String(call.arguments.file_path ?? '').trim()
+				);
+				const result = await args.onSendAttachment(resolvedPath);
+				return {
+					toolCallId: call.id,
+					name: call.name,
+					content: result,
+					isError: false,
+				};
+			} catch (error) {
+				return {
+					toolCallId: call.id,
+					name: call.name,
+					content: error instanceof Error ? error.message : String(error),
+					isError: true,
+				};
+			}
+		},
 	};
 
 	const thinkingLevel = resolveThinkingLevelForSelection(settings, session.modelId.trim());
@@ -858,7 +1018,7 @@ export async function runBotOrchestratorTurn(args: RunBotOrchestratorArgs): Prom
 	let errorMessage = '';
 	let streamFull = '';
 	const leaderToolPool = [
-		...assembleAgentToolPool('agent', { mcpToolDenyPrefixes: settings.mcpToolDenyPrefixes }),
+		...AGENT_TOOLS.filter((tool) => BOT_LEADER_NATIVE_TOOL_NAMES.has(tool.name)),
 		...BOT_TOOL_DEFS,
 	];
 	const leaderMessages = [...session.leaderMessages, { role: 'user', content: inbound.text } satisfies ChatMessage];
@@ -894,8 +1054,14 @@ export async function runBotOrchestratorTurn(args: RunBotOrchestratorArgs): Prom
 					full = streamFull;
 					args.onStreamDelta?.(streamFull);
 				},
-				onToolCall: (name) => {
-					args.onToolStatus?.(name, 'running');
+				onToolProgress: (payload) => {
+					args.onToolStatus?.(payload.name, 'running', payload.detail || payload.phase);
+				},
+				onToolCall: (name, toolArgs) => {
+					if (name === 'TodoWrite') {
+						args.onTodoUpdate?.(extractBotTodosFromArgs(toolArgs));
+					}
+					args.onToolStatus?.(name, 'running', describeBotToolActivity(name, toolArgs));
 				},
 				onToolResult: (name, _result, success) => {
 					args.onToolStatus?.(name, success ? 'completed' : 'error');

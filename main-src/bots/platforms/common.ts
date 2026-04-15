@@ -1,19 +1,30 @@
 import * as http from 'node:http';
 import * as https from 'node:https';
+import type { Readable } from 'node:stream';
+import FormData from 'form-data';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import type { BotIntegrationConfig } from '../../botSettingsTypes.js';
 import type { BotInboundMessage } from '../botRuntime.js';
 
+export type BotTodoListItem = {
+	content: string;
+	status: 'pending' | 'in_progress' | 'completed';
+	activeForm?: string;
+};
+
 export type StreamReplyCallbacks = {
 	onStart: () => Promise<void>;
 	onDelta: (fullText: string) => Promise<void>;
-	onToolStatus: (name: string, state: 'running' | 'completed' | 'error') => void;
+	onToolStatus: (name: string, state: 'running' | 'completed' | 'error', detail?: string) => void;
+	onTodoUpdate: (todos: BotTodoListItem[]) => void;
 	onDone: (fullText: string) => Promise<void>;
 	onError: (error: string) => Promise<void>;
 };
 
 export type PlatformInboundEnvelope = BotInboundMessage & {
 	reply: (text: string) => Promise<void>;
+	replyImage?: (filePath: string) => Promise<void>;
+	replyFile?: (filePath: string) => Promise<void>;
 	streamReply?: StreamReplyCallbacks;
 };
 
@@ -112,6 +123,8 @@ type JsonRequestOptions = {
 	timeoutMs?: number;
 	proxyUrl?: string;
 	signal?: AbortSignal;
+	responseType?: 'json' | 'stream';
+	returnHeaders?: boolean;
 };
 
 type HttpInstanceRequestOptions = {
@@ -121,6 +134,8 @@ type HttpInstanceRequestOptions = {
 	params?: Record<string, JsonPrimitive | null | undefined>;
 	data?: unknown;
 	timeout?: number;
+	responseType?: 'json' | 'stream';
+	$return_headers?: boolean;
 };
 
 function appendQueryParams(url: string, params?: Record<string, JsonPrimitive | null | undefined>): string {
@@ -153,16 +168,94 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
 	return Object.keys(headers).some((key) => key.toLowerCase() === target);
 }
 
+function readHeader(headers: Record<string, string>, name: string): string | undefined {
+	const target = name.toLowerCase();
+	const key = Object.keys(headers).find((headerName) => headerName.toLowerCase() === target);
+	return key ? headers[key] : undefined;
+}
+
+function isMultipartContentType(headers: Record<string, string>): boolean {
+	return String(readHeader(headers, 'content-type') ?? '')
+		.toLowerCase()
+		.includes('multipart/form-data');
+}
+
+function buildMultipartFormData(body: Record<string, unknown>): FormData {
+	const form = new FormData();
+	for (const [key, value] of Object.entries(body)) {
+		if (value === undefined || value === null) {
+			continue;
+		}
+		if (Buffer.isBuffer(value)) {
+			form.append(key, value, { filename: key });
+			continue;
+		}
+		if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+			form.append(key, String(value));
+			continue;
+		}
+		if (typeof (value as { pipe?: unknown }).pipe === 'function') {
+			form.append(key, value as Readable);
+			continue;
+		}
+		form.append(key, JSON.stringify(value));
+	}
+	return form;
+}
+
 export async function requestJson<T>(url: string, options: JsonRequestOptions = {}): Promise<T> {
 	const target = new URL(url);
 	const proxyAgent = createProxyAgent(options.proxyUrl);
 	const headers = normalizeHeaders(options.headers);
-	const payload =
-		options.body === undefined
-			? undefined
-			: typeof options.body === 'string' || Buffer.isBuffer(options.body)
-				? options.body
-				: JSON.stringify(options.body);
+	let payload: string | Buffer | undefined;
+	let streamBody: Readable | null = null;
+	if (options.body !== undefined) {
+		if (typeof options.body === 'string' || Buffer.isBuffer(options.body)) {
+			payload = options.body;
+		} else if (
+			isMultipartContentType(headers) &&
+			typeof options.body === 'object' &&
+			options.body !== null &&
+			!Array.isArray(options.body)
+		) {
+			const form = buildMultipartFormData(options.body as Record<string, unknown>);
+			const normalizedFormHeaders = normalizeHeaders(form.getHeaders() as Record<string, string>);
+			for (const key of Object.keys(headers)) {
+				if (key.toLowerCase() === 'content-type' || key.toLowerCase() === 'content-length') {
+					delete headers[key];
+				}
+			}
+			Object.assign(headers, normalizedFormHeaders);
+			try {
+				headers['content-length'] = String(form.getLengthSync());
+			} catch {
+				/* ignore */
+			}
+			streamBody = form as unknown as Readable;
+		} else if (
+			typeof options.body === 'object' &&
+			options.body !== null &&
+			'getHeaders' in (options.body as Record<string, unknown>) &&
+			typeof (options.body as { getHeaders: () => Record<string, string> }).getHeaders === 'function'
+		) {
+			const form = options.body as {
+				getHeaders: () => Record<string, string>;
+				getLengthSync?: () => number;
+				pipe: (destination: NodeJS.WritableStream) => void;
+			};
+			Object.assign(headers, form.getHeaders());
+			if (!hasHeader(headers, 'content-length') && typeof form.getLengthSync === 'function') {
+				try {
+					headers['content-length'] = String(form.getLengthSync());
+				} catch {
+					/* ignore */
+				}
+			}
+			streamBody = form as unknown as Readable;
+		} else {
+			payload = JSON.stringify(options.body);
+		}
+	}
 	if (payload !== undefined && !hasHeader(headers, 'content-type') && !Buffer.isBuffer(payload)) {
 		headers['content-type'] = 'application/json';
 	}
@@ -180,13 +273,33 @@ export async function requestJson<T>(url: string, options: JsonRequestOptions = 
 				agent: proxyAgent,
 			},
 			(response) => {
+				const status = response.statusCode ?? 0;
+				if (options.responseType === 'stream') {
+					if (status < 200 || status >= 300) {
+						const chunks: Buffer[] = [];
+						response.on('data', (chunk) => {
+							chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+						});
+						response.on('end', () => {
+							const raw = Buffer.concat(chunks).toString('utf8');
+							const detail = raw.trim().slice(0, 240);
+							reject(new Error(`Request failed: ${status}${detail ? ` ${detail}` : ''}`));
+						});
+						return;
+					}
+					if (options.returnHeaders) {
+						resolve({ data: response, headers: response.headers } as T);
+					} else {
+						resolve(response as T);
+					}
+					return;
+				}
 				const chunks: Buffer[] = [];
 				response.on('data', (chunk) => {
 					chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
 				});
 				response.on('end', () => {
 					const raw = Buffer.concat(chunks).toString('utf8');
-					const status = response.statusCode ?? 0;
 					if (status < 200 || status >= 300) {
 						const detail = raw.trim().slice(0, 240);
 						reject(new Error(`Request failed: ${status}${detail ? ` ${detail}` : ''}`));
@@ -233,6 +346,10 @@ export async function requestJson<T>(url: string, options: JsonRequestOptions = 
 			}
 		});
 
+		if (streamBody) {
+			streamBody.pipe(req);
+			return;
+		}
 		if (payload !== undefined) {
 			req.write(payload);
 		}
@@ -248,6 +365,8 @@ export function createJsonHttpInstance(proxyUrl?: string) {
 			body: options.data,
 			timeoutMs: options.timeout,
 			proxyUrl,
+			responseType: options.responseType,
+			returnHeaders: options.$return_headers === true,
 		});
 
 	return {

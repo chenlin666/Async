@@ -294,3 +294,47 @@ export function extractBotReplyText(raw: string): string {
 
 	return raw;
 }
+
+function collectBotScreenshotPathsFromPayload(payload: AgentAssistantPayload, out: string[]): void {
+	for (const part of payload.parts) {
+		if (part.type !== 'tool') {
+			continue;
+		}
+		if (part.name === 'Browser' && part.success === true) {
+			const action = String(part.args.action ?? '').trim();
+			if (action === 'screenshot_page') {
+				try {
+					const parsed = JSON.parse(part.result) as { path?: string };
+					const fullPath = String(parsed.path ?? '').trim();
+					if (fullPath) {
+						out.push(fullPath);
+					}
+				} catch {
+					/* ignore */
+				}
+			}
+		}
+		if (part.name === 'run_async_task') {
+			const stripped = stripBotTaskResultMetadata(part.result);
+			if (isStructuredAssistantMessage(stripped)) {
+				const inner = parseAgentAssistantPayload(stripped);
+				if (inner) {
+					collectBotScreenshotPathsFromPayload(inner, out);
+				}
+			}
+		}
+	}
+}
+
+export function extractBotReplyImagePaths(raw: string): string[] {
+	if (!isStructuredAssistantMessage(raw)) {
+		return [];
+	}
+	const payload = parseAgentAssistantPayload(raw);
+	if (!payload) {
+		return [];
+	}
+	const out: string[] = [];
+	collectBotScreenshotPathsFromPayload(payload, out);
+	return [...new Set(out)];
+}
