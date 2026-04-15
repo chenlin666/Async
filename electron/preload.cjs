@@ -13,12 +13,19 @@ const INVOKE_CHANNELS = new Set([
 	'workspace:deleteSkillFromDisk',
 	'workspace:listFiles',
 	'workspace:searchFiles',
+	'browser:getConfig',
+	'browser:setConfig',
+	'browser:syncState',
+	'browser:getState',
+	'browser:commandResult',
 	'workspace:saveComposerAttachment',
 	'workspace:searchSymbols',
 	'lsp:ts:start',
 	'lsp:ts:stop',
 	'lsp:ts:definition',
 	'lsp:ts:diagnostics',
+	'workspace:memory:stats',
+	'workspace:memory:rebuild',
 	'settings:get',
 	'settings:set',
 	'usageStats:get',
@@ -177,6 +184,32 @@ ipcRenderer.on('auto-update:status', (_event, payload) => {
 	}
 });
 
+const browserNewWindowHandlers = new Map();
+let browserNewWindowSeq = 0;
+
+ipcRenderer.on('async-shell:browserNewWindow', (_event, payload) => {
+	for (const fn of browserNewWindowHandlers.values()) {
+		try {
+			fn(payload);
+		} catch (e) {
+			console.error(e);
+		}
+	}
+});
+
+const browserControlHandlers = new Map();
+let browserControlSeq = 0;
+
+ipcRenderer.on('async-shell:browserControl', (_event, payload) => {
+	for (const fn of browserControlHandlers.values()) {
+		try {
+			fn(payload);
+		} catch (e) {
+			console.error(e);
+		}
+	}
+});
+
 contextBridge.exposeInMainWorld('asyncShell', {
 	invoke(channel, ...args) {
 		if (!INVOKE_CHANNELS.has(channel)) {
@@ -227,5 +260,15 @@ contextBridge.exposeInMainWorld('asyncShell', {
 		const id = ++autoUpdateStatusSeq;
 		autoUpdateStatusHandlers.set(id, callback);
 		return () => autoUpdateStatusHandlers.delete(id);
+	},
+	subscribeBrowserNewWindow(callback) {
+		const id = ++browserNewWindowSeq;
+		browserNewWindowHandlers.set(id, callback);
+		return () => browserNewWindowHandlers.delete(id);
+	},
+	subscribeBrowserControl(callback) {
+		const id = ++browserControlSeq;
+		browserControlHandlers.set(id, callback);
+		return () => browserControlHandlers.delete(id);
 	},
 });

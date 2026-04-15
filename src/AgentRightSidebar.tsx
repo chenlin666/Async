@@ -1,13 +1,32 @@
-import { memo, useEffect, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
+import {
+	memo,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	type Dispatch,
+	type FormEvent,
+	type KeyboardEvent as ReactKeyboardEvent,
+	type ReactNode,
+	type RefObject,
+	type SetStateAction,
+} from 'react';
 import { AgentFilePreviewPanel } from './AgentFilePreviewPanel';
 import { ChatMarkdown } from './ChatMarkdown';
 import { VoidSelect } from './VoidSelect';
 import { GitUnavailableState } from './gitBadge';
 import {
+	IconArrowLeft,
+	IconArrowRight,
 	IconCloseSmall,
 	IconDoc,
 	IconGitSCM,
+	IconGlobe,
+	IconPlus,
 	IconRefresh,
+	IconSettings,
+	IconStop,
 	IconArrowUp,
 	IconArrowUpRight,
 } from './icons';
@@ -25,7 +44,438 @@ import type { TeamSessionState } from './hooks/useTeamSession';
 import { TeamRoleWorkflowPanel } from './TeamRoleWorkflowPanel';
 import { buildTeamWorkflowItems } from './teamWorkflowItems';
 
-type AgentRightSidebarView = 'git' | 'plan' | 'file' | 'team';
+type AgentRightSidebarView = 'git' | 'plan' | 'file' | 'team' | 'browser';
+
+const BROWSER_HOME_URL = 'https://www.bing.com/';
+
+type BrowserNavEvent = Event & { url?: string; isMainFrame?: boolean };
+type BrowserTitleEvent = Event & { title?: string };
+type BrowserFailEvent = Event & {
+	errorCode?: number;
+	errorDescription?: string;
+	validatedURL?: string;
+	isMainFrame?: boolean;
+};
+type BrowserSidebarConfig = {
+	userAgent: string;
+	acceptLanguage: string;
+	extraHeadersText: string;
+	proxyMode: 'system' | 'direct' | 'custom';
+	proxyRules: string;
+	proxyBypassRules: string;
+};
+
+type BrowserControlPayload =
+	| {
+			commandId: string;
+			type: 'navigate';
+			target: string;
+			newTab?: boolean;
+	  }
+	| {
+			commandId: string;
+			type: 'reload' | 'stop' | 'goBack' | 'goForward' | 'closeTab';
+			tabId?: string;
+	  }
+	| {
+			commandId: string;
+			type: 'readPage';
+			tabId?: string;
+			selector?: string;
+			includeHtml?: boolean;
+			maxChars?: number;
+			waitForLoad?: boolean;
+	  }
+	| {
+			commandId: string;
+			type: 'screenshotPage';
+			tabId?: string;
+			waitForLoad?: boolean;
+	  }
+	| {
+			commandId: string;
+			type: 'applyConfig';
+			config: Partial<BrowserSidebarConfig>;
+			defaultUserAgent?: string;
+	  };
+
+type BrowserCommandResultPayload =
+	| {
+			commandId: string;
+			ok: true;
+			result: unknown;
+	  }
+	| {
+			commandId: string;
+			ok: false;
+			error: string;
+	  };
+
+const DEFAULT_BROWSER_SIDEBAR_CONFIG: BrowserSidebarConfig = {
+	userAgent: '',
+	acceptLanguage: '',
+	extraHeadersText: '',
+	proxyMode: 'system',
+	proxyRules: '',
+	proxyBypassRules: '',
+};
+
+function normalizeBrowserSidebarConfig(raw?: Partial<BrowserSidebarConfig> | null): BrowserSidebarConfig {
+	return {
+		userAgent: String(raw?.userAgent ?? '').trim(),
+		acceptLanguage: String(raw?.acceptLanguage ?? '').trim(),
+		extraHeadersText: String(raw?.extraHeadersText ?? '').replace(/\r/g, ''),
+		proxyMode:
+			raw?.proxyMode === 'direct' || raw?.proxyMode === 'custom' || raw?.proxyMode === 'system'
+				? raw.proxyMode
+				: 'system',
+		proxyRules: String(raw?.proxyRules ?? '').trim(),
+		proxyBypassRules: String(raw?.proxyBypassRules ?? '').trim(),
+	};
+}
+
+function isBrowserControlPayload(raw: unknown): raw is BrowserControlPayload {
+	if (!raw || typeof raw !== 'object') {
+		return false;
+	}
+	const obj = raw as Record<string, unknown>;
+	if (typeof obj.commandId !== 'string' || typeof obj.type !== 'string') {
+		return false;
+	}
+	switch (obj.type) {
+		case 'navigate':
+			return typeof obj.target === 'string';
+		case 'reload':
+		case 'stop':
+		case 'goBack':
+		case 'goForward':
+		case 'closeTab':
+			return obj.tabId === undefined || typeof obj.tabId === 'string';
+		case 'readPage':
+			return (
+				(obj.tabId === undefined || typeof obj.tabId === 'string') &&
+				(obj.selector === undefined || typeof obj.selector === 'string') &&
+				(obj.includeHtml === undefined || typeof obj.includeHtml === 'boolean') &&
+				(obj.maxChars === undefined || typeof obj.maxChars === 'number') &&
+				(obj.waitForLoad === undefined || typeof obj.waitForLoad === 'boolean')
+			);
+		case 'screenshotPage':
+			return (
+				(obj.tabId === undefined || typeof obj.tabId === 'string') &&
+				(obj.waitForLoad === undefined || typeof obj.waitForLoad === 'boolean')
+			);
+		case 'applyConfig':
+			return Boolean(obj.config && typeof obj.config === 'object');
+		default:
+			return false;
+	}
+}
+
+function parseBrowserExtraHeadersText(raw: string): { ok: true; headers: Array<[string, string]> } | { ok: false; line: number } {
+	const text = String(raw ?? '').replace(/\r/g, '');
+	const lines = text.split('\n');
+	const headers: Array<[string, string]> = [];
+	for (let i = 0; i < lines.length; i += 1) {
+		const line = lines[i].trim();
+		if (!line) {
+			continue;
+		}
+		const sep = line.indexOf(':');
+		if (sep <= 0) {
+			return { ok: false, line: i + 1 };
+		}
+		const name = line.slice(0, sep).trim();
+		const value = line.slice(sep + 1).trim();
+		if (!name) {
+			return { ok: false, line: i + 1 };
+		}
+		headers.push([name, value]);
+	}
+	return { ok: true, headers };
+}
+
+function safeGetWebviewUrl(node: AsyncShellWebviewElement | null): string {
+	if (!node) {
+		return '';
+	}
+	try {
+		return String(node.getURL?.() ?? '').trim();
+	} catch {
+		return '';
+	}
+}
+
+function looksLikeDirectUrl(raw: string): boolean {
+	if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(raw)) {
+		return true;
+	}
+	return /^(localhost|(?:\d{1,3}\.){3}\d{1,3}|(?:[\w-]+\.)+[a-z]{2,})(?::\d+)?(?:[/?#].*)?$/i.test(raw);
+}
+
+function normalizeBrowserTarget(raw: string): string {
+	const text = raw.trim();
+	if (!text) {
+		return BROWSER_HOME_URL;
+	}
+	if (looksLikeDirectUrl(text)) {
+		return /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(text) ? text : `https://${text}`;
+	}
+	return `https://www.bing.com/search?q=${encodeURIComponent(text)}`;
+}
+
+function normalizeBrowserExtractedText(raw: string, maxChars: number): string {
+	const compact = String(raw ?? '')
+		.replace(/\r/g, '')
+		.replace(/\u00a0/g, ' ')
+		.replace(/[ \t]+\n/g, '\n')
+		.replace(/\n{3,}/g, '\n\n')
+		.replace(/[ \t]{2,}/g, ' ')
+		.trim();
+	return compact.length > maxChars ? `${compact.slice(0, maxChars)}\n\n... (truncated)` : compact;
+}
+
+async function notifyBrowserCommandResult(
+	shell: NonNullable<Window['asyncShell']> | undefined,
+	payload: BrowserCommandResultPayload
+): Promise<void> {
+	if (!shell) {
+		return;
+	}
+	try {
+		await shell.invoke('browser:commandResult', payload);
+	} catch {
+		/* ignore */
+	}
+}
+
+function BrowserSettingsModal({
+	open,
+	t,
+	draft,
+	setDraft,
+	error,
+	saving,
+	onClose,
+	onReset,
+	onSave,
+}: {
+	open: boolean;
+	t: TFunction;
+	draft: BrowserSidebarConfig;
+	setDraft: Dispatch<SetStateAction<BrowserSidebarConfig>>;
+	error: string | null;
+	saving: boolean;
+	onClose: () => void;
+	onReset: () => void;
+	onSave: () => void | Promise<void>;
+}) {
+	const firstInputRef = useRef<HTMLInputElement | null>(null);
+
+	useEffect(() => {
+		if (!open) {
+			return;
+		}
+		const timer = window.setTimeout(() => firstInputRef.current?.focus(), 40);
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') {
+				event.preventDefault();
+				onClose();
+			}
+		};
+		window.addEventListener('keydown', onKey);
+		return () => {
+			window.clearTimeout(timer);
+			window.removeEventListener('keydown', onKey);
+		};
+	}, [open, onClose]);
+
+	if (!open) {
+		return null;
+	}
+
+	return (
+		<div className="ref-browser-settings-backdrop" role="presentation" onClick={onClose}>
+			<form
+				className="ref-browser-settings-modal"
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="browser-settings-title"
+				onClick={(event) => event.stopPropagation()}
+				onSubmit={(event) => {
+					event.preventDefault();
+					void onSave();
+				}}
+			>
+				<div className="ref-browser-settings-head">
+					<div className="ref-browser-settings-title-stack">
+						<span className="ref-browser-settings-kicker">{t('app.tabBrowser')}</span>
+						<h2 id="browser-settings-title" className="ref-browser-settings-title">
+							{t('app.browserSettings')}
+						</h2>
+					</div>
+					<button
+						type="button"
+						className="ref-browser-settings-close"
+						aria-label={t('common.close')}
+						title={t('common.close')}
+						onClick={onClose}
+					>
+						<IconCloseSmall />
+					</button>
+				</div>
+
+				<div className="ref-browser-settings-body">
+					<p className="ref-browser-settings-note">{t('app.browserSettingsDescription')}</p>
+
+					<label className="ref-browser-settings-field">
+						<span className="ref-browser-settings-label">{t('app.browserUserAgent')}</span>
+						<input
+							ref={firstInputRef}
+							type="text"
+							className="ref-browser-settings-input"
+							value={draft.userAgent}
+							placeholder={t('app.browserUserAgentPlaceholder')}
+							spellCheck={false}
+							onChange={(event) =>
+								setDraft((prev) => ({
+									...prev,
+									userAgent: event.target.value,
+								}))
+							}
+						/>
+					</label>
+
+					<label className="ref-browser-settings-field">
+						<span className="ref-browser-settings-label">{t('app.browserAcceptLanguage')}</span>
+						<input
+							type="text"
+							className="ref-browser-settings-input"
+							value={draft.acceptLanguage}
+							placeholder={t('app.browserAcceptLanguagePlaceholder')}
+							spellCheck={false}
+							onChange={(event) =>
+								setDraft((prev) => ({
+									...prev,
+									acceptLanguage: event.target.value,
+								}))
+							}
+						/>
+					</label>
+
+					<div className="ref-browser-settings-field">
+						<span className="ref-browser-settings-label">{t('app.browserProxyMode')}</span>
+						<div className="ref-browser-settings-segmented" role="radiogroup" aria-label={t('app.browserProxyMode')}>
+							{(
+								[
+									['system', 'app.browserProxyModeSystem', 'app.browserProxyModeSystemDesc'],
+									['direct', 'app.browserProxyModeDirect', 'app.browserProxyModeDirectDesc'],
+									['custom', 'app.browserProxyModeCustom', 'app.browserProxyModeCustomDesc'],
+								] as const
+							).map(([mode, titleKey, descKey]) => {
+								const active = draft.proxyMode === mode;
+								return (
+									<button
+										key={mode}
+										type="button"
+										role="radio"
+										aria-checked={active}
+										className={`ref-browser-settings-segment ${active ? 'is-selected' : ''}`}
+										onClick={() =>
+											setDraft((prev) => ({
+												...prev,
+												proxyMode: mode,
+											}))
+										}
+									>
+										<span className="ref-browser-settings-segment-title">{t(titleKey)}</span>
+										<span className="ref-browser-settings-segment-desc">{t(descKey)}</span>
+									</button>
+								);
+							})}
+						</div>
+					</div>
+
+					{draft.proxyMode === 'custom' ? (
+						<>
+							<label className="ref-browser-settings-field">
+								<span className="ref-browser-settings-label">{t('app.browserProxyRules')}</span>
+								<input
+									type="text"
+									className="ref-browser-settings-input"
+									value={draft.proxyRules}
+									placeholder={t('app.browserProxyRulesPlaceholder')}
+									spellCheck={false}
+									onChange={(event) =>
+										setDraft((prev) => ({
+											...prev,
+											proxyRules: event.target.value,
+										}))
+									}
+								/>
+								<span className="ref-browser-settings-help">{t('app.browserProxyRulesHint')}</span>
+							</label>
+
+							<label className="ref-browser-settings-field">
+								<span className="ref-browser-settings-label">{t('app.browserProxyBypassRules')}</span>
+								<input
+									type="text"
+									className="ref-browser-settings-input"
+									value={draft.proxyBypassRules}
+									placeholder={t('app.browserProxyBypassRulesPlaceholder')}
+									spellCheck={false}
+									onChange={(event) =>
+										setDraft((prev) => ({
+											...prev,
+											proxyBypassRules: event.target.value,
+										}))
+									}
+								/>
+								<span className="ref-browser-settings-help">{t('app.browserProxyBypassRulesHint')}</span>
+							</label>
+						</>
+					) : null}
+
+					<label className="ref-browser-settings-field">
+						<span className="ref-browser-settings-label">{t('app.browserExtraHeaders')}</span>
+						<textarea
+							className="ref-browser-settings-textarea"
+							value={draft.extraHeadersText}
+							placeholder={t('app.browserExtraHeadersPlaceholder')}
+							spellCheck={false}
+							onChange={(event) =>
+								setDraft((prev) => ({
+									...prev,
+									extraHeadersText: event.target.value,
+								}))
+							}
+						/>
+						<span className="ref-browser-settings-help">{t('app.browserExtraHeadersHint')}</span>
+					</label>
+
+					{error ? <div className="ref-browser-settings-error">{error}</div> : null}
+				</div>
+
+				<div className="ref-browser-settings-actions">
+					<button type="button" className="ref-browser-settings-btn ref-browser-settings-btn--ghost" onClick={onReset}>
+						{t('app.browserResetDefaults')}
+					</button>
+					<div className="ref-browser-settings-actions-right">
+						<button
+							type="button"
+							className="ref-browser-settings-btn ref-browser-settings-btn--secondary"
+							onClick={onClose}
+						>
+							{t('common.cancel')}
+						</button>
+						<button type="submit" className="ref-browser-settings-btn" disabled={saving}>
+							{t('app.browserSaveAndReload')}
+						</button>
+					</div>
+				</div>
+			</form>
+		</div>
+	);
+}
 
 export type AgentRightSidebarProps = {
 	open: boolean;
@@ -253,11 +703,13 @@ function RightSidebarTabs({
 	hasPlan,
 	openView,
 	closeSidebar,
+	extraActions,
 }: {
 	t: TFunction;
 	hasPlan: boolean;
 	openView: (view: AgentRightSidebarView) => void;
 	closeSidebar: () => void;
+	extraActions?: ReactNode;
 }) {
 	return (
 		<div className="ref-right-icon-tabs" aria-label={t('app.rightSidebarViews')}>
@@ -272,6 +724,7 @@ function RightSidebarTabs({
 					<IconDoc />
 				</button>
 			) : null}
+			{extraActions}
 			<button
 				type="button"
 				aria-label={t('common.close')}
@@ -602,6 +1055,1066 @@ const AgentRightSidebarFilePanel = memo(function AgentRightSidebarFilePanel({
 	);
 });
 
+type BrowserTab = {
+	id: string;
+	requestedUrl: string;
+	currentUrl: string;
+	draftUrl: string;
+	pageTitle: string;
+	isLoading: boolean;
+	canGoBack: boolean;
+	canGoForward: boolean;
+	loadError: { message: string; url: string } | null;
+};
+
+let browserTabSeq = 0;
+function createBrowserTab(url: string = BROWSER_HOME_URL): BrowserTab {
+	browserTabSeq += 1;
+	return {
+		id: `browser-tab-${Date.now().toString(36)}-${browserTabSeq}`,
+		requestedUrl: url,
+		currentUrl: url,
+		draftUrl: url,
+		pageTitle: '',
+		isLoading: true,
+		canGoBack: false,
+		canGoForward: false,
+		loadError: null,
+	};
+}
+
+const BrowserTabView = memo(
+	function BrowserTabView({
+		tab,
+		partition,
+		userAgent,
+		active,
+		t,
+		onNavigate,
+		onTitle,
+		onLoading,
+		onFailLoad,
+		onRegisterWebview,
+	}: {
+		tab: BrowserTab;
+		partition: string;
+		userAgent?: string;
+		active: boolean;
+		t: TFunction;
+		onNavigate: (id: string, patch: { currentUrl: string; canGoBack: boolean; canGoForward: boolean }) => void;
+		onTitle: (id: string, title: string) => void;
+		onLoading: (id: string, isLoading: boolean, currentUrl?: string) => void;
+		onFailLoad: (id: string, error: { message: string; url: string }) => void;
+		onRegisterWebview: (id: string, node: AsyncShellWebviewElement | null) => void;
+	}) {
+	const webviewRef = useRef<AsyncShellWebviewElement | null>(null);
+	const tabIdRef = useRef(tab.id);
+	tabIdRef.current = tab.id;
+
+	const assignWebviewRef = useCallback(
+		(node: AsyncShellWebviewElement | null) => {
+			webviewRef.current = node;
+			try {
+				onRegisterWebview(tabIdRef.current, node);
+			} catch (err) {
+				console.error('[BrowserTab] error in onRegisterWebview:', err);
+			}
+		},
+		[onRegisterWebview]
+	);
+
+	useEffect(() => {
+		const node = webviewRef.current;
+		if (!node) {
+			return;
+		}
+
+		const readNavState = () => {
+			try {
+				return {
+					canGoBack: Boolean(node.canGoBack?.()),
+					canGoForward: Boolean(node.canGoForward?.()),
+				};
+			} catch {
+				return { canGoBack: false, canGoForward: false };
+			}
+		};
+
+		const handleStartLoading = () => {
+			onLoading(tabIdRef.current, true);
+		};
+		const handleStopLoading = () => {
+			onLoading(tabIdRef.current, false, safeGetWebviewUrl(node));
+		};
+		const handleNavigate = (event: Event) => {
+			const navEvent = event as BrowserNavEvent;
+			if (navEvent.isMainFrame === false) {
+				return;
+			}
+			const url = String(navEvent.url ?? safeGetWebviewUrl(node) ?? '').trim();
+			const { canGoBack, canGoForward } = readNavState();
+			onNavigate(tabIdRef.current, { currentUrl: url, canGoBack, canGoForward });
+		};
+		const handleTitleUpdated = (event: Event) => {
+			onTitle(tabIdRef.current, String((event as BrowserTitleEvent).title ?? '').trim());
+		};
+		const handleDomReady = () => {
+			const { canGoBack, canGoForward } = readNavState();
+			onNavigate(tabIdRef.current, {
+				currentUrl: safeGetWebviewUrl(node),
+				canGoBack,
+				canGoForward,
+			});
+		};
+		const handleFailLoad = (event: Event) => {
+			const failEvent = event as BrowserFailEvent;
+			if (failEvent.isMainFrame === false || failEvent.errorCode === -3) {
+				return;
+			}
+			const failedUrl = String(failEvent.validatedURL ?? safeGetWebviewUrl(node) ?? '').trim();
+			onFailLoad(tabIdRef.current, {
+				message: String(failEvent.errorDescription ?? t('app.browserLoadFailed')),
+				url: failedUrl,
+			});
+		};
+		node.addEventListener('dom-ready', handleDomReady);
+		node.addEventListener('did-start-loading', handleStartLoading);
+		node.addEventListener('did-stop-loading', handleStopLoading);
+		node.addEventListener('did-navigate', handleNavigate);
+		node.addEventListener('did-navigate-in-page', handleNavigate);
+		node.addEventListener('page-title-updated', handleTitleUpdated);
+		node.addEventListener('did-fail-load', handleFailLoad);
+
+		return () => {
+			node.removeEventListener('dom-ready', handleDomReady);
+			node.removeEventListener('did-start-loading', handleStartLoading);
+			node.removeEventListener('did-stop-loading', handleStopLoading);
+			node.removeEventListener('did-navigate', handleNavigate);
+			node.removeEventListener('did-navigate-in-page', handleNavigate);
+			node.removeEventListener('page-title-updated', handleTitleUpdated);
+			node.removeEventListener('did-fail-load', handleFailLoad);
+		};
+	}, [partition, onLoading, onNavigate, onTitle, onFailLoad]);
+
+	const webviewProps = {
+		ref: assignWebviewRef,
+		className: `ref-browser-webview${active ? '' : ' is-hidden'}`,
+		src: tab.requestedUrl,
+		partition: partition,
+		useragent: userAgent,
+		onLoad: () => console.log('[BrowserTab] webview onLoad event fired'),
+		allowpopups: 'true' as any,  // Electron webview expects string, not boolean
+	};
+	return <webview {...webviewProps} />;
+},
+(prevProps, nextProps) => {
+	// 自定义比较：忽略 t 的变化，只比较关键属性，防止频繁卸载
+	const comparisons = {
+		tabIdSame: prevProps.tab.id === nextProps.tab.id,
+		requestedUrlSame: prevProps.tab.requestedUrl === nextProps.tab.requestedUrl,
+		currentUrlSame: prevProps.tab.currentUrl === nextProps.tab.currentUrl,
+		isLoadingSame: prevProps.tab.isLoading === nextProps.tab.isLoading,
+		canGoBackSame: prevProps.tab.canGoBack === nextProps.tab.canGoBack,
+		canGoForwardSame: prevProps.tab.canGoForward === nextProps.tab.canGoForward,
+		partitionSame: prevProps.partition === nextProps.partition,
+		userAgentSame: prevProps.userAgent === nextProps.userAgent,
+		activeSame: prevProps.active === nextProps.active,
+	};
+
+	const same = Object.values(comparisons).every(Boolean);
+
+	return same;
+}
+);
+
+const AgentRightSidebarBrowserPanel = memo(function AgentRightSidebarBrowserPanel({
+	hasAgentPlanSidebarContent,
+	closeSidebar,
+	openView,
+	pendingCommand,
+	onCommandHandled,
+}: {
+	hasAgentPlanSidebarContent: boolean;
+	closeSidebar: () => void;
+	openView: (view: AgentRightSidebarView) => void;
+	pendingCommand: BrowserControlPayload | null;
+	onCommandHandled: (commandId: string) => void;
+}) {
+	const { t, shell } = useAppShellChrome();
+	const webviewsRef = useRef<Map<string, AsyncShellWebviewElement>>(new Map());
+	const addressInputRef = useRef<HTMLInputElement | null>(null);
+	const defaultUserAgentRef = useRef('');
+
+	const initialTab = useMemo(() => createBrowserTab(), []);
+	const [tabs, setTabs] = useState<BrowserTab[]>([initialTab]);
+	const [activeTabId, setActiveTabId] = useState<string>(initialTab.id);
+	const tabsRef = useRef(tabs);
+	tabsRef.current = tabs;
+	const activeTabIdRef = useRef(activeTabId);
+	activeTabIdRef.current = activeTabId;
+
+	const [browserPartition, setBrowserPartition] = useState('');
+	const [browserConfigReady, setBrowserConfigReady] = useState(false);
+	const [browserSettingsOpen, setBrowserSettingsOpen] = useState(false);
+	const [browserSettingsSaving, setBrowserSettingsSaving] = useState(false);
+	const [browserSettingsError, setBrowserSettingsError] = useState<string | null>(null);
+	const [browserConfig, setBrowserConfig] = useState<BrowserSidebarConfig>(DEFAULT_BROWSER_SIDEBAR_CONFIG);
+	const [browserDraft, setBrowserDraft] = useState<BrowserSidebarConfig>(DEFAULT_BROWSER_SIDEBAR_CONFIG);
+
+	const applyBrowserConfigLocally = useCallback((rawConfig: Partial<BrowserSidebarConfig>, defaultUserAgent?: string) => {
+		const nextConfig = normalizeBrowserSidebarConfig(rawConfig);
+		setBrowserConfig(nextConfig);
+		setBrowserDraft(nextConfig);
+		if (typeof defaultUserAgent === 'string') {
+			defaultUserAgentRef.current = defaultUserAgent.trim();
+		}
+		const nextUserAgent = nextConfig.userAgent.trim() || defaultUserAgentRef.current;
+		webviewsRef.current.forEach((node) => {
+			if (nextUserAgent) {
+				try {
+					node.setUserAgent(nextUserAgent);
+				} catch {
+					/* ignore */
+				}
+			}
+			try {
+				node.reload();
+			} catch {
+				/* ignore */
+			}
+		});
+		setTabs((prev) => prev.map((tab) => ({ ...tab, loadError: null })));
+	}, []);
+
+	const waitForWebviewNode = useCallback((tabId: string, timeoutMs: number = 10_000): Promise<AsyncShellWebviewElement> => {
+		const startedAt = Date.now();
+		return new Promise((resolve, reject) => {
+			const tick = () => {
+				const node = webviewsRef.current.get(tabId);
+				if (node) {
+					resolve(node);
+					return;
+				}
+				if (Date.now() - startedAt >= timeoutMs) {
+					reject(new Error('Timed out waiting for browser tab to become ready.'));
+					return;
+				}
+				window.setTimeout(tick, 50);
+			};
+			tick();
+		});
+	}, []);
+
+	const waitForWebviewSettled = useCallback(
+		(node: AsyncShellWebviewElement, tabId: string, timeoutMs: number = 15_000): Promise<void> => {
+			const currentTab = tabsRef.current.find((tab) => tab.id === tabId);
+			if (!currentTab?.isLoading) {
+				return Promise.resolve();
+			}
+			return new Promise((resolve, reject) => {
+				const cleanup = () => {
+					window.clearTimeout(timer);
+					node.removeEventListener('did-stop-loading', handleStopLoading);
+					node.removeEventListener('did-fail-load', handleFailLoad);
+				};
+				const handleStopLoading = () => {
+					cleanup();
+					resolve();
+				};
+				const handleFailLoad = (event: Event) => {
+					const failEvent = event as BrowserFailEvent;
+					if (failEvent.isMainFrame === false || failEvent.errorCode === -3) {
+						return;
+					}
+					cleanup();
+					reject(new Error(String(failEvent.errorDescription ?? t('app.browserLoadFailed'))));
+				};
+				const timer = window.setTimeout(() => {
+					cleanup();
+					reject(new Error('Timed out waiting for page load to finish.'));
+				}, timeoutMs);
+				node.addEventListener('did-stop-loading', handleStopLoading);
+				node.addEventListener('did-fail-load', handleFailLoad);
+			});
+		},
+		[t]
+	);
+
+	const readPageFromWebview = useCallback(
+		async (
+			node: AsyncShellWebviewElement,
+			options: { selector?: string; includeHtml?: boolean; maxChars?: number }
+		): Promise<Record<string, unknown>> => {
+			const maxChars = Math.min(Math.max(500, Math.floor(options.maxChars ?? 12_000)), 50_000);
+			const script = `
+				(() => {
+					const args = ${JSON.stringify({
+						selector: options.selector ?? '',
+						includeHtml: options.includeHtml === true,
+						maxChars,
+					})};
+					const root = args.selector ? document.querySelector(args.selector) : (document.body || document.documentElement);
+					if (!root) {
+						return {
+							ok: false,
+							error: args.selector ? 'Selector did not match any element.' : 'Page body is unavailable.',
+						};
+					}
+					const rawText = String(root.innerText || root.textContent || '');
+					const htmlText = args.includeHtml
+						? String(root.outerHTML || root.innerHTML || '').slice(0, Math.min(args.maxChars, 30000))
+						: '';
+					const headings = Array.from(document.querySelectorAll('h1, h2, h3'))
+						.map((el) => String(el.textContent || '').trim())
+						.filter(Boolean)
+						.slice(0, 20);
+					const links = Array.from(root.querySelectorAll('a[href]'))
+						.map((el) => ({
+							text: String(el.textContent || '').trim(),
+							href: String(el.getAttribute('href') || '').trim(),
+						}))
+						.filter((item) => item.href)
+						.slice(0, 20);
+					const metaDescription = document.querySelector('meta[name=\"description\"]')?.getAttribute('content') || '';
+					return {
+						ok: true,
+						url: location.href,
+						title: document.title || '',
+						lang: document.documentElement?.lang || '',
+						selector: args.selector || null,
+						metaDescription: metaDescription || '',
+						text: rawText,
+						totalTextLength: rawText.length,
+						headings,
+						links,
+						html: htmlText || undefined,
+					};
+				})()
+			`;
+			const result = await node.executeJavaScript<Record<string, unknown>>(script, true);
+			if (result?.ok === false) {
+				throw new Error(String(result.error ?? 'Failed to read page content.'));
+			}
+			const text = normalizeBrowserExtractedText(String(result?.text ?? ''), maxChars);
+			return {
+				url: String(result?.url ?? safeGetWebviewUrl(node)),
+				title: String(result?.title ?? ''),
+				lang: String(result?.lang ?? ''),
+				selector: result?.selector ?? null,
+				metaDescription: String(result?.metaDescription ?? ''),
+				totalTextLength: Number(result?.totalTextLength ?? text.length) || text.length,
+				text,
+				headings: Array.isArray(result?.headings) ? result.headings : [],
+				links: Array.isArray(result?.links) ? result.links : [],
+				...(options.includeHtml ? { html: String(result?.html ?? '') } : {}),
+			};
+		},
+		[]
+	);
+
+	const captureWebviewScreenshot = useCallback(async (node: AsyncShellWebviewElement): Promise<Record<string, unknown>> => {
+		const image = await node.capturePage();
+		const size = image.getSize();
+		return {
+			url: safeGetWebviewUrl(node),
+			title: tabsRef.current.find((tab) => webviewsRef.current.get(tab.id) === node)?.pageTitle ?? '',
+			width: size.width,
+			height: size.height,
+			dataUrl: image.toDataURL(),
+		};
+	}, []);
+
+	useEffect(() => {
+		let cancelled = false;
+		if (!shell) {
+			setBrowserPartition('async-agent-browser-fallback');
+			setBrowserConfigReady(true);
+			return () => {
+				cancelled = true;
+			};
+		}
+		void shell
+			.invoke('browser:getConfig')
+			.then((payload) => {
+				if (cancelled) {
+					return;
+				}
+				const response = payload as {
+					ok?: boolean;
+					partition?: string;
+					config?: Partial<BrowserSidebarConfig>;
+					defaultUserAgent?: string;
+				};
+				if (response.ok && response.partition) {
+					const nextConfig = normalizeBrowserSidebarConfig(response.config);
+					setBrowserPartition(response.partition);
+					setBrowserConfig(nextConfig);
+					setBrowserDraft(nextConfig);
+					defaultUserAgentRef.current = String(response.defaultUserAgent ?? '').trim();
+				} else {
+					setBrowserPartition('async-agent-browser-fallback');
+				}
+				setBrowserConfigReady(true);
+			})
+			.catch(() => {
+				if (cancelled) {
+					return;
+				}
+				setBrowserPartition('async-agent-browser-fallback');
+				setBrowserConfigReady(true);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [shell]);
+
+	const handleRegisterWebview = useCallback((id: string, node: AsyncShellWebviewElement | null) => {
+		if (node) {
+			webviewsRef.current.set(id, node);
+			if (!defaultUserAgentRef.current) {
+				try {
+					defaultUserAgentRef.current = String(node.getUserAgent?.() ?? '').trim();
+				} catch {
+					/* ignore */
+				}
+			}
+		} else {
+			webviewsRef.current.delete(id);
+		}
+	}, []);
+
+	const handleTabNavigate = useCallback(
+		(id: string, patch: { currentUrl: string; canGoBack: boolean; canGoForward: boolean }) => {
+			const addressFocused =
+				typeof document !== 'undefined' && document.activeElement === addressInputRef.current;
+			const keepDraft = id === activeTabIdRef.current && addressFocused;
+			setTabs((prev) =>
+				prev.map((tab) => {
+					if (tab.id !== id) {
+						return tab;
+					}
+					const resolvedUrl = patch.currentUrl || tab.currentUrl;
+					return {
+						...tab,
+						currentUrl: resolvedUrl,
+						draftUrl: keepDraft ? tab.draftUrl : resolvedUrl,
+						canGoBack: patch.canGoBack,
+						canGoForward: patch.canGoForward,
+						loadError: null,
+					};
+				})
+			);
+		},
+		[]
+	);
+
+	const handleTabTitle = useCallback((id: string, title: string) => {
+		setTabs((prev) => prev.map((tab) => (tab.id === id ? { ...tab, pageTitle: title } : tab)));
+	}, []);
+
+	const handleTabLoading = useCallback((id: string, isLoading: boolean, currentUrl?: string) => {
+		setTabs((prev) =>
+			prev.map((tab) => {
+				if (tab.id !== id) {
+					return tab;
+				}
+				const next: BrowserTab = { ...tab, isLoading };
+				if (isLoading) {
+					next.loadError = null;
+				} else if (currentUrl && currentUrl !== tab.currentUrl) {
+					const addressFocused =
+						typeof document !== 'undefined' && document.activeElement === addressInputRef.current;
+					const keepDraft = id === activeTabIdRef.current && addressFocused;
+					next.currentUrl = currentUrl;
+					if (!keepDraft) {
+						next.draftUrl = currentUrl;
+					}
+				}
+				return next;
+			})
+		);
+	}, []);
+
+	const handleTabFailLoad = useCallback((id: string, error: { message: string; url: string }) => {
+		setTabs((prev) =>
+			prev.map((tab) => {
+				if (tab.id !== id) {
+					return tab;
+				}
+				return {
+					...tab,
+					isLoading: false,
+					currentUrl: error.url || tab.currentUrl,
+					loadError: error,
+				};
+			})
+		);
+	}, []);
+
+	const openInNewTab = useCallback((url: string) => {
+		const trimmed = String(url ?? '').trim();
+		if (!trimmed) {
+			return;
+		}
+		const tab = createBrowserTab(trimmed);
+		setTabs((prev) => [...prev, tab]);
+		setActiveTabId(tab.id);
+	}, []);
+
+	const navigateTab = useCallback((tabId: string, rawTarget: string) => {
+		const nextUrl = normalizeBrowserTarget(rawTarget);
+		const prevTab = tabsRef.current.find((tab) => tab.id === tabId) ?? null;
+		const sameAsRequested = prevTab?.requestedUrl === nextUrl;
+		setActiveTabId(tabId);
+		setTabs((prev) =>
+			prev.map((tab) => {
+				if (tab.id !== tabId) {
+					return tab;
+				}
+				return {
+					...tab,
+					requestedUrl: nextUrl,
+					currentUrl: nextUrl,
+					draftUrl: nextUrl,
+					pageTitle: '',
+					isLoading: true,
+					canGoBack: false,
+					canGoForward: false,
+					loadError: null,
+				};
+			})
+		);
+		if (sameAsRequested) {
+			webviewsRef.current.get(tabId)?.reload();
+		}
+	}, []);
+
+	// Subscribe to main-process forwarded new-window events for webview contents.
+	// Electron 12+ deprecated the 'new-window' event; the host (this webContents)
+	// receives 'async-shell:browserNewWindow' from web-contents-created hook in main.
+	useEffect(() => {
+		const subscribe = shell?.subscribeBrowserNewWindow;
+		if (!subscribe) {
+			return;
+		}
+		const unsubscribe = subscribe((payload) => {
+			openInNewTab(String(payload?.url ?? ''));
+		});
+		return () => {
+			unsubscribe?.();
+		};
+	}, [shell, openInNewTab]);
+
+	const addNewTab = useCallback(() => {
+		const tab = createBrowserTab();
+		setTabs((prev) => [...prev, tab]);
+		setActiveTabId(tab.id);
+		window.setTimeout(() => {
+			addressInputRef.current?.focus();
+			addressInputRef.current?.select();
+		}, 50);
+	}, []);
+
+	const closeTab = useCallback((id: string) => {
+		const prev = tabsRef.current;
+		const closedIndex = prev.findIndex((tab) => tab.id === id);
+		if (closedIndex < 0) {
+			return;
+		}
+		webviewsRef.current.delete(id);
+		if (prev.length <= 1) {
+			const fresh = createBrowserTab();
+			setTabs([fresh]);
+			setActiveTabId(fresh.id);
+			return;
+		}
+		const nextTabs = prev.filter((tab) => tab.id !== id);
+		setTabs(nextTabs);
+		if (activeTabIdRef.current === id) {
+			const nextActive = nextTabs[Math.min(closedIndex, nextTabs.length - 1)];
+			setActiveTabId(nextActive.id);
+		}
+	}, []);
+
+	const activateTab = useCallback((id: string) => {
+		setActiveTabId(id);
+	}, []);
+
+	const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
+	const activeWebview = () => (activeTab ? webviewsRef.current.get(activeTab.id) ?? null : null);
+
+	const onAddressChange = useCallback(
+		(value: string) => {
+			setTabs((prev) => prev.map((tab) => (tab.id === activeTabId ? { ...tab, draftUrl: value } : tab)));
+		},
+		[activeTabId]
+	);
+
+	const onAddressSubmit = useCallback(
+		(event: FormEvent<HTMLFormElement>) => {
+			event.preventDefault();
+			if (!activeTab) {
+				return;
+			}
+			addressInputRef.current?.blur();
+			navigateTab(activeTabId, activeTab.draftUrl);
+		},
+		[activeTab, activeTabId, navigateTab]
+	);
+
+	const onAddressKeyDown = useCallback(
+		(event: ReactKeyboardEvent<HTMLInputElement>) => {
+			if (event.key === 'Escape') {
+				event.preventDefault();
+				if (activeTab) {
+					setTabs((prev) =>
+						prev.map((tab) => (tab.id === activeTabId ? { ...tab, draftUrl: tab.currentUrl } : tab))
+					);
+				}
+				event.currentTarget.blur();
+			}
+		},
+		[activeTab, activeTabId]
+	);
+
+	const openBrowserSettings = useCallback(() => {
+		setBrowserDraft(browserConfig);
+		setBrowserSettingsError(null);
+		setBrowserSettingsOpen(true);
+	}, [browserConfig]);
+
+	const closeBrowserSettings = useCallback(() => {
+		setBrowserDraft(browserConfig);
+		setBrowserSettingsError(null);
+		setBrowserSettingsOpen(false);
+	}, [browserConfig]);
+
+	const saveBrowserSettings = useCallback(async () => {
+		const parsedHeaders = parseBrowserExtraHeadersText(browserDraft.extraHeadersText);
+		if (!parsedHeaders.ok) {
+			setBrowserSettingsError(t('app.browserHeaderFormatError', { line: String(parsedHeaders.line) }));
+			return;
+		}
+		if (browserDraft.proxyMode === 'custom' && !browserDraft.proxyRules.trim()) {
+			setBrowserSettingsError(t('app.browserProxyRulesRequired'));
+			return;
+		}
+		setBrowserSettingsSaving(true);
+		setBrowserSettingsError(null);
+		try {
+			const nextConfig = normalizeBrowserSidebarConfig(browserDraft);
+			if (shell) {
+				const payload = (await shell.invoke('browser:setConfig', nextConfig)) as {
+					ok?: boolean;
+					error?: string;
+					line?: number;
+					config?: Partial<BrowserSidebarConfig>;
+					defaultUserAgent?: string;
+				};
+				if (!payload?.ok) {
+					if (payload?.error === 'invalid-header-line' && payload.line) {
+						setBrowserSettingsError(t('app.browserHeaderFormatError', { line: String(payload.line) }));
+					} else if (payload?.error === 'proxy-rules-required') {
+						setBrowserSettingsError(t('app.browserProxyRulesRequired'));
+					} else {
+						setBrowserSettingsError(t('app.browserLoadFailed'));
+					}
+					return;
+				}
+				applyBrowserConfigLocally(
+					payload.config ?? nextConfig,
+					String(payload.defaultUserAgent ?? defaultUserAgentRef.current ?? '')
+				);
+			} else {
+				applyBrowserConfigLocally(nextConfig);
+			}
+			setBrowserSettingsOpen(false);
+		} finally {
+			setBrowserSettingsSaving(false);
+		}
+	}, [applyBrowserConfigLocally, browserDraft, shell, t]);
+
+	useEffect(() => {
+		if (!shell) {
+			return;
+		}
+		const payload = {
+			activeTabId,
+			tabs: tabs.map((tab) => ({
+				id: tab.id,
+				requestedUrl: tab.requestedUrl,
+				currentUrl: tab.currentUrl,
+				pageTitle: tab.pageTitle,
+				isLoading: tab.isLoading,
+				canGoBack: tab.canGoBack,
+				canGoForward: tab.canGoForward,
+				loadError: tab.loadError,
+			})),
+			updatedAt: Date.now(),
+		};
+		const timer = window.setTimeout(() => {
+			void shell.invoke('browser:syncState', payload).catch(() => {
+				/* ignore */
+			});
+		}, 40);
+		return () => {
+			window.clearTimeout(timer);
+		};
+	}, [activeTabId, shell, tabs]);
+
+	useEffect(() => {
+		if (!pendingCommand) {
+			return;
+		}
+		const command = pendingCommand;
+		const finish = () => onCommandHandled(command.commandId);
+		if (command.type === 'navigate') {
+			const activeId = activeTabIdRef.current;
+			const hasActiveTab = Boolean(activeId && tabsRef.current.some((tab) => tab.id === activeId));
+			if (command.newTab || !hasActiveTab || !activeId) {
+				openInNewTab(normalizeBrowserTarget(command.target));
+			} else {
+				navigateTab(activeId, command.target);
+			}
+			finish();
+			return;
+		}
+		if (command.type === 'applyConfig') {
+			applyBrowserConfigLocally(command.config, command.defaultUserAgent);
+			finish();
+			return;
+		}
+		void (async () => {
+			const targetTabId =
+				command.tabId && tabsRef.current.some((tab) => tab.id === command.tabId)
+					? command.tabId
+					: activeTabIdRef.current;
+			if (!targetTabId) {
+				if (command.type === 'readPage' || command.type === 'screenshotPage') {
+					await notifyBrowserCommandResult(shell, {
+						commandId: command.commandId,
+						ok: false,
+						error: 'No active browser tab is available.',
+					});
+				}
+				finish();
+				return;
+			}
+			if (command.type === 'closeTab') {
+				closeTab(targetTabId);
+				finish();
+				return;
+			}
+			setActiveTabId(targetTabId);
+			if (command.type === 'readPage' || command.type === 'screenshotPage') {
+				try {
+					const node = await waitForWebviewNode(targetTabId);
+					if (command.waitForLoad !== false) {
+						await waitForWebviewSettled(node, targetTabId);
+					}
+					if (command.type === 'readPage') {
+						const result = await readPageFromWebview(node, {
+							selector: command.selector,
+							includeHtml: command.includeHtml,
+							maxChars: command.maxChars,
+						});
+						await notifyBrowserCommandResult(shell, {
+							commandId: command.commandId,
+							ok: true,
+							result,
+						});
+					} else {
+						const result = await captureWebviewScreenshot(node);
+						await notifyBrowserCommandResult(shell, {
+							commandId: command.commandId,
+							ok: true,
+							result,
+						});
+					}
+				} catch (error) {
+					await notifyBrowserCommandResult(shell, {
+						commandId: command.commandId,
+						ok: false,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				} finally {
+					finish();
+				}
+				return;
+			}
+			const node = webviewsRef.current.get(targetTabId);
+			if (command.type === 'reload') {
+				setTabs((prev) => prev.map((tab) => (tab.id === targetTabId ? { ...tab, loadError: null } : tab)));
+				node?.reload();
+			} else if (command.type === 'stop') {
+				node?.stop();
+			} else if (command.type === 'goBack') {
+				if (node?.canGoBack()) {
+					node.goBack();
+				}
+			} else if (command.type === 'goForward' && node?.canGoForward()) {
+				node.goForward();
+			}
+			finish();
+		})();
+	}, [
+		applyBrowserConfigLocally,
+		captureWebviewScreenshot,
+		closeTab,
+		navigateTab,
+		onCommandHandled,
+		openInNewTab,
+		pendingCommand,
+		readPageFromWebview,
+		shell,
+		waitForWebviewNode,
+		waitForWebviewSettled,
+	]);
+
+	const headerLabel = activeTab
+		? activeTab.isLoading
+			? t('app.browserLoading')
+			: activeTab.pageTitle || activeTab.currentUrl.replace(/^https?:\/\//i, '') || t('app.tabBrowser')
+		: t('app.tabBrowser');
+	const headerUrl = activeTab?.currentUrl ?? '';
+	const userAgentProp = browserConfig.userAgent.trim() || undefined;
+
+	return (
+		<div className="ref-agent-review-shell">
+			<div className="ref-agent-review-head">
+				<div className="ref-agent-review-title-stack">
+					<span className="ref-agent-review-kicker">{t('app.tabBrowser')}</span>
+					<span className="ref-agent-review-title" title={headerUrl}>
+						{headerLabel}
+					</span>
+				</div>
+				<RightSidebarTabs
+					t={t}
+					hasPlan={hasAgentPlanSidebarContent}
+					openView={openView}
+					closeSidebar={closeSidebar}
+					extraActions={
+						<button
+							type="button"
+							aria-label={t('app.browserSettings')}
+							title={t('app.browserSettings')}
+							className="ref-right-icon-tab"
+							onClick={openBrowserSettings}
+						>
+							<IconSettings />
+						</button>
+					}
+				/>
+			</div>
+			<div className="ref-right-panel-stage">
+				<div className="ref-right-panel-view ref-right-panel-view--agent ref-browser-panel">
+					{browserConfigReady ? (
+						<div className="ref-browser-tabstrip" role="tablist" aria-label={t('app.tabBrowser')}>
+							<div className="ref-browser-tabstrip-scroll">
+								{tabs.map((tab) => {
+									const tabActive = tab.id === activeTabId;
+									const tabLabel =
+										(tab.pageTitle && tab.pageTitle.trim()) ||
+										(tab.currentUrl ? tab.currentUrl.replace(/^https?:\/\//i, '') : '') ||
+										t('app.browserUntitled');
+									return (
+										<div
+											key={tab.id}
+											role="tab"
+											aria-selected={tabActive}
+											tabIndex={0}
+											className={`ref-browser-tab${tabActive ? ' is-active' : ''}`}
+											title={tab.currentUrl || tabLabel}
+											onClick={() => activateTab(tab.id)}
+											onKeyDown={(event) => {
+												if (event.key === 'Enter' || event.key === ' ') {
+													event.preventDefault();
+													activateTab(tab.id);
+												}
+											}}
+											onMouseDown={(event) => {
+												// middle-click closes tab, like real browsers
+												if (event.button === 1) {
+													event.preventDefault();
+													closeTab(tab.id);
+												}
+											}}
+										>
+											<span className="ref-browser-tab-indicator" aria-hidden="true">
+												{tab.isLoading ? (
+													<span className="ref-browser-tab-spinner" />
+												) : (
+													<IconGlobe className="ref-browser-tab-favicon" />
+												)}
+											</span>
+											<span className="ref-browser-tab-label">{tabLabel}</span>
+											<button
+												type="button"
+												className="ref-browser-tab-close"
+												aria-label={t('app.browserCloseTab')}
+												title={t('app.browserCloseTab')}
+												onClick={(event) => {
+													event.stopPropagation();
+													closeTab(tab.id);
+												}}
+											>
+												<IconCloseSmall />
+											</button>
+										</div>
+									);
+								})}
+							</div>
+							<button
+								type="button"
+								className="ref-browser-tabstrip-add"
+								aria-label={t('app.browserNewTab')}
+								title={t('app.browserNewTab')}
+								onClick={addNewTab}
+							>
+								<IconPlus />
+							</button>
+						</div>
+					) : null}
+					<div className="ref-right-toolbar ref-browser-toolbar">
+						<button
+							type="button"
+							className="ref-icon-tile ref-browser-tool-btn"
+							aria-label={t('common.back')}
+							title={t('common.back')}
+							disabled={!activeTab?.canGoBack}
+							onClick={() => {
+								const node = activeWebview();
+								if (!node?.canGoBack()) {
+									return;
+								}
+								node.goBack();
+							}}
+						>
+							<IconArrowLeft />
+						</button>
+						<button
+							type="button"
+							className="ref-icon-tile ref-browser-tool-btn"
+							aria-label={t('app.browserForward')}
+							title={t('app.browserForward')}
+							disabled={!activeTab?.canGoForward}
+							onClick={() => {
+								const node = activeWebview();
+								if (!node?.canGoForward()) {
+									return;
+								}
+								node.goForward();
+							}}
+						>
+							<IconArrowRight />
+						</button>
+						<form className="ref-browser-address-form" onSubmit={onAddressSubmit}>
+							<IconGlobe className="ref-browser-address-icon" />
+							<input
+								ref={addressInputRef}
+								type="text"
+								className="ref-browser-address-input"
+								value={activeTab?.draftUrl ?? ''}
+								placeholder={t('app.browserAddressPlaceholder')}
+								spellCheck={false}
+								autoCapitalize="none"
+								autoCorrect="off"
+								onChange={(event) => onAddressChange(event.target.value)}
+								onFocus={(event) => event.currentTarget.select()}
+								onKeyDown={onAddressKeyDown}
+							/>
+						</form>
+						<button
+							type="button"
+							className="ref-icon-tile ref-browser-tool-btn"
+							aria-label={activeTab?.isLoading ? t('app.browserStop') : t('common.refresh')}
+							title={activeTab?.isLoading ? t('app.browserStop') : t('common.refresh')}
+							onClick={() => {
+								const node = activeWebview();
+								if (!node) {
+									return;
+								}
+								if (activeTab?.isLoading) {
+									node.stop();
+									return;
+								}
+								setTabs((prev) =>
+									prev.map((tab) => (tab.id === activeTabId ? { ...tab, loadError: null } : tab))
+								);
+								node.reload();
+							}}
+						>
+							{activeTab?.isLoading ? <IconStop /> : <IconRefresh />}
+						</button>
+					</div>
+					<div className="ref-browser-webview-wrap">
+						{browserConfigReady && browserPartition ? (
+							tabs.map((tab) => (
+								<BrowserTabView
+										key={tab.id}
+										tab={tab}
+										partition={browserPartition}
+										userAgent={userAgentProp}
+										active={tab.id === activeTabId}
+										t={t}
+										onNavigate={handleTabNavigate}
+										onTitle={handleTabTitle}
+										onLoading={handleTabLoading}
+										onFailLoad={handleTabFailLoad}
+										onRegisterWebview={handleRegisterWebview}
+									/>
+							))
+						) : (
+							<div className="ref-browser-preparing">
+								<div className="ref-agent-plan-status-title">{t('app.browserPreparing')}</div>
+								<p className="ref-agent-plan-status-body">{t('app.browserSettingsDescription')}</p>
+							</div>
+						)}
+						{activeTab?.loadError ? (
+							<div className="ref-browser-error-card" role="status">
+								<div className="ref-browser-error-title">{t('app.browserLoadFailed')}</div>
+								<p className="ref-browser-error-body">{activeTab.loadError.message}</p>
+								{activeTab.loadError.url ? (
+									<p className="ref-browser-error-url" title={activeTab.loadError.url}>
+										{activeTab.loadError.url}
+									</p>
+								) : null}
+								<button
+									type="button"
+									className="ref-browser-error-btn"
+									onClick={() => {
+										const tabId = activeTabId;
+										setTabs((prev) =>
+											prev.map((tab) => (tab.id === tabId ? { ...tab, loadError: null } : tab))
+										);
+										webviewsRef.current.get(tabId)?.reload();
+									}}
+								>
+									{t('common.refresh')}
+								</button>
+							</div>
+						) : null}
+					</div>
+				</div>
+			</div>
+			<BrowserSettingsModal
+				open={browserSettingsOpen}
+				t={t}
+				draft={browserDraft}
+				setDraft={setBrowserDraft}
+				error={browserSettingsError}
+				saving={browserSettingsSaving}
+				onClose={closeBrowserSettings}
+				onReset={() => {
+					setBrowserDraft(DEFAULT_BROWSER_SIDEBAR_CONFIG);
+					setBrowserSettingsError(null);
+				}}
+				onSave={saveBrowserSettings}
+			/>
+		</div>
+	);
+});
+
 /** Git 面板：只订阅 AppShell Git/Chrome context，父级因消息/流式重渲时若 Git 切片未变则可跳过本 subtree。 */
 const AgentRightSidebarGitPanel = memo(function AgentRightSidebarGitPanel({
 	hasAgentPlanSidebarContent,
@@ -809,7 +2322,29 @@ export const AgentRightSidebar = memo(function AgentRightSidebar({
 	revertedPaths,
 	revertedChangeKeys,
 }: AgentRightSidebarProps) {
-	const { t } = useAppShellChrome();
+	const { t, shell } = useAppShellChrome();
+	const [pendingBrowserCommands, setPendingBrowserCommands] = useState<BrowserControlPayload[]>([]);
+
+	useEffect(() => {
+		const subscribe = shell?.subscribeBrowserControl;
+		if (!subscribe) {
+			return;
+		}
+		const unsubscribe = subscribe((payload) => {
+			if (!isBrowserControlPayload(payload)) {
+				return;
+			}
+			setPendingBrowserCommands((prev) => [...prev, payload]);
+			openView('browser');
+		});
+		return () => {
+			unsubscribe?.();
+		};
+	}, [openView, shell]);
+
+	const handleBrowserCommandHandled = useCallback((commandId: string) => {
+		setPendingBrowserCommands((prev) => prev.filter((command) => command.commandId !== commandId));
+	}, []);
 
 	let content: ReactNode;
 
@@ -853,6 +2388,16 @@ export const AgentRightSidebar = memo(function AgentRightSidebar({
 				onAcceptAgentFilePreviewHunk={onAcceptAgentFilePreviewHunk}
 				onRevertAgentFilePreviewHunk={onRevertAgentFilePreviewHunk}
 				agentFilePreviewBusyPatch={agentFilePreviewBusyPatch}
+			/>
+		);
+	} else if (view === 'browser') {
+		content = (
+			<AgentRightSidebarBrowserPanel
+				hasAgentPlanSidebarContent={hasAgentPlanSidebarContent}
+				closeSidebar={closeSidebar}
+				openView={openView}
+				pendingCommand={pendingBrowserCommands[0] ?? null}
+				onCommandHandled={handleBrowserCommandHandled}
 			/>
 		);
 	} else if (view === 'team') {

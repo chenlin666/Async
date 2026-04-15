@@ -257,7 +257,6 @@ export function useSettings(
 					: undefined,
 			requirePlanApproval: st?.team?.requirePlanApproval ?? presetDefaults.requirePlanApproval,
 			enablePreflightReview: st?.team?.enablePreflightReview ?? presetDefaults.enablePreflightReview,
-			enableResearchPhase: st?.team?.enableResearchPhase ?? presetDefaults.enableResearchPhase,
 			planReviewer: st?.team?.planReviewer ?? null,
 			deliveryReviewer: st?.team?.deliveryReviewer ?? null,
 		});

@@ -487,14 +487,13 @@ export function getTeamPreset(presetId?: string): TeamPresetDefinition {
 
 export function getTeamPresetDefaults(
 	presetId?: string
-): Pick<TeamSettings, 'requirePlanApproval' | 'enablePreflightReview' | 'enableResearchPhase'> {
+): Pick<TeamSettings, 'requirePlanApproval' | 'enablePreflightReview'> {
 	const preset = getTeamPreset(presetId);
 	switch (preset.id) {
 		case 'engineering':
 			return {
 				requirePlanApproval: true,
 				enablePreflightReview: false,
-				enableResearchPhase: false,
 			};
 		case 'planning':
 		case 'design':
@@ -502,7 +501,6 @@ export function getTeamPresetDefaults(
 			return {
 				requirePlanApproval: true,
 				enablePreflightReview: true,
-				enableResearchPhase: false,
 			};
 	}
 }
