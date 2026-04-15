@@ -28,6 +28,7 @@ const INVOKE_CHANNELS = new Set([
 	'workspace:memory:rebuild',
 	'settings:get',
 	'settings:set',
+	'settings:testBotConnection',
 	'usageStats:get',
 	'usageStats:pickDirectory',
 	'theme:applyChrome',

@@ -74,6 +74,7 @@ import { textBeforeCaretForAt } from './composerRichDom';
 import { useComposerAtMention, type AtComposerSlot } from './useComposerAtMention';
 import { useComposerSlashCommand } from './useComposerSlashCommand';
 import { type AgentRuleScope } from './agentSettingsTypes';
+import type { BotIntegrationConfig } from './botSettingsTypes';
 
 const EMPTY_AGENT_PENDING_PATCHES: AgentPendingPatch[] = [];
 const EMPTY_SNAPSHOT_PATHS: ReadonlySet<string> = new Set<string>();
@@ -322,6 +323,8 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 		applyLoadedSettings,
 		teamSettings,
 		setTeamSettings,
+		botIntegrations,
+		setBotIntegrations,
 	} = useSettings(shell, workspace, t);
 
 	const chromeSlice = useMemo(
@@ -422,6 +425,8 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 			onChangeMergedAgentCustomization,
 			teamSettings,
 			setTeamSettings,
+			botIntegrations,
+			setBotIntegrations,
 			editorSettings,
 			setEditorSettings,
 			mcpServers,
@@ -457,6 +462,8 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 			refreshWorkspaceDiskSkills,
 			mergedAgentCustomization,
 			onChangeMergedAgentCustomization,
+			botIntegrations,
+			setBotIntegrations,
 			editorSettings,
 			setEditorSettings,
 			mcpServers,
@@ -478,6 +485,8 @@ export default function App({ appSurface }: { appSurface?: LayoutMode } = {}) {
 			applyLoadedSettings,
 			teamSettings,
 			setTeamSettings,
+			botIntegrations,
+			setBotIntegrations,
 		]
 	);
 
@@ -585,6 +594,8 @@ function AppMainWorkspaceInner() {
 		applyLoadedSettings,
 		teamSettings,
 		setTeamSettings,
+		botIntegrations,
+		setBotIntegrations,
 	} = useAppShellSettings();
 
 	const {
@@ -2878,6 +2889,7 @@ function AppMainWorkspaceInner() {
 			},
 			editor: editorSettings,
 			team: teamSettings,
+			bots: { integrations: botIntegrations },
 			mcp: { servers: mcpServers },
 			ui: {
 				colorMode,
@@ -2908,11 +2920,25 @@ function AppMainWorkspaceInner() {
 		locale,
 		mcpServers,
 		teamSettings,
+		botIntegrations,
 		colorMode,
 		appearanceSettings,
 		layoutMode,
 		layoutPinnedBySurface,
 	]);
+
+	const onChangeBotIntegrations = useCallback(
+		(next: BotIntegrationConfig[]) => {
+			setBotIntegrations(next);
+			if (!shell) {
+				return;
+			}
+			void shell.invoke('settings:set', {
+				bots: { integrations: next },
+			});
+		},
+		[shell, setBotIntegrations]
+	);
 
 	/** 离开设置页时写入磁盘（返回、点遮罩、Esc 等） */
 	const closeSettingsPage = useCallback(async () => {
@@ -5915,6 +5941,8 @@ function AppMainWorkspaceInner() {
 			onChangeAgentCustomization: onChangeMergedAgentCustomization,
 			teamSettings,
 			onChangeTeamSettings: setTeamSettings,
+			botIntegrations,
+			onChangeBotIntegrations,
 			editorSettings,
 			onChangeEditorSettings: setEditorSettings,
 			onPersistLanguage: (loc) => void onPersistLanguage(loc),
@@ -5947,6 +5975,10 @@ function AppMainWorkspaceInner() {
 			onPickDefaultModel,
 			mergedAgentCustomization,
 			onChangeMergedAgentCustomization,
+			teamSettings,
+			setTeamSettings,
+			botIntegrations,
+			setBotIntegrations,
 			editorSettings,
 			setEditorSettings,
 			onPersistLanguage,

@@ -417,6 +417,18 @@ async function executeBrowserTool(call: ToolCall, execCtx: ToolExecutionContext)
 				isError: false,
 			};
 		}
+		case 'close_sidebar': {
+			const sent = dispatch({
+				commandId: makeBrowserCommandId(),
+				type: 'closeSidebar',
+			});
+			return {
+				toolCallId: call.id,
+				name: call.name,
+				content: `Browser command "${action}" dispatched.${browserControlDeliveryNote(sent, 'command-only')}`.trim(),
+				isError: false,
+			};
+		}
 		case 'reload':
 		case 'stop':
 		case 'go_back':
@@ -527,7 +539,7 @@ async function executeBrowserTool(call: ToolCall, execCtx: ToolExecutionContext)
 				toolCallId: call.id,
 				name: call.name,
 				content:
-					'Unknown Browser action. Supported actions: get_config, get_state, navigate, read_page, screenshot_page, reload, stop, go_back, go_forward, close_tab, set_config, reset_config.',
+					'Unknown Browser action. Supported actions: get_config, get_state, navigate, read_page, screenshot_page, close_sidebar, reload, stop, go_back, go_forward, close_tab, set_config, reset_config.',
 				isError: true,
 			};
 	}
@@ -660,6 +672,10 @@ export type ToolExecutionContext = {
 	signal?: AbortSignal;
 	/** Team 子循环：随 ask_plan_question 一并下发，供聊天区挂到对应角色 */
 	teamToolRoleScope?: TeamPlanQuestionRoleScope;
+	customToolHandlers?: Record<
+		string,
+		(call: ToolCall, hooks: ToolExecutionHooks, execCtx: ToolExecutionContext) => Promise<ToolResult> | ToolResult
+	>;
 };
 
 function throwIfToolAbortRequested(signal: AbortSignal | undefined, toolName: string, phase: string): void {
@@ -676,6 +692,10 @@ export async function executeTool(
 ): Promise<ToolResult> {
 	try {
 		throwIfToolAbortRequested(execCtx.signal, call.name, 'executeTool:start');
+		const customHandler = execCtx.customToolHandlers?.[call.name];
+		if (customHandler) {
+			return await customHandler(call, hooks, execCtx);
+		}
 		switch (call.name) {
 			case 'Read':
 				return executeReadFile(call, execCtx);

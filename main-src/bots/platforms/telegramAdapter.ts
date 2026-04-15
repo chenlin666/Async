@@ -1,0 +1,201 @@
+import { session, type Session } from 'electron';
+import type { BotIntegrationConfig } from '../../botSettingsTypes.js';
+import type { BotPlatformAdapter, PlatformMessageHandler } from './common.js';
+import { electronProxyRulesFromUrl, resolveIntegrationProxyUrl, splitPlainText } from './common.js';
+
+type TelegramUpdate = {
+	update_id: number;
+	message?: TelegramMessage;
+};
+
+type TelegramMessage = {
+	message_id: number;
+	message_thread_id?: number;
+	text?: string;
+	chat: { id: number; type: string };
+	from?: { id: number; is_bot?: boolean; first_name?: string; username?: string };
+};
+
+export class TelegramBotAdapter implements BotPlatformAdapter {
+	private abortController: AbortController | null = null;
+	private offset = 0;
+	private botUsername = '';
+	private stopRequested = false;
+	private readonly sessionPartition: string;
+	private electronSession: Session | null = null;
+
+	constructor(private readonly integration: BotIntegrationConfig) {
+		this.sessionPartition = `async-bot-telegram-${integration.id}`;
+	}
+
+	private get token(): string {
+		return this.integration.telegram?.botToken?.trim() ?? '';
+	}
+
+	private async getElectronSession(): Promise<Session> {
+		if (this.electronSession) {
+			return this.electronSession;
+		}
+		const ses = session.fromPartition(this.sessionPartition);
+		const proxyUrl = resolveIntegrationProxyUrl(this.integration);
+		if (proxyUrl) {
+			await ses.setProxy({
+				mode: 'fixed_servers',
+				proxyRules: electronProxyRulesFromUrl(proxyUrl),
+			});
+		} else {
+			await ses.setProxy({ mode: 'direct' });
+		}
+		try {
+			await ses.closeAllConnections();
+		} catch {
+			/* ignore */
+		}
+		this.electronSession = ses;
+		return ses;
+	}
+
+	private async api<T>(method: string, body?: Record<string, unknown>): Promise<T> {
+		const ses = await this.getElectronSession();
+		const response = await ses.fetch(`https://api.telegram.org/bot${this.token}/${method}`, {
+			method: body ? 'POST' : 'GET',
+			headers: body ? { 'content-type': 'application/json' } : undefined,
+			body: body ? JSON.stringify(body) : undefined,
+			signal: this.abortController?.signal,
+		});
+		if (!response.ok) {
+			throw new Error(`Telegram API ${method} failed: ${response.status}`);
+		}
+		const data = (await response.json()) as { ok?: boolean; result?: T; description?: string };
+		if (!data.ok) {
+			throw new Error(data.description || `Telegram API ${method} failed`);
+		}
+		return data.result as T;
+	}
+
+	async start(onMessage: PlatformMessageHandler): Promise<void> {
+		if (!this.token) {
+			return;
+		}
+		this.stopRequested = false;
+		const controller = new AbortController();
+		this.abortController = controller;
+		const me = await this.api<{ username?: string }>('getMe');
+		this.botUsername = String(me.username ?? '').trim();
+
+		void (async () => {
+			while (!controller.signal.aborted) {
+				try {
+					const ses = await this.getElectronSession();
+					const response = await ses.fetch(`https://api.telegram.org/bot${this.token}/getUpdates`, {
+						method: 'POST',
+						headers: { 'content-type': 'application/json' },
+						body: JSON.stringify({
+							timeout: 30,
+							offset: this.offset,
+							allowed_updates: ['message'],
+						}),
+						signal: controller.signal,
+					});
+					if (!response.ok) {
+						throw new Error(`Telegram API getUpdates failed: ${response.status}`);
+					}
+					const updates = (await response.json()) as { ok?: boolean; result?: TelegramUpdate[]; description?: string };
+					if (!updates.ok) {
+						throw new Error(updates.description || 'Telegram API getUpdates failed');
+					}
+					for (const update of updates.result ?? []) {
+						this.offset = Math.max(this.offset, update.update_id + 1);
+						const message = update.message;
+						if (!message?.text || message.from?.is_bot) {
+							continue;
+						}
+						const chatId = String(message.chat.id);
+						const senderId = message.from?.id != null ? String(message.from.id) : '';
+						if (!this.isAllowedUser(senderId)) {
+							continue;
+						}
+						if (message.chat.type !== 'private' && !this.isAllowedChat(chatId)) {
+							continue;
+						}
+						const cleaned = this.cleanIncomingText(message);
+						if (!cleaned) {
+							continue;
+						}
+						const threadKey = message.message_thread_id ? `${chatId}:${message.message_thread_id}` : chatId;
+						await onMessage({
+							conversationKey: threadKey,
+							text: cleaned,
+							senderId: senderId || undefined,
+							senderName: message.from?.username || message.from?.first_name,
+							reply: async (text) => {
+								for (const chunk of splitPlainText(text, 3500)) {
+									await this.api('sendMessage', {
+										chat_id: message.chat.id,
+										text: chunk,
+										reply_to_message_id: message.message_id,
+										...(message.message_thread_id ? { message_thread_id: message.message_thread_id } : {}),
+									});
+								}
+							},
+						});
+					}
+				} catch (error) {
+					if (controller.signal.aborted || this.stopRequested) {
+						break;
+					}
+					console.warn('[bots][telegram]', error instanceof Error ? error.message : error);
+					await new Promise((resolve) => setTimeout(resolve, 3000));
+				}
+			}
+		})();
+	}
+
+	private isAllowedChat(chatId: string): boolean {
+		const allowed = this.integration.allowedReplyChatIds?.length
+			? this.integration.allowedReplyChatIds
+			: (this.integration.telegram?.allowedChatIds ?? []);
+		return allowed.length === 0 || allowed.includes(chatId);
+	}
+
+	private isAllowedUser(userId: string): boolean {
+		const allowed = this.integration.allowedReplyUserIds ?? [];
+		return allowed.length === 0 || allowed.includes(userId);
+	}
+
+	private cleanIncomingText(message: TelegramMessage): string {
+		const raw = String(message.text ?? '').trim();
+		if (!raw) {
+			return '';
+		}
+		if (message.chat.type === 'private') {
+			return raw;
+		}
+		if (this.integration.telegram?.requireMentionInGroups === false) {
+			return raw;
+		}
+		if (!this.botUsername) {
+			return '';
+		}
+		const mention = `@${this.botUsername.toLowerCase()}`;
+		const lowered = raw.toLowerCase();
+		if (!lowered.includes(mention)) {
+			return '';
+		}
+		return raw.replace(new RegExp(`@${this.botUsername}\\b`, 'ig'), '').trim();
+	}
+
+	async stop(): Promise<void> {
+		this.stopRequested = true;
+		this.abortController?.abort();
+		this.abortController = null;
+		if (this.electronSession) {
+			try {
+				await this.electronSession.closeAllConnections();
+			} catch {
+				/* ignore */
+			}
+		}
+		this.electronSession = null;
+	}
+}

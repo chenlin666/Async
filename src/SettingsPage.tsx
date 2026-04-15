@@ -8,6 +8,7 @@ import {
 } from './modelCatalog';
 import { LLM_PROVIDER_OPTIONS, type ModelRequestParadigm } from './llmProvider';
 import type { AgentCustomization, TeamSettings } from './agentSettingsTypes';
+import type { BotIntegrationConfig } from './botSettingsTypes';
 import type { AppAppearanceSettings } from './appearanceSettings';
 import type { EditorSettings } from './EditorSettingsPanel';
 import type { AppColorMode, ThemeTransitionOrigin } from './colorMode';
@@ -26,6 +27,7 @@ const SettingsAppearancePanel = lazy(() => import('./SettingsAppearancePanel').t
 const SettingsUsageStatsPanel = lazy(() => import('./SettingsUsageStatsPanel').then((m) => ({ default: m.SettingsUsageStatsPanel })));
 const SettingsAutoUpdatePanel = lazy(() => import('./SettingsAutoUpdatePanel').then((m) => ({ default: m.SettingsAutoUpdatePanel })));
 const SettingsTeamPanel = lazy(() => import('./SettingsTeamPanel').then((m) => ({ default: m.SettingsTeamPanel })));
+const SettingsBotsPanel = lazy(() => import('./SettingsBotsPanel').then((m) => ({ default: m.SettingsBotsPanel })));
 
 export type SettingsNavId =
 	| 'general'
@@ -33,6 +35,7 @@ export type SettingsNavId =
 	| 'editor'
 	| 'plan'
 	| 'team'
+	| 'bots'
 	| 'agents'
 	| 'tab'
 	| 'models'
@@ -58,6 +61,7 @@ function navItemsForT(t: (key: string) => string): NavItem[] {
 		{ id: 'editor', label: t('settings.nav.editor') },
 		{ id: 'models', label: t('settings.nav.models'), badge: 1 },
 		{ id: 'agents', label: t('settings.nav.agents') },
+		{ id: 'bots', label: t('settings.nav.bots') },
 		{ id: 'rules', label: t('settings.nav.rules') },
 		{ id: 'indexing', label: t('settings.nav.indexing') },
 		{ id: 'autoUpdate', label: t('settings.nav.autoUpdate') },
@@ -269,6 +273,8 @@ function navIcon(id: SettingsNavId) {
 			return <IconEditor />;
 		case 'agents':
 			return <IconBotNav />;
+		case 'bots':
+			return <IconBotNav />;
 		case 'models':
 			return <IconChip />;
 		case 'rules':
@@ -338,6 +344,8 @@ type Props = {
 	onChangeAgentCustomization: (v: AgentCustomization) => void;
 	teamSettings: TeamSettings;
 	onChangeTeamSettings: (v: TeamSettings) => void;
+	botIntegrations: BotIntegrationConfig[];
+	onChangeBotIntegrations: (v: BotIntegrationConfig[]) => void;
 	/** 打开 Skill Creator：新建对话并发送引导消息 */
 	onOpenSkillCreator?: () => void | Promise<void>;
 	/** 在编辑器中打开工作区内的 SKILL.md（设置里磁盘技能卡片） */
@@ -381,6 +389,8 @@ export function SettingsPage({
 	onChangeAgentCustomization,
 	teamSettings,
 	onChangeTeamSettings,
+	botIntegrations,
+	onChangeBotIntegrations,
 	onOpenSkillCreator,
 	onOpenWorkspaceSkillFile,
 	onDeleteWorkspaceSkillDisk,
@@ -632,9 +642,11 @@ export function SettingsPage({
 								{nav === 'autoUpdate' ? t('settings.title.autoUpdate') : null}
 								{nav === 'plan' ? t('settings.title.usage') : null}
 								{nav === 'team' ? t('settings.title.team') : null}
+								{nav === 'bots' ? t('settings.title.bots') : null}
 								{nav !== 'general' &&
 								nav !== 'appearance' &&
 								nav !== 'agents' &&
+								nav !== 'bots' &&
 								nav !== 'models' &&
 								nav !== 'rules' &&
 								nav !== 'editor' &&
@@ -698,6 +710,17 @@ export function SettingsPage({
 						{nav === 'agents' ? (
 							<Suspense fallback={<SettingsPanelSkeleton />}>
 								<SettingsAgentBehaviorPanel value={agentCustomization} onChange={onChangeAgentCustomization} />
+							</Suspense>
+						) : null}
+
+						{nav === 'bots' ? (
+							<Suspense fallback={<SettingsPanelSkeleton />}>
+								<SettingsBotsPanel
+									value={botIntegrations}
+									onChange={onChangeBotIntegrations}
+									modelEntries={modelEntries}
+									shell={shell}
+								/>
 							</Suspense>
 						) : null}
 
@@ -985,6 +1008,8 @@ export function SettingsPage({
 
 						{nav !== 'general' &&
 						nav !== 'appearance' &&
+						nav !== 'agents' &&
+						nav !== 'bots' &&
 						nav !== 'models' &&
 						nav !== 'rules' &&
 						nav !== 'editor' &&
