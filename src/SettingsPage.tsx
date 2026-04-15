@@ -54,15 +54,14 @@ export type SettingsNavId =
 
 type NavItem = { id: SettingsNavId; label: string; badge?: number; soon?: boolean };
 
-function navItemsForT(t: (key: string) => string, locale: AppLocale): NavItem[] {
-	const botLabel = locale === 'en' ? 'Bots' : '机器人';
+function navItemsForT(t: (key: string) => string): NavItem[] {
 	return [
 		{ id: 'general', label: t('settings.nav.general') },
 		{ id: 'appearance', label: t('settings.nav.appearance') },
 		{ id: 'editor', label: t('settings.nav.editor') },
 		{ id: 'models', label: t('settings.nav.models'), badge: 1 },
 		{ id: 'agents', label: t('settings.nav.agents') },
-		{ id: 'bots', label: botLabel },
+		{ id: 'bots', label: t('settings.nav.bots') },
 		{ id: 'rules', label: t('settings.nav.rules') },
 		{ id: 'indexing', label: t('settings.nav.indexing') },
 		{ id: 'autoUpdate', label: t('settings.nav.autoUpdate') },
@@ -414,8 +413,7 @@ export function SettingsPage({
 	onChangeAppearanceSettings,
 }: Props) {
 	const { t, locale, setLocale } = useI18n();
-	const navItems = useMemo(() => navItemsForT(t, locale), [t, locale]);
-	const botUiLabel = locale === 'en' ? 'Bots' : '机器人';
+	const navItems = useMemo(() => navItemsForT(t), [t]);
 	const [nav, setNav] = useState<SettingsNavId>(initialNav);
 	const [search, setSearch] = useState('');
 	const deferredSearch = useDeferredValue(search);
@@ -644,7 +642,7 @@ export function SettingsPage({
 								{nav === 'autoUpdate' ? t('settings.title.autoUpdate') : null}
 								{nav === 'plan' ? t('settings.title.usage') : null}
 								{nav === 'team' ? t('settings.title.team') : null}
-								{nav === 'bots' ? botUiLabel : null}
+								{nav === 'bots' ? t('settings.title.bots') : null}
 								{nav !== 'general' &&
 								nav !== 'appearance' &&
 								nav !== 'agents' &&
