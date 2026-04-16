@@ -112,6 +112,7 @@ import { useAgentFileReview, type AgentFilePreviewState } from './hooks/useAgent
 import { useComposer } from './hooks/useComposer';
 import { useEditorTabs, type EditorInlineDiffState, clampEditorTerminalHeight } from './hooks/useEditorTabs';
 import { useTeamSession } from './hooks/useTeamSession';
+import { useAgentSession } from './hooks/useAgentSession';
 import { buildTeamWorkflowItems } from './teamWorkflowItems';
 import { AppWorkspaceWelcome } from './app/AppWorkspaceWelcome';
 import { AgentAgentCenterColumn } from './app/AgentAgentCenterColumn';
@@ -151,7 +152,7 @@ import {
 const EditorMainPanel = lazy(() => import('./EditorMainPanel').then((m) => ({ default: m.EditorMainPanel })));
 
 type LayoutMode = ShellLayoutMode;
-type AgentRightSidebarView = 'git' | 'plan' | 'file' | 'team' | 'browser';
+type AgentRightSidebarView = 'git' | 'plan' | 'file' | 'team' | 'browser' | 'agents';
 type EditorLeftSidebarView = 'explorer' | 'search' | 'git';
 import { useI18n, type AppLocale } from './i18n';
 import { hideBootSplash } from './bootSplash';
@@ -692,12 +693,19 @@ function AppMainWorkspaceInner() {
 		applyTeamPayload,
 		getTeamSession,
 		setSelectedTask,
+		clearTeamSession,
 		clearPendingQuestion: clearTeamPendingQuestion,
 		abortTeamSession,
 		startTeamSession,
 		restoreTeamSession,
 		markTeamPlanProposalDecided,
 	} = useTeamSession();
+	const {
+		restoreAgentSession,
+		clearAgentSession,
+		setSelectedAgent,
+		getAgentSession,
+	} = useAgentSession();
 	const {
 		agentReviewPendingByThread,
 		setAgentReviewPendingByThread,
@@ -833,6 +841,7 @@ function AppMainWorkspaceInner() {
 		setCurrentId,
 		loadMessages,
 		refreshThreads,
+		restoreAgentSession,
 		defaultModel,
 		composerMode,
 		teamSettings,
@@ -897,6 +906,7 @@ function AppMainWorkspaceInner() {
 		setPlanFileRelPath,
 		loadMessages,
 		refreshThreads,
+		restoreAgentSession,
 		applyTeamPayload,
 	});
 
@@ -1850,13 +1860,19 @@ function AppMainWorkspaceInner() {
 	 * 避免 messages 变化后 useEffect 级联触发额外 render 轮次。
 	 */
 	const onMessagesLoaded = useCallback(
-		(msgs: ChatMessage[], threadId: string, extra?: { teamSession?: unknown }) => {
+		(msgs: ChatMessage[], threadId: string, extra?: { teamSession?: unknown; agentSession?: unknown }) => {
 			restoreFileChangesState(threadId, msgs, threadId);
 			if (extra?.teamSession && typeof extra.teamSession === 'object') {
 				restoreTeamSession(threadId, extra.teamSession as import('./hooks/useTeamSession').TeamSessionSnapshot);
 			}
+			if (extra?.agentSession && typeof extra.agentSession === 'object') {
+				restoreAgentSession(threadId, extra.agentSession as import('./agentSessionTypes').AgentSessionSnapshot);
+				if (shell) {
+					void shell.invoke('agent:getSession', threadId);
+				}
+			}
 		},
-		[restoreFileChangesState, restoreTeamSession]
+		[restoreFileChangesState, restoreTeamSession, restoreAgentSession, shell]
 	);
 
 	useEffect(() => {
@@ -2497,6 +2513,8 @@ function AppMainWorkspaceInner() {
 			}
 			await shell.invoke('threads:delete', id, threadWorkspaceRoot ?? undefined);
 			clearPersistedAgentFileChanges(id);
+			clearTeamSession(id);
+			clearAgentSession(id);
 			planQuestionDismissedByThreadRef.current.delete(id);
 			await refreshThreads();
 		},
@@ -2507,6 +2525,8 @@ function AppMainWorkspaceInner() {
 			awaitingReply,
 			refreshThreads,
 			workspace,
+			clearTeamSession,
+			clearAgentSession,
 			clearStreamingToolPreviewNow,
 			resetLiveAgentBlocks,
 		]
@@ -3737,6 +3757,7 @@ function AppMainWorkspaceInner() {
 	const showPlanFileEditorChrome =
 		hasConversation && !!currentId && isPlanMdPath(filePath.trim());
 	const teamSession = useMemo(() => getTeamSession(currentId), [getTeamSession, currentId]);
+	const agentSession = useMemo(() => getAgentSession(currentId), [getAgentSession, currentId]);
 	const activePlanQuestion = useMemo(
 		() =>
 			resendFromUserIndex !== null
@@ -4976,6 +4997,127 @@ function AppMainWorkspaceInner() {
 		[currentId, markTeamPlanProposalDecided, shell]
 	);
 
+	const onSelectAgentSession = useCallback(
+		(agentId: string | null) => {
+			if (!currentId) {
+				return;
+			}
+			setSelectedAgent(currentId, agentId);
+			setAgentRightSidebarView('agents');
+			if (layoutMode === 'agent') {
+				setAgentRightSidebarOpen(true);
+			}
+		},
+		[currentId, setSelectedAgent, layoutMode]
+	);
+
+	const onSendAgentInput = useCallback(
+		async (agentId: string, message: string, interrupt: boolean) => {
+			if (!currentId || !shell) {
+				return;
+			}
+			const result = (await shell.invoke('agent:sendInput', {
+				threadId: currentId,
+				agentId,
+				message,
+				interrupt,
+			})) as { ok?: boolean; error?: string };
+			if (!result?.ok) {
+				showTransientToast(false, result?.error || t('app.chatSendFailed'));
+				return;
+			}
+			setSelectedAgent(currentId, agentId);
+			showTransientToast(true, t('agent.session.sentToast'));
+		},
+		[currentId, shell, showTransientToast, t, setSelectedAgent]
+	);
+
+	const onWaitAgent = useCallback(
+		async (agentId: string) => {
+			if (!currentId || !shell) {
+				return;
+			}
+			const result = (await shell.invoke('agent:wait', {
+				threadId: currentId,
+				agentIds: [agentId],
+				timeoutMs: 30000,
+			})) as { ok?: boolean; timedOut?: boolean; statuses?: Record<string, { status: string }> };
+			if (!result?.ok) {
+				showTransientToast(false, t('agent.session.waitFailed'));
+				return;
+			}
+			const status = result.statuses?.[agentId]?.status ?? 'running';
+			showTransientToast(
+				true,
+				result.timedOut ? t('agent.session.waitTimedOut') : t('agent.session.waitDone', { status })
+			);
+		},
+		[currentId, shell, showTransientToast, t]
+	);
+
+	const onResumeAgent = useCallback(
+		async (agentId: string) => {
+			if (!currentId || !shell) {
+				return;
+			}
+			const result = (await shell.invoke('agent:resume', { threadId: currentId, agentId })) as {
+				ok?: boolean;
+				error?: string;
+			};
+			if (!result?.ok) {
+				showTransientToast(false, result?.error || t('agent.session.resumeFailed'));
+				return;
+			}
+			showTransientToast(true, t('agent.session.resumeDone'));
+		},
+		[currentId, shell, showTransientToast, t]
+	);
+
+	const onCloseAgent = useCallback(
+		async (agentId: string) => {
+			if (!currentId || !shell) {
+				return;
+			}
+			const result = (await shell.invoke('agent:close', { threadId: currentId, agentId })) as {
+				ok?: boolean;
+				error?: string;
+			};
+			if (!result?.ok) {
+				showTransientToast(false, result?.error || t('agent.session.closeFailed'));
+				return;
+			}
+			showTransientToast(true, t('agent.session.closeDone'));
+		},
+		[currentId, shell, showTransientToast, t]
+	);
+
+	const onOpenAgentTranscript = useCallback(
+		(absPath: string) => {
+			if (!shell || !absPath.trim()) {
+				return;
+			}
+			void shell.invoke('shell:openDefault', absPath.trim());
+		},
+		[shell]
+	);
+
+	const onSubAgentToastClick = useCallback(
+		async (threadId: string, agentId: string) => {
+			if (!shell) {
+				return;
+			}
+			if (threadId !== currentIdRef.current) {
+				await shell.invoke('threads:select', threadId);
+				setCurrentId(threadId);
+				await loadMessages(threadId, onMessagesLoaded);
+			}
+			setSelectedAgent(threadId, agentId);
+			setAgentRightSidebarView('agents');
+			setAgentRightSidebarOpen(true);
+		},
+		[shell, loadMessages, onMessagesLoaded, setSelectedAgent]
+	);
+
 	useEffect(() => {
 		const onResize = () => {
 			setRailWidths((prev) => {
@@ -5624,6 +5766,14 @@ function AppMainWorkspaceInner() {
 		onOpenTeamAgentFile: onAgentConversationOpenFile,
 		revertedPaths: revertedFiles,
 		revertedChangeKeys,
+		agentSession,
+		currentThreadId: currentId,
+		onSelectAgentSession,
+		onSendAgentInput,
+		onWaitAgent,
+		onResumeAgent,
+		onCloseAgent,
+		onOpenAgentTranscript,
 	});
 
 	const editorMainPanelProps = useEditorMainPanelProps({
@@ -6161,6 +6311,7 @@ function AppMainWorkspaceInner() {
 				saveToastKey={saveToastKey}
 				subAgentBgToast={subAgentBgToast}
 				composerAttachErr={composerAttachErr}
+				onSubAgentToastClick={onSubAgentToastClick}
 			/>
 
 

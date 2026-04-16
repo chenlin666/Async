@@ -370,7 +370,7 @@ export const AGENT_TOOLS: AgentToolDef[] = [
 	{
 		name: 'Agent',
 		description:
-			'Spawn a focused sub-agent. Use for scoped, autonomous work: deep codebase exploration, refactors isolated to a module, or keeping your main context clean. The sub-agent runs a full tool loop and returns its final text. With background fork enabled, omitting subagent_type (or setting run_in_background) lets work continue asynchronously while the tool returns immediately. Set subagent_type to "explore" for read-only exploration; use a custom name from user subagent settings for tailored instructions. Nested Agent calls are blocked. Maximum nesting depth is 1.',
+			'Spawn a focused sub-agent. Use for scoped, autonomous work: deep codebase exploration, refactors isolated to a module, or keeping your main context clean. The sub-agent runs a full tool loop and returns its final text. With background fork enabled, omitting subagent_type (or setting run_in_background) lets work continue asynchronously while the tool returns immediately. Set subagent_type to "explore" for read-only exploration; use a custom name from user subagent settings for tailored instructions. Set fork_context to true to copy the current visible thread history into the child agent. Nested Agent calls are blocked. Maximum nesting depth is 1.',
 		parameters: {
 			type: 'object',
 			properties: {
@@ -392,8 +392,86 @@ export const AGENT_TOOLS: AgentToolDef[] = [
 					description:
 						'If true, the sub-agent runs in the background: the tool returns immediately with a short notice, nested activity still streams, and the user gets a completion toast when it finishes.',
 				},
+				fork_context: {
+					type: 'boolean',
+					description:
+						'If true, copy the current visible conversation history into the spawned agent before adding the new task message.',
+				},
 			},
 			required: ['prompt'],
+		},
+	},
+	{
+		name: 'send_input',
+		description:
+			'Send a follow-up message to an existing sub-agent. Use interrupt=true to stop its current run and handle the new message immediately.',
+		parameters: {
+			type: 'object',
+			properties: {
+				target: {
+					type: 'string',
+					description: 'Agent id returned or shown for the target sub-agent.',
+				},
+				message: {
+					type: 'string',
+					description: 'Plain text message to deliver to the target sub-agent.',
+				},
+				interrupt: {
+					type: 'boolean',
+					description: 'If true, abort the current run and prioritize this new message.',
+				},
+			},
+			required: ['target', 'message'],
+		},
+	},
+	{
+		name: 'wait_agent',
+		description:
+			'Wait for one or more sub-agents to finish. Returns the final statuses that completed before the timeout.',
+		parameters: {
+			type: 'object',
+			properties: {
+				targets: {
+					type: 'array',
+					items: { type: 'string' },
+					description: 'One or more agent ids to wait for.',
+				},
+				timeout_ms: {
+					type: 'number',
+					description: 'Optional timeout in milliseconds. Defaults to 30000.',
+				},
+			},
+			required: ['targets'],
+		},
+	},
+	{
+		name: 'resume_agent',
+		description:
+			'Resume a paused or previously closed sub-agent when it has stored context and can continue.',
+		parameters: {
+			type: 'object',
+			properties: {
+				id: {
+					type: 'string',
+					description: 'Agent id to resume.',
+				},
+			},
+			required: ['id'],
+		},
+	},
+	{
+		name: 'close_agent',
+		description:
+			'Close a running or resumable sub-agent and any of its descendants.',
+		parameters: {
+			type: 'object',
+			properties: {
+				target: {
+					type: 'string',
+					description: 'Agent id to close.',
+				},
+			},
+			required: ['target'],
 		},
 	},
 	{

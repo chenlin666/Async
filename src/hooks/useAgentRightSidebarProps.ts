@@ -79,6 +79,14 @@ export function useAgentRightSidebarProps(p: UseAgentRightSidebarPropsParams): A
 			rest.onOpenTeamAgentFile,
 			rest.revertedPaths,
 			rest.revertedChangeKeys,
+			rest.agentSession,
+			rest.currentThreadId,
+			rest.onSelectAgentSession,
+			rest.onSendAgentInput,
+			rest.onWaitAgent,
+			rest.onResumeAgent,
+			rest.onCloseAgent,
+			rest.onOpenAgentTranscript,
 		]
 	);
 }

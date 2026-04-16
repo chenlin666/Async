@@ -43,8 +43,10 @@ import { useAppShellChrome, useAppShellGit, useAppShellSettings } from './app/ap
 import type { TeamSessionState } from './hooks/useTeamSession';
 import { TeamRoleWorkflowPanel } from './TeamRoleWorkflowPanel';
 import { buildTeamWorkflowItems } from './teamWorkflowItems';
+import { AgentSessionPanel } from './AgentSessionPanel';
+import type { AgentSessionState } from './hooks/useAgentSession';
 
-type AgentRightSidebarView = 'git' | 'plan' | 'file' | 'team' | 'browser';
+type AgentRightSidebarView = 'git' | 'plan' | 'file' | 'team' | 'browser' | 'agents';
 
 const BROWSER_HOME_URL = 'https://www.bing.com/';
 
@@ -557,6 +559,14 @@ export type AgentRightSidebarProps = {
 	) => void;
 	revertedPaths: ReadonlySet<string>;
 	revertedChangeKeys: ReadonlySet<string>;
+	agentSession: AgentSessionState | null;
+	currentThreadId: string | null;
+	onSelectAgentSession: (agentId: string | null) => void;
+	onSendAgentInput: (agentId: string, message: string, interrupt: boolean) => Promise<void>;
+	onWaitAgent: (agentId: string) => Promise<void>;
+	onResumeAgent: (agentId: string) => Promise<void>;
+	onCloseAgent: (agentId: string) => Promise<void>;
+	onOpenAgentTranscript: (absPath: string) => void;
 };
 
 type CommitAction = 'commit' | 'commit-push' | 'commit-pr';
@@ -2352,6 +2362,14 @@ export const AgentRightSidebar = memo(function AgentRightSidebar({
 	onOpenTeamAgentFile,
 	revertedPaths,
 	revertedChangeKeys,
+	agentSession,
+	currentThreadId,
+	onSelectAgentSession,
+	onSendAgentInput,
+	onWaitAgent,
+	onResumeAgent,
+	onCloseAgent,
+	onOpenAgentTranscript,
 }: AgentRightSidebarProps) {
 	const { t, shell } = useAppShellChrome();
 	const [pendingBrowserCommands, setPendingBrowserCommands] = useState<BrowserControlPayload[]>([]);
@@ -2433,6 +2451,21 @@ export const AgentRightSidebar = memo(function AgentRightSidebar({
 				openView={openView}
 				pendingCommand={pendingBrowserCommands[0] ?? null}
 				onCommandHandled={handleBrowserCommandHandled}
+			/>
+		);
+	} else if (view === 'agents') {
+		content = (
+			<AgentSessionPanel
+				t={t}
+				session={agentSession}
+				threadId={currentThreadId}
+				onClose={closeSidebar}
+				onSelectAgent={onSelectAgentSession}
+				onSendInput={onSendAgentInput}
+				onWaitAgent={onWaitAgent}
+				onResumeAgent={onResumeAgent}
+				onCloseAgent={onCloseAgent}
+				onOpenTranscript={onOpenAgentTranscript}
 			/>
 		);
 	} else if (view === 'team') {

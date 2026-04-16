@@ -76,6 +76,7 @@ import {
 	markPlanFileExecuted,
 	incrementThreadAgentToolCallCount,
 	saveTeamSession,
+	getAgentSession,
 	type ChatMessage,
 } from '../threadStore.js';
 import { compressForSend } from '../agent/conversationCompress.js';
@@ -150,6 +151,15 @@ import {
 	disposeTsLspSessionForWebContents,
 } from '../lspSessionsByWebContents.js';
 import { setDelegateContext, clearDelegateContext } from '../agent/toolExecutor.js';
+import {
+	attachManagedAgentEmitter,
+	closeManagedAgent,
+	getManagedAgentSession,
+	getManagedAgentTranscriptPath,
+	resumeManagedAgent,
+	sendInputToManagedAgent,
+	waitForManagedAgents,
+} from '../agent/managedSubagents.js';
 import {
 	searchWorkspaceSymbols,
 	ensureSymbolIndexLoaded,
@@ -307,6 +317,37 @@ const toolApprovalWaiters = new Map<string, (approved: boolean) => void>();
 const mistakeLimitWaiters = new Map<string, (d: MistakeLimitDecision) => void>();
 function activeUsageStatsDir(): string | null {
 	return resolveUsageStatsDataDir(getSettings());
+}
+
+function resolveManagedAgentLoopOptions(
+	settings: ReturnType<typeof getSettings>,
+	workspaceRoot: string | null,
+	workspaceLspManager: ReturnType<typeof getWorkspaceLspManagerForWebContents>,
+	hostWebContentsId: number | null
+): Omit<import('../agent/agentLoop.js').AgentLoopOptions, 'signal'> | null {
+	const modelSelection = String(settings.defaultModel ?? '').trim();
+	if (!modelSelection) {
+		return null;
+	}
+	const resolved = resolveModelRequest(settings, modelSelection);
+	if (!resolved.ok) {
+		return null;
+	}
+	const thinkingLevel = resolveThinkingLevelForSelection(settings, modelSelection);
+	return {
+		modelSelection,
+		requestModelId: resolved.requestModelId,
+		paradigm: resolved.paradigm,
+		requestApiKey: resolved.apiKey,
+		requestBaseURL: resolved.baseURL,
+		requestProxyUrl: resolved.proxyUrl,
+		maxOutputTokens: resolved.maxOutputTokens,
+		composerMode: 'agent',
+		thinkingLevel,
+		workspaceRoot,
+		workspaceLspManager,
+		hostWebContentsId,
+	};
 }
 
 function readWorkspaceTextFileIfExists(relPath: string, workspaceRoot: string | null): string | null {
@@ -738,14 +779,17 @@ function runChatStream(
 					ac.signal,
 					(evt) => send({ threadId, ...evt }),
 					threadId,
+					(evt) => send(evt),
 					(payload) =>
 						send({
 							threadId,
 							type: 'sub_agent_background_done',
 							parentToolCallId: payload.parentToolCallId,
+							agentId: payload.agentId,
 							result: payload.result,
 							success: payload.success,
-						})
+						}),
+					messages
 				);
 				if (mode === 'plan') {
 					setPlanQuestionRuntime({
@@ -1738,6 +1782,7 @@ export function registerIpc(): void {
 			ok: true as const,
 			messages: t.messages.filter((m) => m.role !== 'system'),
 			teamSession: t.teamSession ?? null,
+			agentSession: getManagedAgentSession(threadId) ?? getAgentSession(threadId),
 		};
 	});
 
@@ -2202,6 +2247,110 @@ export function registerIpc(): void {
 		return { ok: true };
 	});
 
+	ipcMain.handle('agent:getSession', (event, threadId: string) => {
+		const session =
+			getManagedAgentSession(String(threadId ?? '').trim()) ??
+			getAgentSession(String(threadId ?? '').trim()) ??
+			null;
+		if (session) {
+			attachManagedAgentEmitter(String(threadId ?? '').trim(), (evt) => {
+				event.sender.send('async-shell:chat', evt);
+			});
+		}
+		return { ok: true as const, session };
+	});
+
+	ipcMain.handle('agent:sendInput', async (event, payload: { threadId?: string; agentId?: string; message?: string; interrupt?: boolean }) => {
+		const threadId = String(payload?.threadId ?? '').trim();
+		const agentId = String(payload?.agentId ?? '').trim();
+		const message = String(payload?.message ?? '').trim();
+		if (!threadId || !agentId || !message) {
+			return { ok: false as const, error: 'missing agent input payload' };
+		}
+		const workspaceRoot = senderWorkspaceRoot(event);
+		const settings = getSettings();
+		const options = resolveManagedAgentLoopOptions(
+			settings,
+			workspaceRoot,
+			getWorkspaceLspManagerForWebContents(event.sender),
+			event.sender.id
+		);
+		if (!options) {
+			return { ok: false as const, error: 'no-model' };
+		}
+		const send = (evt: import('../agent/managedSubagents.js').ManagedAgentUiEvent) =>
+			event.sender.send('async-shell:chat', evt);
+		const result = await sendInputToManagedAgent({
+			threadId,
+			agentId,
+			message,
+			interrupt: payload?.interrupt === true,
+			settings,
+			options,
+			emit: send,
+		});
+		return result.ok ? { ok: true as const } : { ok: false as const, error: result.error };
+	});
+
+	ipcMain.handle('agent:wait', async (_event, payload: { threadId?: string; agentIds?: string[]; timeoutMs?: number }) => {
+		const threadId = String(payload?.threadId ?? '').trim();
+		const agentIds = Array.isArray(payload?.agentIds)
+			? payload.agentIds.map((value) => String(value ?? '').trim()).filter(Boolean)
+			: [];
+		if (!threadId || agentIds.length === 0) {
+			return { ok: false as const, error: 'missing wait payload' };
+		}
+		const timeoutMsRaw = Number(payload?.timeoutMs ?? 30000);
+		const timeoutMs = Number.isFinite(timeoutMsRaw) && timeoutMsRaw > 0 ? timeoutMsRaw : 30000;
+		const statuses = await waitForManagedAgents(threadId, agentIds, timeoutMs);
+		return {
+			ok: true as const,
+			statuses,
+			timedOut: Object.keys(statuses).length < agentIds.length,
+		};
+	});
+
+	ipcMain.handle('agent:resume', async (event, payload: { threadId?: string; agentId?: string }) => {
+		const threadId = String(payload?.threadId ?? '').trim();
+		const agentId = String(payload?.agentId ?? '').trim();
+		if (!threadId || !agentId) {
+			return { ok: false as const, error: 'missing resume payload' };
+		}
+		const workspaceRoot = senderWorkspaceRoot(event);
+		const settings = getSettings();
+		const options = resolveManagedAgentLoopOptions(
+			settings,
+			workspaceRoot,
+			getWorkspaceLspManagerForWebContents(event.sender),
+			event.sender.id
+		);
+		if (!options) {
+			return { ok: false as const, error: 'no-model' };
+		}
+		const send = (evt: import('../agent/managedSubagents.js').ManagedAgentUiEvent) =>
+			event.sender.send('async-shell:chat', evt);
+		const result = await resumeManagedAgent({
+			threadId,
+			agentId,
+			settings,
+			options,
+			emit: send,
+		});
+		return result.ok ? { ok: true as const } : { ok: false as const, error: result.error };
+	});
+
+	ipcMain.handle('agent:close', (event, payload: { threadId?: string; agentId?: string }) => {
+		const threadId = String(payload?.threadId ?? '').trim();
+		const agentId = String(payload?.agentId ?? '').trim();
+		if (!threadId || !agentId) {
+			return { ok: false as const, error: 'missing close payload' };
+		}
+		const send = (evt: import('../agent/managedSubagents.js').ManagedAgentUiEvent) =>
+			event.sender.send('async-shell:chat', evt);
+		const result = closeManagedAgent({ threadId, agentId, emit: send });
+		return result.ok ? { ok: true as const } : { ok: false as const, error: result.error };
+	});
+
 	ipcMain.handle(
 		'agent:toolApprovalRespond',
 		(_e, payload: { approvalId: string; approved: boolean }) => {
@@ -2584,14 +2733,17 @@ ipcMain.handle(
 	ipcMain.handle('shell:openDefault', async (event, relPath: string) => {
 		try {
 			const root = senderWorkspaceRoot(event);
-			if (!root) {
-				return { ok: false as const, error: 'No workspace' };
-			}
 			const rel = String(relPath ?? '').trim();
 			if (!rel) {
 				return { ok: false as const, error: 'empty path' };
 			}
-			const full = resolveWorkspacePath(rel, root);
+			let full = rel;
+			if (!path.isAbsolute(full)) {
+				if (!root) {
+					return { ok: false as const, error: 'No workspace' };
+				}
+				full = resolveWorkspacePath(rel, root);
+			}
 			if (!fs.existsSync(full) || !fs.statSync(full).isFile()) {
 				return { ok: false as const, error: 'not a file' };
 			}

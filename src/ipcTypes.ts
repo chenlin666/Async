@@ -1,4 +1,5 @@
 import type { ComposerMode } from './ComposerPlusMenu';
+import type { AgentSessionSnapshot } from './agentSessionTypes';
 
 /** 与 main-src/llm/types.ts TurnTokenUsage 保持一致（渲染端独立定义，避免跨进程 import） */
 export type TurnTokenUsage = {
@@ -117,8 +118,14 @@ type ChatStreamPayloadCore =
 			threadId: string;
 			type: 'sub_agent_background_done';
 			parentToolCallId: string;
+			agentId: string;
 			result: string;
 			success: boolean;
+	  }
+	| {
+			threadId: string;
+			type: 'agent_session_sync';
+			session: AgentSessionSnapshot;
 	  }
 	| {
 			threadId: string;
