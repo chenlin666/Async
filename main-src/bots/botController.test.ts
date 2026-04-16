@@ -3,7 +3,7 @@ import { botAttachmentDedupeKey, filterUnsentBotReplyImages } from './botControl
 
 describe('botAttachmentDedupeKey', () => {
 	it('normalizes path separators and casing for duplicate detection', () => {
-		expect(botAttachmentDedupeKey('D:\\Temp\\Capture.PNG')).toBe(botAttachmentDedupeKey('d:/temp/capture.png'));c
+		expect(botAttachmentDedupeKey('D:\\Temp\\Capture.PNG')).toBe(botAttachmentDedupeKey('d:/temp/capture.png'));
 	});
 });
 
