@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, type RefObject } from 'react';
 import {
-	useAppShellChrome,
+	useAppShellChromeCore,
 	useAppShellGitActions,
 	useAppShellGitFiles,
 	useAppShellGitMeta,
@@ -30,7 +30,7 @@ type SearchResult = { rel: string; fileName: string; dir: string };
 
 /** 资源管理器 Git 刷新：仅订阅 Git Actions（稳定引用），fullStatus 大对象更新时不重渲。 */
 const EditorExplorerGitRefreshButton = memo(function EditorExplorerGitRefreshButton() {
-	const { t } = useAppShellChrome();
+	const { t } = useAppShellChromeCore();
 	const { refreshGit } = useAppShellGitActions();
 	return (
 		<button
@@ -53,7 +53,7 @@ const EditorGitTabButton = memo(function EditorGitTabButton({
 	isActive: boolean;
 	onActivate: () => void;
 }) {
-	const { t } = useAppShellChrome();
+	const { t } = useAppShellChromeCore();
 	const { refreshGit } = useAppShellGitActions();
 	return (
 		<button
@@ -86,7 +86,7 @@ const EditorLeftSidebarGitPane = memo(function EditorLeftSidebarGitPane({
 	onExplorerOpenFile: (rel: string) => void;
 	setWorkspacePickerOpen: (v: boolean) => void;
 }) {
-	const { t } = useAppShellChrome();
+	const { t } = useAppShellChromeCore();
 	const { workspace } = useAppShellWorkspace();
 	const { refreshGit } = useAppShellGitActions();
 	const { gitLines, gitStatusOk, diffLoading } = useAppShellGitMeta();

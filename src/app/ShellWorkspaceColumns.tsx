@@ -10,6 +10,7 @@ import {
 import { AgentLeftSidebar, type AgentLeftSidebarProps } from '../AgentLeftSidebar';
 import { AgentRightSidebar } from '../AgentRightSidebar';
 import { AgentChatPanel, type AgentChatPanelProps } from '../AgentChatPanel';
+import { DevProfiler } from '../devProfiler';
 import { EditorLeftSidebar } from '../EditorLeftSidebar';
 import {
 	IconCloseSmall,
@@ -334,7 +335,9 @@ export const ShellCenterRightGroup = memo(function ShellCenterRightGroup({
 								</div>
 							</div>
 						</div>
-						<AgentChatPanel layout="editor-rail" {...agentChatPanelProps} />
+						<DevProfiler id="AgentChatPanel[editor-rail]">
+							<AgentChatPanel layout="editor-rail" {...agentChatPanelProps} />
+						</DevProfiler>
 					</div>
 				</aside>
 			)}

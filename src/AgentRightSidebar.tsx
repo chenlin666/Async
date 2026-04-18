@@ -41,7 +41,7 @@ import {
 } from './gitAvailability';
 import type { AgentFilePreviewState } from './hooks/useAgentFileReview';
 import { AgentGitScmChangedCards } from './GitScmVirtualLists';
-import { useAppShellChrome, useAppShellGit, useAppShellSettings } from './app/appShellContexts';
+import { useAppShellChromeCore, useAppShellGit, useAppShellSettings } from './app/appShellContexts';
 import type { TeamSessionState } from './hooks/useTeamSession';
 import { TeamRoleWorkflowPanel } from './TeamRoleWorkflowPanel';
 import { buildTeamWorkflowItems } from './teamWorkflowItems';
@@ -582,7 +582,7 @@ const AgentRightSidebarPlanPanel = memo(function AgentRightSidebarPlanPanel({
 	onPlanAddTodoCancel: () => void;
 	onPlanTodoToggle: (id: string) => void;
 }) {
-	const { t } = useAppShellChrome();
+	const { t } = useAppShellChromeCore();
 	const { modelPickerItems } = useAppShellSettings();
 
 	return (
@@ -770,7 +770,7 @@ const AgentRightSidebarFilePanel = memo(function AgentRightSidebarFilePanel({
 	onRevertAgentFilePreviewHunk: (patch: string) => void;
 	agentFilePreviewBusyPatch: string | null;
 }) {
-	const { t } = useAppShellChrome();
+	const { t } = useAppShellChromeCore();
 	const agentFilePreviewTitle =
 		agentFilePreview?.relPath?.split('/').pop() || agentFilePreview?.relPath || t('app.filePreview');
 
@@ -1096,7 +1096,7 @@ const AgentRightSidebarBrowserPanel = memo(function AgentRightSidebarBrowserPane
 	onCommandHandled: (commandId: string) => void;
 	variant?: 'sidebar' | 'window';
 }) {
-	const { t, shell } = useAppShellChrome();
+	const { t, shell } = useAppShellChromeCore();
 	const webviewsRef = useRef<Map<string, AsyncShellWebviewElement>>(new Map());
 	const addressInputRef = useRef<HTMLInputElement | null>(null);
 	const defaultUserAgentRef = useRef('');
@@ -2322,7 +2322,7 @@ const AgentRightSidebarBrowserPanel = memo(function AgentRightSidebarBrowserPane
 });
 
 export const AgentBrowserWindowSurface = memo(function AgentBrowserWindowSurface() {
-	const { shell } = useAppShellChrome();
+	const { shell } = useAppShellChromeCore();
 	const [pendingBrowserCommands, setPendingBrowserCommands] = useState<BrowserControlPayload[]>([]);
 
 	const openBrowserSettingsInHost = useCallback(() => {
@@ -2411,7 +2411,7 @@ const AgentRightSidebarGitPanel = memo(function AgentRightSidebarGitPanel({
 	onCommitOnly: () => void;
 	onCommitAndPush: () => void;
 }) {
-	const { t } = useAppShellChrome();
+	const { t } = useAppShellChromeCore();
 	const {
 		gitBranch,
 		gitLines,
@@ -2606,7 +2606,7 @@ export const AgentRightSidebar = memo(function AgentRightSidebar({
 	onCloseAgent,
 	onOpenAgentTranscript,
 }: AgentRightSidebarProps) {
-	const { t, shell } = useAppShellChrome();
+	const { t, shell } = useAppShellChromeCore();
 	const [pendingBrowserCommands, setPendingBrowserCommands] = useState<BrowserControlPayload[]>([]);
 
 	useEffect(() => {
