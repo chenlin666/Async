@@ -28,6 +28,7 @@ import { windowsPowerShellUtf8Command } from '../winUtf8.js';
 import { setTodos, type TodoItem } from './todoStore.js';
 import { minimatch } from 'minimatch';
 import * as gitService from '../gitService.js';
+import type { AnthropicToolResultContent } from '../llm/anthropicBeta.js';
 import {
 	awaitBrowserCommandResult,
 	dispatchBrowserControlToHostId,
@@ -136,6 +137,14 @@ const GLOB_IGNORE_DIR_NAMES = new Set(['.git', 'node_modules', '.hg', '.svn', '.
 const MAX_SYMBOL_SEARCH_RESULTS = 80;
 const DEFAULT_GREP_HEAD_LIMIT = 250;
 const VCS_GREP_EXCLUDES = ['.git', '.svn', '.hg', '.bzr', '.jj', '.sl'] as const;
+const VIEW_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const VIEW_IMAGE_MEDIA_TYPE_BY_EXT = new Map<string, 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'>([
+	['.jpg', 'image/jpeg'],
+	['.jpeg', 'image/jpeg'],
+	['.png', 'image/png'],
+	['.gif', 'image/gif'],
+	['.webp', 'image/webp'],
+]);
 
 export type ToolWriteSnapshot = {
 	path: string;
@@ -989,6 +998,8 @@ export async function executeTool(
 		switch (call.name) {
 			case 'Read':
 				return executeReadFile(call, execCtx);
+			case 'view_image':
+				return executeViewImage(call, execCtx);
 			case 'Write':
 				return executeWriteToFile(call, hooks, execCtx);
 			case 'Edit':
@@ -1089,6 +1100,110 @@ function resolveAgentFilePath(raw: string, execCtx: ToolExecutionContext): { rel
 
 function readToolFileArg(call: ToolCall): string {
 	return String(call.arguments.file_path ?? call.arguments.path ?? '').trim();
+}
+
+function resolveViewImageMediaType(filePath: string): 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' | null {
+	return VIEW_IMAGE_MEDIA_TYPE_BY_EXT.get(path.extname(filePath).toLowerCase()) ?? null;
+}
+
+function executeViewImage(call: ToolCall, execCtx: ToolExecutionContext): ToolResult {
+	const rawPath = String(call.arguments.path ?? call.arguments.file_path ?? '').trim();
+	if (!rawPath) {
+		return { toolCallId: call.id, name: call.name, content: 'Error: path is required', isError: true };
+	}
+
+	const detailRaw = call.arguments.detail;
+	if (detailRaw != null && String(detailRaw).trim() !== '' && String(detailRaw).trim() !== 'original') {
+		return {
+			toolCallId: call.id,
+			name: call.name,
+			content: `Error: view_image.detail only supports "original"; omit it for default behavior, got "${String(detailRaw)}"`,
+			isError: true,
+		};
+	}
+
+	let resolved: { rel: string; full: string };
+	try {
+		resolved = resolveAgentFilePath(rawPath, execCtx);
+	} catch (error) {
+		return {
+			toolCallId: call.id,
+			name: call.name,
+			content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+			isError: true,
+		};
+	}
+
+	if (!fs.existsSync(resolved.full) || !fs.statSync(resolved.full).isFile()) {
+		return {
+			toolCallId: call.id,
+			name: call.name,
+			content: `Error: image not found or not a regular file: ${resolved.rel}`,
+			isError: true,
+		};
+	}
+
+	const mediaType = resolveViewImageMediaType(resolved.full);
+	if (!mediaType) {
+		return {
+			toolCallId: call.id,
+			name: call.name,
+			content: 'Error: view_image only supports PNG, JPG, JPEG, GIF, and WEBP files.',
+			isError: true,
+		};
+	}
+
+	const bytes = fs.readFileSync(resolved.full);
+	if (bytes.length === 0) {
+		return {
+			toolCallId: call.id,
+			name: call.name,
+			content: `Error: image file is empty: ${resolved.rel}`,
+			isError: true,
+		};
+	}
+	if (bytes.length > VIEW_IMAGE_MAX_BYTES) {
+		return {
+			toolCallId: call.id,
+			name: call.name,
+			content: `Error: image is too large for view_image (${bytes.length} bytes). Maximum supported size is ${VIEW_IMAGE_MAX_BYTES} bytes.`,
+			isError: true,
+		};
+	}
+
+	const structuredContent: AnthropicToolResultContent = [
+		{
+			type: 'text',
+			text: `Loaded local image ${resolved.rel}.`,
+		},
+		{
+			type: 'image',
+			source: {
+				type: 'base64',
+				media_type: mediaType,
+				data: bytes.toString('base64'),
+			},
+		},
+	];
+
+	return {
+		toolCallId: call.id,
+		name: call.name,
+		content: JSON.stringify(
+			{
+				path: resolved.full,
+				relPath: resolved.rel,
+				mediaType,
+				sizeBytes: bytes.length,
+				detail: detailRaw === 'original' ? 'original' : null,
+				note: 'Local image loaded for inspection. Prefer this tool over Browser for workspace image files.',
+			},
+			null,
+			2
+		),
+		structuredContent,
+		isError: false,
+	};
 }
 
 function executeReadFile(call: ToolCall, execCtx: ToolExecutionContext): ToolResult {

@@ -1914,19 +1914,14 @@ function AppMainWorkspaceInner() {
 			setComposerSegments((prev) => {
 				const next = [...prev];
 				const last = next[next.length - 1];
-				if (last?.kind === 'text' && last.text.length > 0 && !/\s$/.test(last.text)) {
-					next[next.length - 1] = { ...last, text: `${last.text} ` };
+				if (last?.kind === 'text' && last.text.length > 0 && !last.text.endsWith('\n')) {
+					next[next.length - 1] = { ...last, text: `${last.text}\n` };
 				} else if (last?.kind === 'file') {
-					next.push({ id: newSegmentId(), kind: 'text', text: ' ' });
+					next.push({ id: newSegmentId(), kind: 'text', text: '\n' });
 				}
 				for (let i = 0; i < normalized.length; i++) {
-					if (i > 0) {
-						next.push({ id: newSegmentId(), kind: 'text', text: ' ' });
-					}
 					next.push({ id: newSegmentId(), kind: 'file', path: normalized[i]! });
-				}
-				if (next[next.length - 1]?.kind !== 'text') {
-					next.push({ id: newSegmentId(), kind: 'text', text: '' });
+					next.push({ id: newSegmentId(), kind: 'text', text: '\n' });
 				}
 				return next;
 			});

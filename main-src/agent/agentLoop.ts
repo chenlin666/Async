@@ -93,6 +93,7 @@ const DEFAULT_MAX_CONSECUTIVE_MISTAKES = 5;
 /** 只读类工具：不向 UI 发送 tool_input_delta，避免参数 JSON 流式刷新；完成后由活动行渐入展示 */
 const READ_TOOLS_SKIP_INPUT_DELTA = new Set([
 	'Read',
+	'view_image',
 	'Glob',
 	'Grep',
 	'list_dir',
@@ -582,6 +583,52 @@ function synthesizeMissingAnthropicToolResults(
 
 type OAIMsg = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
+function anthropicImageDataUrlFromStructuredToolResult(content: ToolResult['structuredContent']): string | null {
+	if (!Array.isArray(content)) {
+		return null;
+	}
+	for (const block of content) {
+		if (
+			block &&
+			typeof block === 'object' &&
+			(block as { type?: unknown }).type === 'image'
+		) {
+			const source = (block as { source?: { type?: unknown; media_type?: unknown; data?: unknown } }).source;
+			if (
+				source?.type === 'base64' &&
+				typeof source.media_type === 'string' &&
+				typeof source.data === 'string' &&
+				source.data.length > 0
+			) {
+				return `data:${source.media_type};base64,${source.data}`;
+			}
+		}
+	}
+	return null;
+}
+
+function buildOpenAIViewImageFollowupMessage(results: ToolResult[]): OAIMsg | null {
+	const imageUrls = results
+		.map((result) => anthropicImageDataUrlFromStructuredToolResult(result.structuredContent))
+		.filter((value): value is string => typeof value === 'string' && value.length > 0);
+	if (imageUrls.length === 0) {
+		return null;
+	}
+	return {
+		role: 'user',
+		content: [
+			{
+				type: 'text',
+				text: '[Tool context] The previous view_image tool loaded local workspace image(s) for inspection. Use them as tool context, not as a new user request.',
+			},
+			...imageUrls.map((url) => ({
+				type: 'image_url' as const,
+				image_url: { url },
+			})),
+		],
+	};
+}
+
 function threadToOpenAI(
 	messages: ChatMessage[],
 	systemContent: string
@@ -836,7 +883,7 @@ async function runOpenAILoop(
 
 	async function flushOpenAIToolsInOrder(
 		turnToolCalls: TurnTc[]
-	): Promise<OpenAI.Chat.ChatCompletionToolMessageParam[]> {
+	): Promise<OAIMsg[]> {
 		const withNames = turnToolCalls.filter((tc) => tc.name);
 		const executed: OpenAIToolExecution[] = [];
 		let i = 0;
@@ -870,7 +917,7 @@ async function runOpenAILoop(
 		);
 		toolResultReplacementState = budgeted.state;
 		options.onToolResultReplacementStateChange?.(toolResultReplacementState);
-		return executed.map((item, index) => {
+		const toolMessages = executed.map((item, index) => {
 			const adjusted = budgeted.results[index]!;
 			structured.pushTool(
 				item.call.id,
@@ -892,6 +939,8 @@ async function runOpenAILoop(
 				content: adjusted.content,
 			};
 		});
+		const followup = buildOpenAIViewImageFollowupMessage(budgeted.results);
+		return followup ? [...toolMessages, followup] : toolMessages;
 	}
 
 	const streamTimeoutConfig = resolveStreamTimeouts(settings);

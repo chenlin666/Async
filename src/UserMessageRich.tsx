@@ -17,7 +17,7 @@ type Props = {
  */
 export function UserMessageRich({ segments, onFileClick }: Props) {
 	return (
-		<span className="ref-msg-user-rich">
+		<div className="ref-msg-user-rich">
 			{segments.map((s) =>
 				s.kind === 'text' ? (
 					<span key={s.id} className="ref-msg-user-rich-text">
@@ -64,6 +64,6 @@ export function UserMessageRich({ segments, onFileClick }: Props) {
 					</span>
 				) : null
 			)}
-		</span>
+		</div>
 	);
 }

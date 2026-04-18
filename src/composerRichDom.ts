@@ -175,6 +175,10 @@ export type FileChipDomHandlers = {
 	onStructureChange: () => void;
 };
 
+function isBrNode(node: Node | null): node is HTMLBRElement {
+	return !!node && node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).tagName === 'BR';
+}
+
 export function createFileChipElement(relPath: string, segId: string, h: FileChipDomHandlers): HTMLElement {
 	const span = document.createElement('span');
 	span.contentEditable = 'false';
@@ -312,10 +316,19 @@ export function insertFileChipAtCaret(root: HTMLElement, relPath: string, segId:
 	range.deleteContents();
 	const chip = createFileChipElement(relPath, segId, h);
 	range.insertNode(chip);
-	const pad = document.createTextNode(' ');
-	chip.after(pad);
+	const prev = chip.previousSibling;
+	const next = chip.nextSibling;
+	if (prev && !isBrNode(prev)) {
+		chip.before(document.createElement('br'));
+	}
+	const postBreak = document.createElement('br');
+	if (next && isBrNode(next)) {
+		next.replaceWith(postBreak);
+	} else {
+		chip.after(postBreak);
+	}
 	const nr = document.createRange();
-	nr.setStartAfter(pad);
+	nr.setStartAfter(postBreak);
 	nr.collapse(true);
 	sel2.removeAllRanges();
 	sel2.addRange(nr);

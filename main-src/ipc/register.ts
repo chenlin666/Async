@@ -1657,7 +1657,21 @@ export function registerIpc(): void {
 				const ext = parsed.ext || '';
 				let finalName = `${baseName}${ext}`;
 				let seq = 2;
-				while (fs.existsSync(path.join(dirAbs, finalName))) {
+				while (true) {
+					const candidateAbs = path.join(dirAbs, finalName);
+					if (!fs.existsSync(candidateAbs)) {
+						break;
+					}
+					try {
+						const existingBuf = fs.readFileSync(candidateAbs);
+						if (Buffer.compare(existingBuf, buf) === 0) {
+							const relPath = `${dirRel}/${finalName}`;
+							registerKnownWorkspaceRelPath(relPath, root);
+							return { ok: true as const, relPath };
+						}
+					} catch {
+						/* 读取失败时继续找下一个可用名称 */
+					}
 					finalName = `${baseName} (${seq})${ext}`;
 					seq += 1;
 				}

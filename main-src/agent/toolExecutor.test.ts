@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 const resolveTerminalToolExecCreateOptsMock = vi.fn();
 const runTerminalSessionToExitMock = vi.fn();
@@ -58,6 +61,36 @@ describe('executeTool BrowserCapture', () => {
 
 		expect(result.isError).toBe(true);
 		expect(result.content).toContain('attached to an app window');
+	});
+});
+
+describe('executeTool view_image', () => {
+	it('loads a local workspace image without using the browser tool', async () => {
+		const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'async-view-image-'));
+		const imagePath = path.join(workspaceRoot, 'tiny.png');
+		fs.writeFileSync(
+			imagePath,
+			Buffer.from(
+				'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX6QAAAAASUVORK5CYII=',
+				'base64'
+			)
+		);
+
+		const result = await executeTool(
+			{
+				id: 'view-image-1',
+				name: 'view_image',
+				arguments: { path: 'tiny.png' },
+			},
+			undefined,
+			{ workspaceRoot }
+		);
+
+		expect(result.isError).toBe(false);
+		expect(result.content).toContain('"relPath": "tiny.png"');
+		expect(Array.isArray(result.structuredContent)).toBe(true);
+		const blocks = result.structuredContent as Array<{ type: string; source?: { media_type?: string } }>;
+		expect(blocks.some((block) => block.type === 'image' && block.source?.media_type === 'image/png')).toBe(true);
 	});
 });
 

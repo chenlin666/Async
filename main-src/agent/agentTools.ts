@@ -40,6 +40,7 @@ export type ToolResult = {
 /** 只读工具：可安全并发执行，不修改文件系统或运行副作用命令（含 MCP 资源工具） */
 export const READ_ONLY_AGENT_TOOL_NAMES = [
 	'Read',
+	'view_image',
 	'Glob',
 	'Grep',
 	'LSP',
@@ -91,6 +92,26 @@ export const AGENT_TOOLS: AgentToolDef[] = [
 				},
 			},
 			required: ['file_path'],
+		},
+	},
+	{
+		name: 'view_image',
+		description:
+			'Load a local image file from the workspace for model inspection. Prefer this over **Browser** when the target is an existing local PNG/JPG/JPEG/GIF/WEBP file rather than a webpage. Accepts a workspace-relative path, or an absolute path if it stays inside the workspace root.',
+		parameters: {
+			type: 'object',
+			properties: {
+				path: {
+					type: 'string',
+					description: 'Path to the image file: workspace-relative, or absolute if under the workspace root.',
+				},
+				detail: {
+					type: 'string',
+					description:
+						'Optional detail override. The only supported value is `original`; omit it for default behavior.',
+				},
+			},
+			required: ['path'],
 		},
 	},
 	{

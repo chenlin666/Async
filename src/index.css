@@ -3453,6 +3453,16 @@ html[data-theme-switching='true'] .ref-editor-welcome-panel {
 	word-break: break-word;
 }
 
+.ref-msg-user-rich .ref-inline-file-chip--image {
+	display: flex;
+	inline-size: fit-content;
+	max-inline-size: min(320px, 100%);
+	margin: 0 0 8px;
+	padding: 6px 8px 6px 10px;
+	border-radius: 14px;
+	box-shadow: 0 0 0 1px color-mix(in srgb, #38bdf8 18%, transparent);
+}
+
 /* 气泡�?chip 与正文同字号，避免预览里正文 14px、chip �?13px */
 .ref-msg-user .ref-inline-file-chip,
 .ref-msg-user .ref-inline-slash-chip {
