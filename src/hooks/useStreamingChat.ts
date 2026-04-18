@@ -153,8 +153,6 @@ export function useStreamingChat() {
 	 */
 	const setStreaming = useMemo(() => streamingStore.setStreaming, []);
 	const [awaitingReply, setAwaitingReply] = useState(false);
-	// thinkingTickRef 保留（部分调用方直接读 .current）；实际 UI 重渲染由 streamingStore.thinkingTick 驱动
-	const thinkingTickRef = useRef(0);
 	const [thoughtSecondsByThread, setThoughtSecondsByThread] = useState<Record<string, number>>({});
 	const [subAgentBgToast, setSubAgentBgToast] = useState<StreamingToast>(null);
 
@@ -199,7 +197,6 @@ export function useStreamingChat() {
 		streamStartedAtRef.current = Date.now();
 		firstTokenAtRef.current = null;
 		streamingStore.setStreaming('');
-		thinkingTickRef.current = 0;
 		streamingStore.resetThinkingTick();
 		setAwaitingReply(true);
 		ipcStreamNonceRef.current += 1;
@@ -266,7 +263,6 @@ export function useStreamingChat() {
 			if (streamingStore.getStreaming().length > 0) {
 				return;
 			}
-			thinkingTickRef.current += 1;
 			streamingStore.incrementThinkingTick();
 		}, 1000);
 		return () => window.clearInterval(id);
@@ -278,7 +274,6 @@ export function useStreamingChat() {
 		setStreaming,
 		awaitingReply,
 		setAwaitingReply,
-		thinkingTickRef,
 		thoughtSecondsByThread,
 		setThoughtSecondsByThread,
 		subAgentBgToast,

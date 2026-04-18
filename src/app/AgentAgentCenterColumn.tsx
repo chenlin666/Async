@@ -4,6 +4,7 @@ import { IconDoc, IconGitSCM, IconGlobe, IconTeam } from '../icons';
 import type { TFunction } from '../i18n';
 import { AgentWorkspaceLauncher } from './AgentWorkspaceLauncher';
 import type { WorkspaceLauncherTool } from './workspaceLaunchers';
+import { DevProfiler } from '../devProfiler';
 
 export type AgentRightSidebarView = 'git' | 'plan' | 'file' | 'team' | 'browser' | 'agents';
 
@@ -127,7 +128,9 @@ export const AgentAgentCenterColumn = memo(function AgentAgentCenterColumn({
 				</button>
 			</div>
 
-			<AgentChatPanel layout="agent-center" {...chatPanelProps} />
+			<DevProfiler id="AgentChatPanel[agent-center]">
+				<AgentChatPanel layout="agent-center" {...chatPanelProps} />
+			</DevProfiler>
 		</main>
 	);
 }, (prev, next) => {

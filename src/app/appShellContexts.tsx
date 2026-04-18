@@ -16,18 +16,26 @@ import type { ShellLayoutMode } from './shellLayoutStorage';
 
 type SettingsHook = ReturnType<typeof useSettings>;
 
-/** 主题 / i18n / shell 与索引等（与 Git / 工作区 / 模型设置解耦，便于子树按需订阅） */
-export type AppShellChromeValue = {
+/** Chrome 核心：shell / i18n — 绝大多数叶组件只订阅这三个字段 */
+export type AppShellChromeCoreValue = {
 	shell: Window['asyncShell'];
 	t: TFunction;
 	setLocale: (locale: AppLocale) => void;
 	locale: AppLocale;
+};
+
+/** Chrome 布局：ipc 握手状态与 shell 布局标记 */
+export type AppShellChromeLayoutValue = {
 	ipcOk: string;
 	setIpcOk: Dispatch<SetStateAction<string>>;
 	layoutPinnedBySurface: boolean;
 	appSurface: ShellLayoutMode | undefined;
 	shellLayoutStorageKey: string;
 	sidebarLayoutStorageKey: string;
+};
+
+/** Chrome 主题：颜色模式、外观偏好、主题切换动画 */
+export type AppShellChromeThemeValue = {
 	colorMode: AppColorMode;
 	setColorMode: Dispatch<SetStateAction<AppColorMode>>;
 	appearanceSettings: AppAppearanceSettings;
@@ -36,6 +44,11 @@ export type AppShellChromeValue = {
 	setTransitionOrigin: (origin?: ThemeTransitionOrigin) => void;
 	monacoChromeTheme: 'void-light' | 'void-dark';
 };
+
+/** 合并视图；保留以兼容 `useAppShellChrome()` 的既有消费者。新代码应直接用三个窄 hook。 */
+export type AppShellChromeValue = AppShellChromeCoreValue &
+	AppShellChromeLayoutValue &
+	AppShellChromeThemeValue;
 
 export type AppShellWorkspaceValue = ReturnType<typeof useWorkspaceManager>;
 
@@ -114,19 +127,51 @@ export type AppShellFoundationMerged = AppShellChromeValue &
 	AppShellGitValue &
 	AppShellSettingsValue;
 
-const AppShellChromeContext = createContext<AppShellChromeValue | null>(null);
+const AppShellChromeCoreContext = createContext<AppShellChromeCoreValue | null>(null);
+const AppShellChromeLayoutContext = createContext<AppShellChromeLayoutValue | null>(null);
+const AppShellChromeThemeContext = createContext<AppShellChromeThemeValue | null>(null);
 const AppShellWorkspaceContext = createContext<AppShellWorkspaceValue | null>(null);
 const AppShellGitActionsContext = createContext<AppShellGitActionsValue | null>(null);
 const AppShellGitMetaContext = createContext<AppShellGitMetaValue | null>(null);
 const AppShellGitFilesContext = createContext<AppShellGitFilesValue | null>(null);
 const AppShellSettingsContext = createContext<AppShellSettingsValue | null>(null);
 
-export function useAppShellChrome(): AppShellChromeValue {
-	const v = useContext(AppShellChromeContext);
+export function useAppShellChromeCore(): AppShellChromeCoreValue {
+	const v = useContext(AppShellChromeCoreContext);
 	if (!v) {
-		throw new Error('useAppShellChrome: missing provider');
+		throw new Error('useAppShellChromeCore: missing provider');
 	}
 	return v;
+}
+
+export function useAppShellChromeLayout(): AppShellChromeLayoutValue {
+	const v = useContext(AppShellChromeLayoutContext);
+	if (!v) {
+		throw new Error('useAppShellChromeLayout: missing provider');
+	}
+	return v;
+}
+
+export function useAppShellChromeTheme(): AppShellChromeThemeValue {
+	const v = useContext(AppShellChromeThemeContext);
+	if (!v) {
+		throw new Error('useAppShellChromeTheme: missing provider');
+	}
+	return v;
+}
+
+/**
+ * 合并订阅：等价于订阅三层 Chrome context。仅适合仍需全量 Chrome 的遗留消费者；
+ * 新代码请直接使用 `useAppShellChromeCore` / `useAppShellChromeLayout` / `useAppShellChromeTheme`。
+ */
+export function useAppShellChrome(): AppShellChromeValue {
+	const core = useAppShellChromeCore();
+	const layout = useAppShellChromeLayout();
+	const theme = useAppShellChromeTheme();
+	return useMemo(
+		(): AppShellChromeValue => ({ ...core, ...layout, ...theme }),
+		[core, layout, theme]
+	);
 }
 
 export function useAppShellWorkspace(): AppShellWorkspaceValue {
@@ -190,7 +235,7 @@ export function useAppShellSettings(): AppShellSettingsValue {
  */
 function AppShellGitContextBridge(props: { settings: AppShellSettingsValue; children: ReactNode }) {
 	const { settings, children } = props;
-	const { shell } = useAppShellChrome();
+	const { shell } = useAppShellChromeCore();
 	const { workspace } = useAppShellWorkspace();
 	const {
 		gitBranch,
@@ -271,17 +316,23 @@ function AppShellGitContextBridge(props: { settings: AppShellSettingsValue; chil
 }
 
 export function AppShellProviders(props: {
-	chrome: AppShellChromeValue;
+	chromeCore: AppShellChromeCoreValue;
+	chromeLayout: AppShellChromeLayoutValue;
+	chromeTheme: AppShellChromeThemeValue;
 	workspace: AppShellWorkspaceValue;
 	settings: AppShellSettingsValue;
 	children: ReactNode;
 }) {
-	const { chrome, workspace, settings, children } = props;
+	const { chromeCore, chromeLayout, chromeTheme, workspace, settings, children } = props;
 	return (
-		<AppShellChromeContext.Provider value={chrome}>
-			<AppShellWorkspaceContext.Provider value={workspace}>
-				<AppShellGitContextBridge settings={settings}>{children}</AppShellGitContextBridge>
-			</AppShellWorkspaceContext.Provider>
-		</AppShellChromeContext.Provider>
+		<AppShellChromeCoreContext.Provider value={chromeCore}>
+			<AppShellChromeLayoutContext.Provider value={chromeLayout}>
+				<AppShellChromeThemeContext.Provider value={chromeTheme}>
+					<AppShellWorkspaceContext.Provider value={workspace}>
+						<AppShellGitContextBridge settings={settings}>{children}</AppShellGitContextBridge>
+					</AppShellWorkspaceContext.Provider>
+				</AppShellChromeThemeContext.Provider>
+			</AppShellChromeLayoutContext.Provider>
+		</AppShellChromeCoreContext.Provider>
 	);
 }

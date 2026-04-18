@@ -2,7 +2,7 @@ import { forwardRef, useCallback } from 'react';
 import { AgentCommandPermissionDropdown, type CommandPermissionMode } from './AgentCommandPermissionDropdown';
 import { getShellPermissionMode, shellPermissionModeToAgentPatch } from './shellPermissionMode';
 import {
-	useAppShellChrome,
+	useAppShellChromeCore,
 	useAppShellGitActions,
 	useAppShellGitMeta,
 	useAppShellSettings,
@@ -35,7 +35,7 @@ export type ComposerGitBranchRowProps = {
  */
 export const ComposerGitBranchRow = forwardRef<HTMLButtonElement, ComposerGitBranchRowProps>(
 	function ComposerGitBranchRow({ onBeforeToggleGitBranchPicker, contextMeter }, ref) {
-		const { shell, t } = useAppShellChrome();
+		const { shell, t } = useAppShellChromeCore();
 		const { gitBranch, gitLines, gitStatusOk, gitBranchPickerOpen } = useAppShellGitMeta();
 		const { setGitBranchPickerOpen } = useAppShellGitActions();
 		const { agentCustomization, setAgentCustomization } = useAppShellSettings();

@@ -114,6 +114,7 @@ import { normWorkspaceRootKey } from './workspaceRootKey';
 import { useAgentFileReview, type AgentFilePreviewState } from './hooks/useAgentFileReview';
 import { useComposer } from './hooks/useComposer';
 import { useStreaming } from './streamingStore';
+import { DevProfiler } from './devProfiler';
 import { useEditorTabs, type EditorInlineDiffState, clampEditorTerminalHeight } from './hooks/useEditorTabs';
 import { useTeamSession } from './hooks/useTeamSession';
 import { useAgentSession } from './hooks/useAgentSession';
@@ -140,7 +141,9 @@ import {
 } from './app/shellLayoutStorage';
 import {
 	AppShellProviders,
-	useAppShellChrome,
+	useAppShellChromeCore,
+	useAppShellChromeLayout,
+	useAppShellChromeTheme,
 	useAppShellWorkspace,
 	useAppShellGitActions,
 	useAppShellGitMeta,
@@ -343,18 +346,32 @@ export default function App({
 		setBotIntegrations,
 	} = useSettings(shell, workspace, t);
 
-	const chromeSlice = useMemo(
+	const chromeCoreSlice = useMemo(
+		() => ({ shell, t, setLocale, locale }),
+		[shell, t, setLocale, locale]
+	);
+
+	const chromeLayoutSlice = useMemo(
 		() => ({
-			shell,
-			t,
-			setLocale,
-			locale,
 			ipcOk,
 			setIpcOk,
 			layoutPinnedBySurface,
 			appSurface,
 			shellLayoutStorageKey,
 			sidebarLayoutStorageKey,
+		}),
+		[
+			ipcOk,
+			setIpcOk,
+			layoutPinnedBySurface,
+			appSurface,
+			shellLayoutStorageKey,
+			sidebarLayoutStorageKey,
+		]
+	);
+
+	const chromeThemeSlice = useMemo(
+		() => ({
 			colorMode,
 			setColorMode,
 			appearanceSettings,
@@ -364,16 +381,6 @@ export default function App({
 			monacoChromeTheme,
 		}),
 		[
-			shell,
-			t,
-			setLocale,
-			locale,
-			ipcOk,
-			setIpcOk,
-			layoutPinnedBySurface,
-			appSurface,
-			shellLayoutStorageKey,
-			sidebarLayoutStorageKey,
 			colorMode,
 			setColorMode,
 			appearanceSettings,
@@ -511,14 +518,21 @@ export default function App({
 	);
 
 	return (
-		<AppShellProviders chrome={chromeSlice} workspace={workspaceSlice} settings={settingsSlice}>
+		<AppShellProviders
+			chromeCore={chromeCoreSlice}
+			chromeLayout={chromeLayoutSlice}
+			chromeTheme={chromeThemeSlice}
+			workspace={workspaceSlice}
+			settings={settingsSlice}
+		>
 			{browserWindow ? <AppBrowserWindow /> : <AppMainWorkspace />}
 		</AppShellProviders>
 	);
 }
 
 function AppBrowserWindow() {
-	const { shell, setLocale, setColorMode, setAppearanceSettings } = useAppShellChrome();
+	const { shell, setLocale } = useAppShellChromeCore();
+	const { setColorMode, setAppearanceSettings } = useAppShellChromeTheme();
 
 	useEffect(() => {
 		if (!shell) {
@@ -588,17 +602,16 @@ const MessagesScrollSync = memo(function MessagesScrollSync({
 });
 
 function AppMainWorkspaceInner() {
+	const { shell, t, setLocale, locale } = useAppShellChromeCore();
 	const {
-		shell,
-		t,
-		setLocale,
-		locale,
 		ipcOk,
 		setIpcOk,
 		layoutPinnedBySurface,
 		appSurface,
 		shellLayoutStorageKey,
 		sidebarLayoutStorageKey,
+	} = useAppShellChromeLayout();
+	const {
 		colorMode,
 		setColorMode,
 		appearanceSettings,
@@ -606,7 +619,7 @@ function AppMainWorkspaceInner() {
 		effectiveScheme,
 		setTransitionOrigin,
 		monacoChromeTheme,
-	} = useAppShellChrome();
+	} = useAppShellChromeTheme();
 
 	const {
 		workspace,
@@ -6115,7 +6128,9 @@ function AppMainWorkspaceInner() {
 					</main>
 				}
 			>
-				<EditorMainPanel {...editorMainPanelProps} />
+				<DevProfiler id="EditorMainPanel">
+					<EditorMainPanel {...editorMainPanelProps} />
+				</DevProfiler>
 			</Suspense>
 		);
 	}, [
