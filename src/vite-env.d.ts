@@ -24,6 +24,7 @@ export interface AsyncShellAPI {
 	subscribeTerminalSessionData?(callback: (id: string, data: string, seq: number) => void): () => void;
 	subscribeTerminalSessionExit?(callback: (id: string, code: unknown) => void): () => void;
 	subscribeTerminalSessionListChanged?(callback: () => void): () => void;
+	/** 查询全能终端设置页可显示的内置 Shell / 连接模板 */
 	/** 主进程请求主窗口打开设置并切换到指定侧栏项（如从独立浏览器窗口唤起） */
 	subscribeOpenSettingsNav?(callback: (nav: string) => void): () => void;
 }

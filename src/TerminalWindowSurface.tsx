@@ -15,6 +15,7 @@ import {
 	saveTerminalSettings,
 	subscribeTerminalSettings,
 	type TerminalAppSettings,
+	type TerminalProfile,
 } from './terminalWindow/terminalSettings';
 import {
 	isTerminalAlternateScreen,
@@ -430,6 +431,7 @@ export const TerminalWindowSurface = memo(function TerminalWindowSurface({ t }: 
 	const [activeId, setActiveId] = useState<string | null>(null);
 	const [exitByTab, setExitByTab] = useState<Record<string, number | null>>({});
 	const [sessionProfiles, setSessionProfiles] = useState<Record<string, string>>({});
+	const [builtinProfiles, setBuiltinProfiles] = useState<TerminalProfile[]>(() => getBuiltinTerminalProfiles());
 	const [themeColors, setThemeColors] = useState<XTermThemeColors>(() => readXtermThemeColors());
 	const [terminalSettings, setTerminalSettings] = useState<TerminalAppSettings>(() => loadTerminalSettings());
 	const [settingsOpen, setSettingsOpen] = useState(false);
@@ -439,8 +441,10 @@ export const TerminalWindowSurface = memo(function TerminalWindowSurface({ t }: 
 	const creatingRef = useRef(false);
 	const initialListLoadedRef = useRef(false);
 	const createSessionRef = useRef<(profileId?: string) => Promise<void>>(async () => {});
+	const builtinProfilesRef = useRef<TerminalProfile[]>(builtinProfiles);
 	const menuWrapRef = useRef<HTMLDivElement>(null);
 	const runtimeControlsRef = useRef<Record<string, TerminalRuntimeControls>>({});
+	builtinProfilesRef.current = builtinProfiles;
 
 	const closeTerminalContextMenu = useCallback(() => {
 		setContextMenu(null);
@@ -469,6 +473,24 @@ export const TerminalWindowSurface = memo(function TerminalWindowSurface({ t }: 
 		}
 		return true;
 	}, []);
+
+	const reloadBuiltinProfiles = useCallback(async (): Promise<TerminalProfile[]> => {
+		if (!shell) {
+			return builtinProfilesRef.current;
+		}
+		try {
+			const raw = (await shell.invoke('term:listBuiltinProfiles')) as { ok?: boolean; profiles?: unknown[] };
+			if (!raw?.ok || !Array.isArray(raw.profiles)) {
+				return builtinProfilesRef.current;
+			}
+			const next = raw.profiles.map((profile) => profile as TerminalProfile);
+			builtinProfilesRef.current = next;
+			setBuiltinProfiles(next);
+			return next;
+		} catch {
+			return builtinProfilesRef.current;
+		}
+	}, [shell]);
 
 	const refreshList = useCallback(async () => {
 		if (!shell) {
@@ -502,8 +524,11 @@ export const TerminalWindowSurface = memo(function TerminalWindowSurface({ t }: 
 				return result.sessions[0]?.id ?? null;
 			});
 			const firstCycle = !initialListLoadedRef.current;
-			initialListLoadedRef.current = true;
+			if (firstCycle) {
+				initialListLoadedRef.current = true;
+			}
 			if (firstCycle && result.sessions.length === 0) {
+				await reloadBuiltinProfiles();
 				const restored = terminalSettings.restoreTabs ? await restoreSavedTabs() : false;
 				if (!restored && terminalSettings.autoOpen) {
 					await createSessionRef.current();
@@ -512,7 +537,7 @@ export const TerminalWindowSurface = memo(function TerminalWindowSurface({ t }: 
 		} catch {
 			/* ignore */
 		}
-	}, [shell, restoreSavedTabs, terminalSettings.autoOpen, terminalSettings.restoreTabs]);
+	}, [reloadBuiltinProfiles, restoreSavedTabs, shell, terminalSettings.autoOpen, terminalSettings.restoreTabs]);
 
 	const createSession = useCallback(
 		async (profileId?: string) => {
@@ -523,7 +548,8 @@ export const TerminalWindowSurface = memo(function TerminalWindowSurface({ t }: 
 			try {
 				const resolvedProfile = resolveTerminalProfile(
 					terminalSettings.profiles,
-					profileId ?? terminalSettings.defaultProfileId
+					profileId ?? terminalSettings.defaultProfileId,
+					builtinProfilesRef.current
 				);
 				const profile = resolvedProfile ? withTerminalWindowProfileLabel(resolvedProfile, t) : null;
 				const payload = profile ? buildTermSessionCreatePayload(profile) : {};
@@ -614,6 +640,17 @@ export const TerminalWindowSurface = memo(function TerminalWindowSurface({ t }: 
 			setTerminalSettings(loadTerminalSettings());
 		});
 	}, []);
+
+	useEffect(() => {
+		void reloadBuiltinProfiles();
+	}, [reloadBuiltinProfiles]);
+
+	useEffect(() => {
+		if (!settingsOpen) {
+			return;
+		}
+		void reloadBuiltinProfiles();
+	}, [reloadBuiltinProfiles, settingsOpen]);
 
 	useEffect(() => {
 		if (!terminalSettings.restoreTabs) {
@@ -709,14 +746,14 @@ export const TerminalWindowSurface = memo(function TerminalWindowSurface({ t }: 
 		[sessions, activeId]
 	);
 
-	const builtinProfiles = useMemo(
-		() => getBuiltinTerminalProfiles().map((profile) => withTerminalWindowProfileLabel(profile, t)),
-		[t]
+	const displayBuiltinProfiles = useMemo(
+		() => builtinProfiles.map((profile) => withTerminalWindowProfileLabel(profile, t)),
+		[builtinProfiles, t]
 	);
 
 	const defaultProfile = useMemo(
-		() => resolveTerminalProfile(terminalSettings.profiles, terminalSettings.defaultProfileId),
-		[terminalSettings.defaultProfileId, terminalSettings.profiles]
+		() => resolveTerminalProfile(terminalSettings.profiles, terminalSettings.defaultProfileId, builtinProfiles),
+		[builtinProfiles, terminalSettings.defaultProfileId, terminalSettings.profiles]
 	);
 
 	const terminalStageStyle = useMemo(
@@ -870,13 +907,13 @@ export const TerminalWindowSurface = memo(function TerminalWindowSurface({ t }: 
 								>
 									{t('app.universalTerminalMenu.closeActiveTab')}
 								</button>
-								{terminalSettings.profiles.length > 0 || builtinProfiles.length > 0 ? (
+								{terminalSettings.profiles.length > 0 || displayBuiltinProfiles.length > 0 ? (
 									<>
 										<div className="ref-uterm-dropdown-sep" role="separator" />
 										<div className="ref-uterm-dropdown-label">
 											{t('app.universalTerminalMenu.newWithProfile')}
 										</div>
-										{[...terminalSettings.profiles, ...builtinProfiles].map((profile) => (
+										{[...terminalSettings.profiles, ...displayBuiltinProfiles].map((profile) => (
 											<button
 												key={profile.id}
 												type="button"
@@ -952,6 +989,7 @@ export const TerminalWindowSurface = memo(function TerminalWindowSurface({ t }: 
 					<TerminalSettingsPanel
 						t={t}
 						settings={terminalSettings}
+						builtinProfiles={builtinProfiles}
 						onChange={persistSettings}
 						onLaunchProfile={(profileId) => void createSession(profileId)}
 					/>

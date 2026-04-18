@@ -33,6 +33,7 @@ describe('terminalSettings', () => {
 			sshPort: 2222,
 			sshUser: 'deploy',
 			sshIdentityFile: '~/.ssh/id_ed25519',
+			sshIdentityFiles: ['~/.ssh/id_ed25519'],
 			sshExtraArgs: '-o ServerAliveInterval=30',
 			sshRemoteCommand: '"cd /srv/app && ./start.sh"',
 		};
@@ -116,6 +117,29 @@ describe('terminalSettings', () => {
 		});
 
 		expect(settings.defaultProfileId).toBe(builtin.id);
+	});
+
+	it('keeps dynamically detected builtin default profile ids when normalizing settings', () => {
+		const settings = normalizeTerminalSettings({
+			defaultProfileId: 'builtin:wsl-ubuntu-22-04',
+		});
+
+		expect(settings.defaultProfileId).toBe('builtin:wsl-ubuntu-22-04');
+	});
+
+	it('migrates a legacy single ssh identity file into the new list field', () => {
+		const settings = normalizeTerminalSettings({
+			profiles: [
+				{
+					...defaultTerminalSettings().profiles[0],
+					id: 'profile-2',
+					kind: 'ssh',
+					sshIdentityFile: 'C:/Users/test/.ssh/id_ed25519',
+				},
+			],
+		});
+
+		expect(settings.profiles[0].sshIdentityFiles).toEqual(['C:/Users/test/.ssh/id_ed25519']);
 	});
 
 	it('duplicates builtin profiles into editable custom profiles', () => {

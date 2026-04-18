@@ -3,7 +3,7 @@
  * 会话本身由 terminalSessionService.ts 管理；这里只暴露 IPC 面。
  */
 
-import { BrowserWindow, ipcMain, type WebContents } from 'electron';
+import { BrowserWindow, dialog, ipcMain, type FileFilter, type WebContents } from 'electron';
 import path from 'node:path';
 import { existsSync, statSync } from 'node:fs';
 import { getWorkspaceRootForWebContents, resolveWorkspacePath } from './workspace.js';
@@ -20,6 +20,7 @@ import {
 	writeTerminalSession,
 	type TerminalSessionCreateOpts,
 } from './terminalSessionService.js';
+import { listBuiltinTerminalProfiles } from './terminalBuiltinProfiles.js';
 
 const openPromisesByHost = new Map<number, Promise<number | null>>();
 const terminalWindowRendererByHost = new Map<number, number>();
@@ -210,6 +211,59 @@ export function registerTerminalSessionIpc(): void {
 
 	ipcMain.handle('term:sessionList', () => {
 		return { ok: true as const, sessions: listTerminalSessions() };
+	});
+
+	ipcMain.handle('term:listBuiltinProfiles', async () => {
+		try {
+			return { ok: true as const, profiles: await listBuiltinTerminalProfiles() };
+		} catch (e) {
+			return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+		}
+	});
+
+	ipcMain.handle('term:pickPath', async (event, rawOpts: unknown) => {
+		const opts = (rawOpts && typeof rawOpts === 'object' ? rawOpts : {}) as Record<string, unknown>;
+		const kind = opts.kind === 'directory' ? 'directory' : 'file';
+		const multi = opts.multi === true;
+		const title = typeof opts.title === 'string' && opts.title.trim() ? opts.title.trim() : undefined;
+		const filters = Array.isArray(opts.filters)
+			? (opts.filters
+					.map((item) => {
+						if (!item || typeof item !== 'object') {
+							return null;
+						}
+						const record = item as Record<string, unknown>;
+						const name = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : '';
+						const extensions = Array.isArray(record.extensions)
+							? record.extensions.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+							: [];
+						if (!name || extensions.length === 0) {
+							return null;
+						}
+						return {
+							name,
+							extensions,
+						} satisfies FileFilter;
+					})
+					.filter((item): item is FileFilter => Boolean(item)))
+			: undefined;
+		const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+		const result = await dialog.showOpenDialog(win, {
+			title,
+			properties:
+				kind === 'directory'
+					? (multi ? ['openDirectory', 'multiSelections', 'createDirectory'] : ['openDirectory', 'createDirectory'])
+					: (multi ? ['openFile', 'multiSelections'] : ['openFile']),
+			filters: kind === 'file' && filters?.length ? filters : undefined,
+		});
+		if (result.canceled || !result.filePaths.length) {
+			return { ok: false as const, canceled: true as const };
+		}
+		return {
+			ok: true as const,
+			path: result.filePaths[0],
+			paths: result.filePaths,
+		};
 	});
 
 	ipcMain.handle('term:sessionInfo', (_event, id: unknown) => {

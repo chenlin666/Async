@@ -4,6 +4,7 @@ export type TerminalCursorStyle = 'bar' | 'block' | 'underline';
 export type TerminalBellStyle = 'none' | 'visual' | 'audible';
 export type TerminalRightClickAction = 'off' | 'menu' | 'paste' | 'clipboard';
 export type TerminalDisplayPresetId = 'compact' | 'balanced' | 'presentation';
+export type TerminalSshAuthMode = 'auto' | 'password' | 'publicKey' | 'agent' | 'keyboardInteractive';
 
 /** 本地 Shell 或通过 SSH 的远程会话（由 ssh 作为 pty 子进程）。 */
 export type TerminalProfileKind = 'local' | 'ssh';
@@ -19,12 +20,24 @@ export type TerminalProfile = {
 	sshPort: number;
 	/** SSH：登录用户名。 */
 	sshUser: string;
-	/** SSH：私钥路径，可选。 */
+	/** SSH：兼容旧配置的首个私钥路径。 */
 	sshIdentityFile: string;
+	/** SSH：私钥列表。 */
+	sshIdentityFiles: string[];
+	/** SSH：认证方式偏好。 */
+	sshAuthMode: TerminalSshAuthMode;
+	/** SSH：ProxyCommand。 */
+	sshProxyCommand: string;
+	/** SSH：Jump host，格式如 user@host 或 host。 */
+	sshJumpHost: string;
 	/** SSH：登录后在远端执行的命令（可选，空格分词，支持引号）。 */
 	sshRemoteCommand: string;
 	/** SSH：附加到 ssh 命令行的参数（在 -tt 之后、-i 之前插入，如 -o ServerAliveInterval=30）。 */
 	sshExtraArgs: string;
+	/** SSH：keep alive 间隔（秒，0 表示禁用）。 */
+	sshKeepAliveInterval: number;
+	/** SSH：keep alive 最大重试次数。 */
+	sshKeepAliveCountMax: number;
 	/** 为空 = 平台默认 shell。 */
 	shell: string;
 	/** 以空格分隔（支持 "..."/'...' 引号），为空 = 平台默认参数。 */
@@ -113,8 +126,14 @@ export function defaultTerminalSettings(): TerminalAppSettings {
 				sshPort: 22,
 				sshUser: '',
 				sshIdentityFile: '',
+				sshIdentityFiles: [],
+				sshAuthMode: 'auto',
+				sshProxyCommand: '',
+				sshJumpHost: '',
 				sshRemoteCommand: '',
 				sshExtraArgs: '',
+				sshKeepAliveInterval: 0,
+				sshKeepAliveCountMax: 3,
 				shell: '',
 				args: '',
 				cwd: '',
@@ -149,8 +168,17 @@ export function normalizeTerminalSettings(raw: unknown): TerminalAppSettings {
 				sshPort: clamp(Math.floor(toNumber(po.sshPort, 22)), 1, 65535),
 				sshUser: typeof po.sshUser === 'string' ? po.sshUser : '',
 				sshIdentityFile: typeof po.sshIdentityFile === 'string' ? po.sshIdentityFile : '',
+				sshIdentityFiles: normalizeIdentityFiles(
+					Array.isArray(po.sshIdentityFiles) ? po.sshIdentityFiles : [],
+					typeof po.sshIdentityFile === 'string' ? po.sshIdentityFile : ''
+				),
+				sshAuthMode: normalizeSshAuthMode(po.sshAuthMode),
+				sshProxyCommand: typeof po.sshProxyCommand === 'string' ? po.sshProxyCommand : '',
+				sshJumpHost: typeof po.sshJumpHost === 'string' ? po.sshJumpHost : '',
 				sshRemoteCommand: typeof po.sshRemoteCommand === 'string' ? po.sshRemoteCommand : '',
 				sshExtraArgs: typeof po.sshExtraArgs === 'string' ? po.sshExtraArgs : '',
+				sshKeepAliveInterval: clamp(Math.floor(toNumber(po.sshKeepAliveInterval, 0)), 0, 86_400),
+				sshKeepAliveCountMax: clamp(Math.floor(toNumber(po.sshKeepAliveCountMax, 3)), 1, 20),
 				shell: typeof po.shell === 'string' ? po.shell : '',
 				args: typeof po.args === 'string' ? po.args : '',
 				cwd: typeof po.cwd === 'string' ? po.cwd : '',
@@ -159,13 +187,14 @@ export function normalizeTerminalSettings(raw: unknown): TerminalAppSettings {
 		})
 		.filter((v): v is TerminalProfile => Boolean(v));
 	const effectiveProfiles = profiles.length ? profiles : def.profiles;
+	const rawDefaultProfileId = typeof obj.defaultProfileId === 'string' ? obj.defaultProfileId : '';
 	const validDefaultProfileIds = new Set([
 		...effectiveProfiles.map((profile) => profile.id),
 		...getBuiltinTerminalProfiles().map((profile) => profile.id),
 	]);
 	const defaultProfileId =
-		typeof obj.defaultProfileId === 'string' && validDefaultProfileIds.has(obj.defaultProfileId)
-			? obj.defaultProfileId
+		rawDefaultProfileId && (validDefaultProfileIds.has(rawDefaultProfileId) || isBuiltinTerminalProfileId(rawDefaultProfileId))
+			? rawDefaultProfileId
 			: effectiveProfiles[0].id;
 	const cursor = obj.cursorStyle;
 	const bell = obj.bell;
@@ -263,6 +292,7 @@ export function cloneTerminalProfile(existing: TerminalProfile[], profile: Termi
 	return {
 		...profile,
 		builtinKey: undefined,
+		sshIdentityFiles: [...getSshIdentityFiles(profile)],
 		id: newProfileId(existing),
 		name: `${profile.name.trim() || 'Profile'} Copy`,
 	};
@@ -274,6 +304,7 @@ export function resetTerminalProfile(profile: TerminalProfile): TerminalProfile 
 		id: profile.id,
 		name: profile.name,
 		kind: profile.kind,
+		sshIdentityFiles: [],
 	};
 }
 
@@ -296,27 +327,7 @@ export function buildTerminalProfileTarget(profile: TerminalProfile): string {
 
 export function buildTerminalProfileLaunchPreview(profile: TerminalProfile): string {
 	if (profile.kind === 'ssh') {
-		const args: string[] = ['ssh', '-tt'];
-		const extraArgs = parseArgsString(profile.sshExtraArgs);
-		if (extraArgs.length) {
-			args.push(...extraArgs);
-		}
-		const identity = profile.sshIdentityFile.trim();
-		if (identity) {
-			args.push('-i', identity);
-		}
-		if (profile.sshPort && profile.sshPort !== 22) {
-			args.push('-p', String(profile.sshPort));
-		}
-		const target = [profile.sshUser.trim(), profile.sshHost.trim()].filter(Boolean).join('@');
-		if (target) {
-			args.push(target);
-		}
-		const remoteCommand = parseArgsString(profile.sshRemoteCommand);
-		if (remoteCommand.length) {
-			args.push(...remoteCommand);
-		}
-		return args.join(' ').trim() || 'ssh';
+		return ['ssh', ...buildSshArgs(profile)].join(' ').trim() || 'ssh';
 	}
 	const shell = profile.shell.trim() || 'system shell';
 	const args = parseArgsString(profile.args);
@@ -404,20 +415,8 @@ export function buildTermSessionCreatePayload(profile: TerminalProfile): Record<
 		profile.kind === 'ssh' && profile.sshHost.trim().length > 0 && profile.sshUser.trim().length > 0;
 
 	if (sshReady) {
-		const args: string[] = ['-tt'];
-		args.push(...parseArgsString(profile.sshExtraArgs));
-		const ident = profile.sshIdentityFile.trim();
-		if (ident) {
-			args.push('-i', ident);
-		}
-		const port = Math.floor(Number(profile.sshPort) || 22);
-		if (port !== 22) {
-			args.push('-p', String(port));
-		}
-		args.push(`${profile.sshUser.trim()}@${profile.sshHost.trim()}`);
-		args.push(...parseArgsString(profile.sshRemoteCommand));
 		payload.shell = isWindowsRenderer() ? 'ssh.exe' : 'ssh';
-		payload.args = args;
+		payload.args = buildSshArgs(profile);
 		return payload;
 	}
 
@@ -452,6 +451,10 @@ export function parseEnvString(s: string): Record<string, string> | undefined {
 	return Object.keys(env).length ? env : undefined;
 }
 
+export function getSshIdentityFiles(profile: Pick<TerminalProfile, 'sshIdentityFile' | 'sshIdentityFiles'>): string[] {
+	return normalizeIdentityFiles(profile.sshIdentityFiles, profile.sshIdentityFile);
+}
+
 export function getBuiltinTerminalProfiles(): TerminalProfile[] {
 	switch (readRendererPlatform()) {
 		case 'win32':
@@ -462,22 +465,27 @@ export function getBuiltinTerminalProfiles(): TerminalProfile[] {
 				createBuiltinTerminalProfile('cmd', 'cmd', {
 					name: 'Command Prompt',
 					shell: 'cmd.exe',
+					args: '/k chcp 65001>nul',
 				}),
 				createBuiltinTerminalProfile('powershell', 'powershell', {
 					name: 'PowerShell',
 					shell: 'powershell.exe',
+					args: '-NoLogo',
 				}),
 				createBuiltinTerminalProfile('pwsh', 'pwsh', {
 					name: 'PowerShell 7',
 					shell: 'pwsh.exe',
+					args: '-NoLogo',
 				}),
 				createBuiltinTerminalProfile('git-bash', 'gitBash', {
 					name: 'Git Bash',
 					shell: 'C:\\Program Files\\Git\\bin\\bash.exe',
+					args: '--login -i',
 				}),
 				createBuiltinTerminalProfile('wsl', 'wsl', {
 					name: 'WSL',
 					shell: 'wsl.exe',
+					env: 'TERM=xterm-color\nCOLORTERM=truecolor',
 				}),
 				createBuiltinTerminalProfile('ssh-template', 'sshConnection', {
 					name: 'SSH connection',
@@ -529,16 +537,17 @@ export function getBuiltinTerminalProfiles(): TerminalProfile[] {
 
 export function resolveTerminalProfile(
 	customProfiles: TerminalProfile[],
-	profileId: string | null | undefined
+	profileId: string | null | undefined,
+	builtinProfiles: TerminalProfile[] = getBuiltinTerminalProfiles()
 ): TerminalProfile | null {
 	if (!profileId) {
-		return customProfiles[0] ?? getBuiltinTerminalProfiles()[0] ?? null;
+		return customProfiles[0] ?? builtinProfiles[0] ?? null;
 	}
 	return (
 		customProfiles.find((profile) => profile.id === profileId) ??
-		getBuiltinTerminalProfiles().find((profile) => profile.id === profileId) ??
+		builtinProfiles.find((profile) => profile.id === profileId) ??
 		customProfiles[0] ??
-		getBuiltinTerminalProfiles()[0] ??
+		builtinProfiles[0] ??
 		null
 	);
 }
@@ -613,6 +622,81 @@ function toNumber(v: unknown, fallback: number): number {
 
 function toBoolean(v: unknown, fallback: boolean): boolean {
 	return typeof v === 'boolean' ? v : fallback;
+}
+
+function normalizeSshAuthMode(value: unknown): TerminalSshAuthMode {
+	return value === 'password' ||
+		value === 'publicKey' ||
+		value === 'agent' ||
+		value === 'keyboardInteractive'
+		? value
+		: 'auto';
+}
+
+function normalizeIdentityFiles(value: unknown, fallback = ''): string[] {
+	const files = Array.isArray(value)
+		? value.filter((item): item is string => typeof item === 'string')
+		: [];
+	if (typeof fallback === 'string' && fallback.trim()) {
+		files.push(fallback);
+	}
+	const unique = new Set<string>();
+	for (const item of files) {
+		const next = item.trim();
+		if (next) {
+			unique.add(next);
+		}
+	}
+	return Array.from(unique);
+}
+
+function buildSshArgs(profile: TerminalProfile): string[] {
+	const args: string[] = ['-tt'];
+	args.push(...parseArgsString(profile.sshExtraArgs));
+
+	switch (profile.sshAuthMode) {
+		case 'password':
+			args.push('-o', 'PreferredAuthentications=password');
+			break;
+		case 'publicKey':
+		case 'agent':
+			args.push('-o', 'PreferredAuthentications=publickey');
+			break;
+		case 'keyboardInteractive':
+			args.push('-o', 'PreferredAuthentications=keyboard-interactive');
+			break;
+		default:
+			break;
+	}
+
+	if (profile.sshProxyCommand.trim()) {
+		args.push('-o', `ProxyCommand=${profile.sshProxyCommand.trim()}`);
+	}
+	if (profile.sshJumpHost.trim()) {
+		args.push('-J', profile.sshJumpHost.trim());
+	}
+	if (profile.sshKeepAliveInterval > 0) {
+		args.push('-o', `ServerAliveInterval=${profile.sshKeepAliveInterval}`);
+	}
+	if (profile.sshKeepAliveInterval > 0 && profile.sshKeepAliveCountMax > 0) {
+		args.push('-o', `ServerAliveCountMax=${profile.sshKeepAliveCountMax}`);
+	}
+
+	for (const identity of getSshIdentityFiles(profile)) {
+		args.push('-i', identity);
+	}
+
+	if (profile.sshPort && profile.sshPort !== 22) {
+		args.push('-p', String(profile.sshPort));
+	}
+
+	const target = [profile.sshUser.trim(), profile.sshHost.trim()].filter(Boolean).join('@');
+	if (target) {
+		args.push(target);
+	}
+
+	args.push(...parseArgsString(profile.sshRemoteCommand));
+	return args;
 }
 
 function readRendererPlatform(): 'win32' | 'darwin' | 'linux' | 'unknown' {

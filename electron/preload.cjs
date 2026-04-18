@@ -101,6 +101,8 @@ const INVOKE_CHANNELS = new Set([
 	'term:sessionKill',
 	'term:sessionRename',
 	'term:sessionList',
+	'term:listBuiltinProfiles',
+	'term:pickPath',
 	'term:sessionInfo',
 	'term:sessionBuffer',
 	'term:sessionSubscribe',
