@@ -1,12 +1,19 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, clipboard, webContents, type WebContents } from 'electron';
-import { createAppWindow } from '../appWindow.js';
+import { createAppWindow, findAppWindowBySurface, focusAppWindow, type AppWindowSurface } from '../appWindow.js';
 import { applyThemeChromeToWindow, type NativeChromeOverride, type ThemeChromeScheme } from '../themeChrome.js';
 import { applyPatch, formatPatch, parsePatch, reversePatch } from 'diff';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as crypto from 'node:crypto';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import sharp from 'sharp';
+import {
+	imageMimeFromExt,
+	isImagePath,
+	type UserMessagePart,
+} from '../../src/messageParts.js';
 import { windowsCmdUtf8Prefix } from '../winUtf8.js';
 import {
 	bindWorkspaceRootToWebContents,
@@ -110,9 +117,9 @@ import { streamChatUnified } from '../llm/llmRouter.js';
 import { formatLlmSdkError } from '../llm/formatLlmSdkError.js';
 import {
 	buildWorkspaceTreeSummary,
-	cloneMessagesWithExpandedLastUser,
 	modeExpandsWorkspaceFileContext,
 } from '../llm/workspaceContextExpand.js';
+import { resolveMessagesForSend } from '../llm/sendResolved.js';
 import {
 	listAgentDiffChunks,
 	applyAgentDiffChunk,
@@ -214,6 +221,10 @@ const execFileAsync = promisify(execFile);
 
 function senderWorkspaceRoot(event: { sender: WebContents }): string | null {
 	return getWorkspaceRootForWebContents(event.sender);
+}
+
+function parseAppWindowSurface(raw: unknown): AppWindowSurface | null {
+	return raw === 'agent' || raw === 'editor' ? raw : null;
 }
 
 function broadcastPluginsChanged(): void {
@@ -915,11 +926,11 @@ function runChatStream(
 				const expandMode = mode as import('../llm/composerMode.js').ComposerMode;
 				const doAtExpand = modeExpandsWorkspaceFileContext(expandMode);
 				const expandStarted = Date.now();
-				phaseRef.current = 'expandWorkspaceRefs';
+				phaseRef.current = 'resolveMessagesForSend';
 				const messagesForAgent = doAtExpand
-					? cloneMessagesWithExpandedLastUser(sendMessages, workspaceRoot)
+					? await resolveMessagesForSend(sendMessages, workspaceRoot)
 					: sendMessages;
-				logChatPipelineLatency('chat:stream', threadId, streamLatencyT0, 'after @-workspace expand', {
+				logChatPipelineLatency('chat:stream', threadId, streamLatencyT0, 'after structured send resolve', {
 					expandMs: Date.now() - expandStarted,
 					didExpand: doAtExpand,
 				});
@@ -1170,6 +1181,13 @@ export function registerIpc(): void {
 		home: app.getPath('home'),
 	}));
 
+	ipcMain.handle('app:getVersion', () => ({
+		version: app.getVersion(),
+		electron: process.versions.electron ?? '',
+		chrome: process.versions.chrome ?? '',
+		node: process.versions.node ?? '',
+	}));
+
 	ipcMain.handle('workspace:pickFolder', async (event) => {
 		const win = BrowserWindow.fromWebContents(event.sender);
 		const r = await dialog.showOpenDialog(win!, {
@@ -1387,6 +1405,39 @@ export function registerIpc(): void {
 	ipcMain.handle('app:newEditorWindow', () => {
 		createAppWindow({ blank: true, surface: 'editor' });
 		return { ok: true as const };
+	});
+
+	ipcMain.handle('app:windowSurfaceStatus', (event, rawSurface: unknown) => {
+		const surface = parseAppWindowSurface(rawSurface);
+		if (!surface) {
+			return { ok: false as const, error: 'invalid-surface' as const };
+		}
+		const existing = findAppWindowBySurface(surface, {
+			workspaceRoot: senderWorkspaceRoot(event),
+			excludeWebContentsId: event.sender.id,
+		});
+		return { ok: true as const, exists: !!existing };
+	});
+
+	ipcMain.handle('app:openOrFocusWindowSurface', (event, rawSurface: unknown) => {
+		const surface = parseAppWindowSurface(rawSurface);
+		if (!surface) {
+			return { ok: false as const, error: 'invalid-surface' as const };
+		}
+		const initialWorkspace = senderWorkspaceRoot(event);
+		const existing = findAppWindowBySurface(surface, {
+			workspaceRoot: initialWorkspace,
+			excludeWebContentsId: event.sender.id,
+		});
+		if (existing) {
+			focusAppWindow(existing);
+			return { ok: true as const, action: 'focused' as const };
+		}
+		createAppWindow({
+			surface,
+			initialWorkspace,
+		});
+		return { ok: true as const, action: 'created' as const };
 	});
 
 	ipcMain.handle('app:windowGetState', (event) => {
@@ -1614,13 +1665,51 @@ export function registerIpc(): void {
 
 	const COMPOSER_ATTACH_MAX_BYTES = 8 * 1024 * 1024;
 
+	async function probeImageMeta(
+		buf: Buffer,
+		relPath: string
+	): Promise<
+		| { mimeType: string; sizeBytes: number; width: number; height: number; sha256: string }
+		| null
+	> {
+		if (!isImagePath(relPath)) {
+			return null;
+		}
+		try {
+			const meta = await sharp(buf).metadata();
+			if (!meta.width || !meta.height) {
+				return null;
+			}
+			const ext = (path.extname(relPath).slice(1) || '').toLowerCase();
+			const mimeType = imageMimeFromExt(ext) ?? 'application/octet-stream';
+			const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
+			return {
+				mimeType,
+				sizeBytes: buf.length,
+				width: meta.width,
+				height: meta.height,
+				sha256,
+			};
+		} catch {
+			return null;
+		}
+	}
+
+	type ComposerImageMetaDto = {
+		mimeType: string;
+		sizeBytes: number;
+		width: number;
+		height: number;
+		sha256: string;
+	};
+
 	ipcMain.handle(
 		'workspace:saveComposerAttachment',
 		async (
 			event,
 			payload: { base64?: string; fileName?: string }
 		): Promise<
-			| { ok: true; relPath: string }
+			| { ok: true; relPath: string; imageMeta?: ComposerImageMetaDto }
 			| { ok: false; error: 'no-workspace' | 'empty' | 'too-large' | 'write-failed' }
 		> => {
 			const root = senderWorkspaceRoot(event);
@@ -1667,7 +1756,10 @@ export function registerIpc(): void {
 						if (Buffer.compare(existingBuf, buf) === 0) {
 							const relPath = `${dirRel}/${finalName}`;
 							registerKnownWorkspaceRelPath(relPath, root);
-							return { ok: true as const, relPath };
+							const imageMeta = await probeImageMeta(buf, relPath);
+							return imageMeta
+								? { ok: true as const, relPath, imageMeta }
+								: { ok: true as const, relPath };
 						}
 					} catch {
 						/* 读取失败时继续找下一个可用名称 */
@@ -1678,7 +1770,10 @@ export function registerIpc(): void {
 				const relPath = `${dirRel}/${finalName}`;
 				fs.writeFileSync(path.join(root, relPath), buf);
 				registerKnownWorkspaceRelPath(relPath, root);
-				return { ok: true as const, relPath };
+				const imageMeta = await probeImageMeta(buf, relPath);
+				return imageMeta
+					? { ok: true as const, relPath, imageMeta }
+					: { ok: true as const, relPath };
 			} catch {
 				return { ok: false as const, error: 'write-failed' as const };
 			}
@@ -1691,7 +1786,7 @@ export function registerIpc(): void {
 			event,
 			payload: { fullPath?: string }
 		): Promise<
-			| { ok: true; relPath: string }
+			| { ok: true; relPath: string; imageMeta?: ComposerImageMetaDto }
 			| { ok: false; error: 'no-workspace' | 'outside-workspace' | 'not-file' }
 		> => {
 			const root = senderWorkspaceRoot(event);
@@ -1715,7 +1810,14 @@ export function registerIpc(): void {
 			}
 			const relPath = path.relative(root, abs).replace(/\\/g, '/');
 			registerKnownWorkspaceRelPath(relPath, root);
-			return { ok: true as const, relPath };
+			try {
+				const imageMeta = await probeImageMeta(fs.readFileSync(abs), relPath);
+				return imageMeta
+					? { ok: true as const, relPath, imageMeta }
+					: { ok: true as const, relPath };
+			} catch {
+				return { ok: true as const, relPath };
+			}
 		}
 	);
 
@@ -2266,6 +2368,7 @@ export function registerIpc(): void {
 		return {
 			ok: true as const,
 			messages: t.messages.filter((m) => m.role !== 'system'),
+			schemaVersion: t.schemaVersion,
 			teamSession: t.teamSession ?? null,
 			agentSession: getManagedAgentSession(threadId) ?? getAgentSession(threadId),
 		};
@@ -2373,6 +2476,42 @@ export function registerIpc(): void {
 		}
 	);
 
+	function sanitizeUserMessagePartsPayload(raw: unknown): UserMessagePart[] | undefined {
+		if (!Array.isArray(raw) || raw.length === 0) {
+			return undefined;
+		}
+		const out: UserMessagePart[] = [];
+		for (const item of raw) {
+			if (!item || typeof item !== 'object') continue;
+			const r = item as Record<string, unknown>;
+			const kind = r.kind;
+			if (kind === 'text') {
+				const text = typeof r.text === 'string' ? r.text : '';
+				if (text.length > 0) out.push({ kind: 'text', text });
+			} else if (kind === 'command') {
+				const cmd = typeof r.command === 'string' ? r.command : '';
+				if (cmd.length > 0) out.push({ kind: 'command', command: cmd });
+			} else if (kind === 'file_ref') {
+				const rel = typeof r.relPath === 'string' ? r.relPath.trim() : '';
+				if (rel.length > 0) out.push({ kind: 'file_ref', relPath: rel });
+			} else if (kind === 'image_ref') {
+				const rel = typeof r.relPath === 'string' ? r.relPath.trim() : '';
+				const mimeType = typeof r.mimeType === 'string' ? r.mimeType : '';
+				if (rel.length === 0) continue;
+				out.push({
+					kind: 'image_ref',
+					relPath: rel,
+					mimeType: mimeType || 'application/octet-stream',
+					sizeBytes: typeof r.sizeBytes === 'number' ? r.sizeBytes : 0,
+					width: typeof r.width === 'number' ? r.width : 0,
+					height: typeof r.height === 'number' ? r.height : 0,
+					sha256: typeof r.sha256 === 'string' ? r.sha256 : '',
+				});
+			}
+		}
+		return out.length > 0 ? out : undefined;
+	}
+
 	ipcMain.handle(
 		'chat:send',
 		async (
@@ -2380,6 +2519,7 @@ export function registerIpc(): void {
 			payload: {
 				threadId: string;
 				text: string;
+				parts?: unknown;
 				mode?: string;
 				modelId?: string;
 				streamNonce?: number;
@@ -2600,7 +2740,13 @@ export function registerIpc(): void {
 
 			finalSystemAppend = appendPlanExecuteToSystem(finalSystemAppend, payload.planExecute, root);
 
-			const t = appendMessage(threadId, { role: 'user', content: userText });
+			const userParts = sanitizeUserMessagePartsPayload(payload.parts);
+			const t = appendMessage(
+				threadId,
+				userParts
+					? { role: 'user', content: userText, parts: userParts }
+					: { role: 'user', content: userText }
+			);
 			logChatPipelineLatency('chat:ipc', threadId, chatSendLatencyT0, 'before runChatStream (IPC returns soon)', {
 				persistedMsgCount: t.messages.length,
 			});
@@ -2628,6 +2774,7 @@ export function registerIpc(): void {
 				threadId: string;
 				visibleIndex: number;
 				text: string;
+				parts?: unknown;
 				mode?: string;
 				modelId?: string;
 				streamNonce?: number;
@@ -2698,7 +2845,8 @@ export function registerIpc(): void {
 				});
 				throwIfAbortRequested(preflightAc.signal, threadId, 'editResend preflight');
 
-				const t = replaceFromUserVisibleIndex(threadId, visibleIndex, userText);
+				const editParts = sanitizeUserMessagePartsPayload(payload.parts);
+				const t = replaceFromUserVisibleIndex(threadId, visibleIndex, userText, editParts);
 				runChatStream(win, threadId, t.messages, mode, modelSelection, finalSystemAppend, streamNonce);
 				return { ok: true as const };
 			} catch (e) {
@@ -3289,6 +3437,28 @@ ipcMain.handle(
 				return { ok: false as const, error: 'unsupported type' };
 			}
 			await shell.openExternal(pathToFileURL(full).href);
+			return { ok: true as const };
+		} catch (e) {
+			return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+		}
+	});
+
+	ipcMain.handle('shell:openExternalUrl', async (_event, url: string) => {
+		try {
+			const trimmed = String(url ?? '').trim();
+			if (!trimmed) {
+				return { ok: false as const, error: 'empty url' };
+			}
+			let parsed: URL;
+			try {
+				parsed = new URL(trimmed);
+			} catch {
+				return { ok: false as const, error: 'invalid url' };
+			}
+			if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:' && parsed.protocol !== 'mailto:') {
+				return { ok: false as const, error: 'unsupported protocol' };
+			}
+			await shell.openExternal(parsed.toString());
 			return { ok: true as const };
 		} catch (e) {
 			return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
